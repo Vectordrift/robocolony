@@ -49,9 +49,7 @@ describe('hexesWithinRadius', () => {
     const grid = createHexGrid(5);
     const result = hexesWithinRadius({ q: 0, r: 0 }, 1, grid);
     expect(result).toHaveLength(7);
-    // Should include center
     expect(result).toContainEqual({ q: 0, r: 0 });
-    // Should include all 6 neighbors
     expect(result).toContainEqual({ q: 1, r: 0 });
     expect(result).toContainEqual({ q: -1, r: 0 });
     expect(result).toContainEqual({ q: 0, r: 1 });
@@ -67,7 +65,6 @@ describe('hexesWithinRadius', () => {
   });
 
   it('filters out hexes not in the valid set', () => {
-    // Grid radius 1 = 7 hexes. Ask for radius 2 from origin = would be 19, but only 7 exist.
     const grid = createHexGrid(1);
     const result = hexesWithinRadius({ q: 0, r: 0 }, 2, grid);
     expect(result).toHaveLength(7);
@@ -89,7 +86,6 @@ describe('computeFogReveals', () => {
 
     const result = computeFogReveals([unit], grid, explored);
 
-    // Militia has vision radius 1 → 7 hexes revealed
     expect(result.reveals).toHaveLength(7);
     expect(result.events).toHaveLength(1);
     expect(result.events[0].type).toBe('hexes_revealed');
@@ -104,7 +100,6 @@ describe('computeFogReveals', () => {
 
     const result = computeFogReveals([unit], grid, explored);
 
-    // Scout has vision radius 3 → 37 hexes (1 + 6 + 12 + 18)
     expect(result.reveals).toHaveLength(37);
     expect(result.events).toHaveLength(1);
     expect(result.events[0].data.radius).toBe(3);
@@ -115,7 +110,6 @@ describe('computeFogReveals', () => {
     const grid = createHexGrid(5);
     const explored = new Map<string, boolean>();
 
-    // Pre-mark center and some neighbors as explored
     explored.set('col_test:0,0', true);
     explored.set('col_test:1,0', true);
     explored.set('col_test:-1,0', true);
@@ -123,7 +117,6 @@ describe('computeFogReveals', () => {
     const unit = makeUnit({ type: 'militia', hexX: 0, hexY: 0 });
     const result = computeFogReveals([unit], grid, explored);
 
-    // 7 total - 3 already explored = 4 new
     expect(result.reveals).toHaveLength(4);
     expect(result.events[0].data.newHexCount).toBe(4);
   });
@@ -132,7 +125,6 @@ describe('computeFogReveals', () => {
     const grid = createHexGrid(5);
     const explored = new Map<string, boolean>();
 
-    // Pre-mark all hexes in radius 1 as explored
     const neighbors = [
       { q: 0, r: 0 }, { q: 1, r: 0 }, { q: -1, r: 0 },
       { q: 0, r: 1 }, { q: 0, r: -1 }, { q: 1, r: -1 }, { q: -1, r: 1 },
@@ -157,9 +149,8 @@ describe('computeFogReveals', () => {
 
     const result = computeFogReveals([unit1, unit2], grid, explored);
 
-    // Both units at same position — first reveals 7, second reveals 0
     expect(result.reveals).toHaveLength(7);
-    expect(result.events).toHaveLength(1); // Only unit1 generates an event
+    expect(result.events).toHaveLength(1);
   });
 
   it('handles units from different colonies independently', () => {
@@ -171,7 +162,6 @@ describe('computeFogReveals', () => {
 
     const result = computeFogReveals([unit1, unit2], grid, explored);
 
-    // Each colony reveals 7 hexes independently
     expect(result.reveals).toHaveLength(14);
     expect(result.events).toHaveLength(2);
 
@@ -185,15 +175,12 @@ describe('computeFogReveals', () => {
     const grid = createHexGrid(2);
     const explored = new Map<string, boolean>();
 
-    // Place scout at edge — some of its vision radius 3 hexes won't exist
     const unit = makeUnit({ type: 'scout', hexX: 2, hexY: 0 });
     const result = computeFogReveals([unit], grid, explored);
 
-    // Should only reveal hexes that actually exist in the grid
     for (const reveal of result.reveals) {
       expect(grid.has(`${reveal.hex.q},${reveal.hex.r}`)).toBe(true);
     }
-    // Should be less than 37 (full radius 3)
     expect(result.reveals.length).toBeLessThan(37);
     expect(result.reveals.length).toBeGreaterThan(0);
   });
@@ -224,7 +211,6 @@ describe('computeStartingReveals', () => {
     const grid = createHexGrid(10);
     const reveals = computeStartingReveals('col_test', { q: 0, r: 0 }, 5, grid);
 
-    // Radius 5 = 1 + 6 + 12 + 18 + 24 + 30 = 91 hexes
     expect(reveals).toHaveLength(91);
     for (const r of reveals) {
       expect(r.colonyId).toBe('col_test');
@@ -235,7 +221,6 @@ describe('computeStartingReveals', () => {
     const grid = createHexGrid(3);
     const reveals = computeStartingReveals('col_test', { q: 0, r: 0 }, 5, grid);
 
-    // Grid has 37 hexes (radius 3), reveal radius 5 would be 91 — clamped to 37
     expect(reveals).toHaveLength(37);
   });
 
@@ -243,9 +228,7 @@ describe('computeStartingReveals', () => {
     const grid = createHexGrid(10);
     const reveals = computeStartingReveals('col_test', { q: 3, r: -2 }, 2, grid);
 
-    // Radius 2 = 19 hexes
     expect(reveals).toHaveLength(19);
-    // All should be within distance 2 of (3, -2)
     for (const r of reveals) {
       const dq = r.hex.q - 3;
       const dr = r.hex.r - (-2);
