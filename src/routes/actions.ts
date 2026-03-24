@@ -190,7 +190,11 @@ export async function actionRoutes(app: FastifyInstance) {
     if (body.actions.length > remainingSlots) {
       return reply.code(429).send({
         error: 'rate_limit',
-        message: `Rate limit: max ${MAX_ACTIONS_PER_TICK} actions per tick. You have ${currentQueuedCount} queued, ${remainingSlots} remaining.`,
+        message: `Batch of ${body.actions.length} actions exceeds the limit. Max ${MAX_ACTIONS_PER_TICK} actions per tick, you have ${currentQueuedCount} already queued and ${remainingSlots} slot${remainingSlots === 1 ? '' : 's'} remaining. Send ${remainingSlots} or fewer actions.`,
+        submitted: body.actions.length,
+        queued: currentQueuedCount,
+        remaining: remainingSlots,
+        maxPerTick: MAX_ACTIONS_PER_TICK,
       });
     }
 
