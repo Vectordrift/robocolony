@@ -9,7 +9,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { worlds, hexes, colonies, settlements, units } from '../db/schema/index.js';
-import { authenticateColony } from '../lib/middleware.js';
+import { requireAuth } from '../middleware/index.js';
 
 // --- Fog of War Helper ---
 
@@ -55,13 +55,13 @@ export async function getVisibleHexes(worldId: string, colonyId: string): Promis
 
 export async function stateRoutes(app: FastifyInstance) {
   // Full colony state
-  app.get('/api/worlds/:id/state', async (
+  app.get('/api/worlds/:id/state', {
+    preHandler: requireAuth,
+  }, async (
     request: FastifyRequest<{ Params: { id: string } }>,
     reply: FastifyReply,
   ) => {
-    const colony = await authenticateColony(request, reply);
-    if (!colony) return; // 401/403 already sent
-
+    const colony = request.colony!;
     const worldId = colony.worldId;
 
     // Get world info (for current tick)
@@ -130,12 +130,13 @@ export async function stateRoutes(app: FastifyInstance) {
   });
 
   // Map only (fog of war)
-  app.get('/api/worlds/:id/map', async (
+  app.get('/api/worlds/:id/map', {
+    preHandler: requireAuth,
+  }, async (
     request: FastifyRequest<{ Params: { id: string } }>,
     reply: FastifyReply,
   ) => {
-    const colony = await authenticateColony(request, reply);
-    if (!colony) return;
+    const colony = request.colony!;
 
     const world = await db
       .select({ currentTick: worlds.currentTick })
