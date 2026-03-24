@@ -170,6 +170,18 @@ export const UNIT_UPKEEP: Record<UnitType, number> = {
   settler: 2,
 };
 
+/** Unit training costs (resources needed to recruit) */
+export const UNIT_TRAINING_COSTS: Record<UnitType, Partial<Resources>> = {
+  scout:   { food: 10, timber: 5 },
+  militia:  { food: 15, timber: 10, iron: 5 },
+  soldier:  { food: 25, timber: 10, iron: 15 },
+  siege:    { food: 40, timber: 20, iron: 30, stone: 10 },
+  settler:  { food: 50, timber: 30 },
+};
+
+/** All valid unit types for training */
+export const VALID_UNIT_TYPES: UnitType[] = ['scout', 'militia', 'soldier', 'siege', 'settler'];
+
 /** Morale loss per tick when food is negative */
 export const MORALE_LOSS_RATE = 0.15;
 
@@ -640,6 +652,159 @@ export function resolveFoundSettlement(
   return { units: remainingUnits, newSettlements, consumedUnitIds, events, actionResults, fogReveals };
 }
 
+// --- Unit Training ---
+
+export interface TrainUnitResult {
+  newUnits: Unit[];
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+/**
+ * Resolve train_unit actions: recruit new units at settlements with barracks.
+ *
+ * Validates:
+ * - Settlement exists and belongs to the colony
+ * - Settlement has a barracks building
+ * - Valid unit type
+ * - Colony has enough resources
+ *
+ * On success: resources deducted, new unit created at settlement hex.
+ */
+export function resolveTrainUnit(
+  colonies: Colony[],
+  settlements: Settlement[],
+  actions: QueuedAction[],
+): TrainUnitResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+  const newUnits: Unit[] = [];
+
+  const trainActions = actions.filter(a => a.type === 'train_unit');
+  if (trainActions.length === 0) {
+    return { newUnits, events, actionResults };
+  }
+
+  // Build lookups
+  const settlementMap = new Map<string, Settlement>();
+  for (const s of settlements) {
+    settlementMap.set(s.id, s);
+  }
+  const colonyMap = new Map<string, Colony>();
+  for (const c of colonies) {
+    colonyMap.set(c.id, c);
+  }
+
+  for (const action of trainActions) {
+    const settlementId = action.params.settlementId as string;
+    const unitType = action.params.unitType as string;
+
+    // 1. Settlement exists
+    const settlement = settlementMap.get(settlementId);
+    if (!settlement) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} not found`,
+      });
+      continue;
+    }
+
+    // 2. Colony ownership
+    if (settlement.colonyId !== action.colonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+      });
+      continue;
+    }
+
+    // 3. Settlement has barracks
+    if (!settlement.buildings.some(b => b.type === 'barracks')) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} does not have a barracks`,
+      });
+      continue;
+    }
+
+    // 4. Valid unit type
+    if (!VALID_UNIT_TYPES.includes(unitType as UnitType)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Invalid unit type: ${unitType}. Valid types: ${VALID_UNIT_TYPES.join(', ')}`,
+      });
+      continue;
+    }
+
+    const uType = unitType as UnitType;
+
+    // 5. Colony has enough resources
+    const colony = colonyMap.get(action.colonyId);
+    if (!colony) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Colony ${action.colonyId} not found`,
+      });
+      continue;
+    }
+
+    const cost = UNIT_TRAINING_COSTS[uType];
+    if (!hasResources(colony.resources, cost)) {
+      const costStr = Object.entries(cost)
+        .filter(([, v]) => (v as number) > 0)
+        .map(([k, v]) => `${v} ${k}`)
+        .join(', ');
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Insufficient resources for ${uType}: need ${costStr}`,
+      });
+      continue;
+    }
+
+    // --- All checks passed: deduct resources and create unit ---
+    deductResources(colony.resources, cost);
+
+    const newUnit: Unit = {
+      id: `unit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      colonyId: action.colonyId,
+      worldId: settlement.worldId,
+      type: uType,
+      hexX: settlement.hexX,
+      hexY: settlement.hexY,
+      health: 100,
+      morale: 1.0,
+    };
+    newUnits.push(newUnit);
+
+    events.push({
+      type: 'unit_trained',
+      colonyId: action.colonyId,
+      settlementId: settlement.id,
+      unitId: newUnit.id,
+      data: {
+        unitType: uType,
+        hexX: settlement.hexX,
+        hexY: settlement.hexY,
+        cost,
+      },
+    });
+
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: `${uType} trained at ${settlement.name}`,
+    });
+  }
+
+  return { newUnits, events, actionResults };
+}
+
 // --- Movement Resolution ---
 
 /**
@@ -996,6 +1161,19 @@ export function resolveTick(
     const buildResult = resolveBuilding(updatedSettlements, updatedColonies, actions);
     events.push(...buildResult.events);
     actionResults.push(...buildResult.actionResults);
+  }
+
+  // --- Phase 1.5: Resolve train_unit actions ---
+  const trainActions = actions.filter(a => a.type === 'train_unit');
+  if (trainActions.length > 0) {
+    const trainResult = resolveTrainUnit(updatedColonies, updatedSettlements, actions);
+    events.push(...trainResult.events);
+    actionResults.push(...trainResult.actionResults);
+    // Add newly trained units to the unit pool
+    updatedUnits.push(...trainResult.newUnits.map(u => ({
+      ...u,
+      movementQueue: [] as HexCoord[],
+    })));
   }
 
   // Group settlements and units by colony

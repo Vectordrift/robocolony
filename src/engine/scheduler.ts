@@ -196,17 +196,34 @@ export class TickScheduler {
             .where(eq(schema.settlements.id, settlement.id));
         }
 
-        // Update units (morale, position, movementQueue)
+        // Update existing units and insert newly trained units
+        const existingUnitIds = new Set(dbUnits.map(u => u.id));
         for (const unit of result.units) {
-          await tx
-            .update(schema.units)
-            .set({
-              morale: unit.morale,
+          if (existingUnitIds.has(unit.id)) {
+            // Update existing unit
+            await tx
+              .update(schema.units)
+              .set({
+                morale: unit.morale,
+                hexX: unit.hexX,
+                hexY: unit.hexY,
+                movementQueue: unit.movementQueue ?? [],
+              })
+              .where(eq(schema.units.id, unit.id));
+          } else {
+            // Insert newly trained unit
+            await tx.insert(schema.units).values({
+              id: unit.id,
+              colonyId: unit.colonyId,
+              worldId: unit.worldId,
+              type: unit.type,
               hexX: unit.hexX,
               hexY: unit.hexY,
+              health: unit.health,
+              morale: unit.morale,
               movementQueue: unit.movementQueue ?? [],
-            })
-            .where(eq(schema.units.id, unit.id));
+            });
+          }
         }
 
         // Delete deserted units
