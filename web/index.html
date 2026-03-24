@@ -162,10 +162,95 @@
 
     .colony-stats .stat .val { color: var(--text); }
 
+    /* Content area */
+    .content-area {
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Leaderboard */
+    .leaderboard {
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      padding: 1rem 1.5rem;
+    }
+
+    .leaderboard-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+
+    .leaderboard-table th {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      text-align: left;
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      font-weight: 500;
+    }
+
+    .leaderboard-table th:not(:first-child) { text-align: center; }
+
+    .leaderboard-table td {
+      padding: 0.5rem 0.6rem;
+      border-bottom: 1px solid rgba(42, 42, 58, 0.4);
+    }
+
+    .leaderboard-table td:not(:first-child) { text-align: center; }
+
+    .leaderboard-table tr:hover { background: rgba(255,255,255,0.02); }
+
+    .rank {
+      font-weight: 700;
+      width: 2rem;
+    }
+
+    .rank-1 { color: var(--yellow); }
+    .rank-2 { color: var(--text-dim); }
+    .rank-3 { color: var(--orange); }
+
+    .lb-colony-name {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .lb-colony-status {
+      font-size: 0.6rem;
+      padding: 1px 5px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-left: 0.4rem;
+    }
+
+    .lb-colony-status.active { background: rgba(74, 255, 138, 0.12); color: var(--green); }
+    .lb-colony-status.eliminated { background: rgba(136, 136, 160, 0.12); color: var(--text-dim); }
+
+    .lb-score {
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .lb-bar {
+      display: inline-block;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--accent);
+      opacity: 0.5;
+      vertical-align: middle;
+      margin-left: 0.3rem;
+      transition: width 0.3s;
+    }
+
     /* Feed */
     .feed {
       padding: 1rem 1.5rem;
       overflow-y: auto;
+      flex: 1;
     }
 
     .feed-header {
@@ -311,7 +396,13 @@
       </div>
     </aside>
 
-    <main class="feed">
+    <main class="content-area">
+      <section class="leaderboard">
+        <div class="section-title" style="border: none; margin: 0 0 0.75rem 0; padding: 0;">🏆 Leaderboard</div>
+        <div id="leaderboard" class="loading">Loading</div>
+      </section>
+
+      <div class="feed">
       <div class="feed-header">
         <div class="section-title" style="border: none; margin: 0; padding: 0;">📡 Live Feed</div>
         <div class="feed-controls">
@@ -325,6 +416,7 @@
       <ul class="event-list" id="eventList">
         <li class="loading">Loading feed</li>
       </ul>
+      </div>
     </main>
   </div>
 
@@ -421,6 +513,63 @@
       }).join('');
     }
 
+    // --- Leaderboard rendering ---
+    function renderLeaderboard(colonies) {
+      const container = document.getElementById('leaderboard');
+      if (!colonies || colonies.length === 0) {
+        container.innerHTML = '<div class="empty-feed">No colonies yet</div>';
+        return;
+      }
+
+      // Sort by score desc, then by settlements desc, then units desc
+      const ranked = [...colonies].sort((a, b) => {
+        if (b.legacyScore !== a.legacyScore) return b.legacyScore - a.legacyScore;
+        if (b.settlements !== a.settlements) return b.settlements - a.settlements;
+        return b.units - a.units;
+      });
+
+      const maxScore = Math.max(1, ...ranked.map(c => c.legacyScore));
+
+      const rows = ranked.map((c, i) => {
+        const rank = i + 1;
+        const rankClass = rank <= 3 ? `rank-${rank}` : '';
+        const medal = rank === 1 ? '👑' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}`;
+        const army = (c.unitTypes?.militia || 0) + (c.unitTypes?.soldier || 0) + (c.unitTypes?.siege || 0);
+        const barWidth = maxScore > 0 ? Math.round((c.legacyScore / maxScore) * 60) : 0;
+
+        return `
+          <tr>
+            <td class="rank ${rankClass}">${medal}</td>
+            <td>
+              <span class="lb-colony-name">${c.name}</span>
+              <span class="lb-colony-status ${c.status}">${c.status}</span>
+            </td>
+            <td>${c.settlements}</td>
+            <td>${c.units}</td>
+            <td>${army}</td>
+            <td>
+              <span class="lb-score">${c.legacyScore}</span>
+              ${barWidth > 0 ? `<span class="lb-bar" style="width:${barWidth}px"></span>` : ''}
+            </td>
+          </tr>`;
+      }).join('');
+
+      container.innerHTML = `
+        <table class="leaderboard-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th style="text-align:left">Colony</th>
+              <th>🏘️</th>
+              <th>👥</th>
+              <th>⚔️</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
     // --- Colony rendering ---
     function renderColonies(colonies) {
       const container = document.getElementById('colonyList');
@@ -478,6 +627,9 @@
 
         // Update colonies
         renderColonies(data.colonies);
+
+        // Update leaderboard
+        renderLeaderboard(data.colonies);
 
         // Update events
         allEvents = data.events;
