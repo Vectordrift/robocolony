@@ -207,6 +207,33 @@ export const MIN_SETTLEMENT_DISTANCE = 3;
 export const FOUNDING_REVEAL_RADIUS = 2;
 
 /** Terrains where settlements cannot be founded */
+
+/** Settlement upgrade requirements */
+export const UPGRADE_COSTS: Record<string, { resources: Partial<Resources>; minPopulation: number; minBuildings: number }> = {
+  town: {
+    resources: { food: 200, timber: 150, stone: 100 },
+    minPopulation: 50,
+    minBuildings: 3,
+  },
+  city: {
+    resources: { food: 500, timber: 300, stone: 200, iron: 100 },
+    minPopulation: 200,
+    minBuildings: 5,
+  },
+};
+
+/** Settlement tier progression order */
+export const TIER_ORDER: string[] = ['outpost', 'town', 'city'];
+
+/** Maximum population per settlement tier */
+export const MAX_POPULATION: Record<string, number> = {
+  outpost: 50,
+  town: 200,
+  city: 1000,
+};
+
+/** Population growth rate: +1 per this many excess food */
+export const POP_GROWTH_PER_FOOD = 10;
 const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 
 // --- Helpers ---
@@ -808,6 +835,166 @@ export function resolveTrainUnit(
   return { newUnits, events, actionResults };
 }
 
+// --- Settlement Upgrade ---
+
+export interface UpgradeSettlementResult {
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+/**
+ * Resolve upgrade_settlement actions: upgrade outpost → town → city.
+ *
+ * Validates:
+ * - Settlement exists and belongs to the colony
+ * - Settlement is not already max tier (city)
+ * - Colony has enough resources for the upgrade
+ * - Settlement meets minimum population requirement
+ * - Settlement meets minimum building count
+ *
+ * On success: resources deducted, tier upgraded, events emitted.
+ */
+export function resolveUpgradeSettlement(
+  settlements: Settlement[],
+  colonies: Colony[],
+  actions: QueuedAction[],
+): UpgradeSettlementResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+
+  const upgradeActions = actions.filter(a => a.type === 'upgrade_settlement');
+  if (upgradeActions.length === 0) {
+    return { events, actionResults };
+  }
+
+  // Build lookups
+  const settlementMap = new Map<string, Settlement>();
+  for (const s of settlements) {
+    settlementMap.set(s.id, s);
+  }
+  const colonyMap = new Map<string, Colony>();
+  for (const c of colonies) {
+    colonyMap.set(c.id, c);
+  }
+
+  for (const action of upgradeActions) {
+    const settlementId = action.params.settlementId as string;
+
+    // 1. Settlement exists
+    const settlement = settlementMap.get(settlementId);
+    if (!settlement) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} not found`,
+      });
+      continue;
+    }
+
+    // 2. Colony ownership
+    if (settlement.colonyId !== action.colonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+      });
+      continue;
+    }
+
+    // 3. Not already max tier
+    const currentTierIndex = TIER_ORDER.indexOf(settlement.tier);
+    if (currentTierIndex === -1 || currentTierIndex >= TIER_ORDER.length - 1) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} is already at maximum tier (${settlement.tier})`,
+      });
+      continue;
+    }
+
+    const nextTier = TIER_ORDER[currentTierIndex + 1] as 'outpost' | 'town' | 'city';
+    const requirements = UPGRADE_COSTS[nextTier];
+
+    if (!requirements) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `No upgrade requirements defined for tier ${nextTier}`,
+      });
+      continue;
+    }
+
+    // 4. Colony has enough resources
+    const colony = colonyMap.get(action.colonyId);
+    if (!colony) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Colony ${action.colonyId} not found`,
+      });
+      continue;
+    }
+
+    if (!hasResources(colony.resources, requirements.resources)) {
+      const costStr = Object.entries(requirements.resources)
+        .filter(([, v]) => (v as number) > 0)
+        .map(([k, v]) => `${v} ${k}`)
+        .join(', ');
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Insufficient resources to upgrade to ${nextTier}: need ${costStr}`,
+      });
+      continue;
+    }
+
+    // 5. Minimum population
+    if (settlement.population < requirements.minPopulation) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Insufficient population to upgrade to ${nextTier}: need ${requirements.minPopulation}, have ${settlement.population}`,
+      });
+      continue;
+    }
+
+    // 6. Minimum buildings
+    if (settlement.buildings.length < requirements.minBuildings) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Insufficient buildings to upgrade to ${nextTier}: need ${requirements.minBuildings}, have ${settlement.buildings.length}`,
+      });
+      continue;
+    }
+
+    // --- All checks passed: deduct resources and upgrade ---
+    deductResources(colony.resources, requirements.resources);
+    const previousTier = settlement.tier;
+    settlement.tier = nextTier;
+
+    events.push({
+      type: 'settlement_upgraded',
+      colonyId: action.colonyId,
+      settlementId: settlement.id,
+      data: {
+        name: settlement.name,
+        previousTier,
+        newTier: nextTier,
+        cost: requirements.resources,
+      },
+    });
+
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: `${settlement.name} upgraded from ${previousTier} to ${nextTier}`,
+    });
+  }
+
+  return { events, actionResults };
+}
+
 // --- Movement Resolution ---
 
 /**
@@ -1183,6 +1370,15 @@ export function resolveTick(
     })));
   }
 
+
+  // --- Phase 1.75: Resolve upgrade_settlement actions ---
+  const upgradeActions = actions.filter(a => a.type === 'upgrade_settlement');
+  if (upgradeActions.length > 0) {
+    const upgradeResult = resolveUpgradeSettlement(updatedSettlements, updatedColonies, actions);
+    events.push(...upgradeResult.events);
+    actionResults.push(...upgradeResult.actionResults);
+  }
+
   // Group settlements and units by colony
   const colonySettlements = new Map<string, Settlement[]>();
   const colonyUnits = new Map<string, Unit[]>();
@@ -1256,6 +1452,40 @@ export function resolveTick(
       },
     });
 
+
+    // --- Population growth ---
+    // +1 population per POP_GROWTH_PER_FOOD excess food, capped by tier max
+    if (colony.resources.food > 0) {
+      for (const settlement of mySettlements) {
+        const maxPop = MAX_POPULATION[settlement.tier] ?? 50;
+        if (settlement.population < maxPop) {
+          // Calculate food surplus attributable to this settlement
+          const popFoodConsumption = calculatePopulationConsumption(settlement);
+          const settlementFoodNet = net.food; // Use colony-level net (simplified)
+          if (settlementFoodNet > 0) {
+            const growth = Math.floor(settlementFoodNet / POP_GROWTH_PER_FOOD);
+            if (growth > 0) {
+              const oldPop = settlement.population;
+              settlement.population = Math.min(maxPop, settlement.population + growth);
+              if (settlement.population > oldPop) {
+                events.push({
+                  type: 'population_growth',
+                  colonyId: colony.id,
+                  settlementId: settlement.id,
+                  data: {
+                    previousPopulation: oldPop,
+                    newPopulation: settlement.population,
+                    growth: settlement.population - oldPop,
+                    maxPopulation: maxPop,
+                  },
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
     // --- Food deficit: morale loss ---
     if (colony.resources.food < 0) {
       events.push({
@@ -1304,3 +1534,5 @@ export function resolveTick(
     fogReveals,
   };
 }
+
+
