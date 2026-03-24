@@ -43,7 +43,9 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
         unitType: event.data.unitType,
       };
     case 'famine':
-      return {};
+      return {
+        foodDeficit: event.data.foodDeficit,
+      };
     case 'desertion':
       return {
         unitType: event.data.unitType,
@@ -318,3 +320,4 @@ export class TickScheduler {
     }
   }
 }
+
