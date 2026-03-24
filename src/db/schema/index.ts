@@ -1,3 +1,9 @@
-// Database schema — placeholder until #2 (database schema issue)
-// Each table will be defined in its own file and re-exported here.
-export {};
+export { worlds } from './worlds.js';
+export { hexes } from './hexes.js';
+export { colonies } from './colonies.js';
+export { settlements } from './settlements.js';
+export { units } from './units.js';
+export { actions } from './actions.js';
+export { agreements } from './agreements.js';
+export { messages } from './messages.js';
+export { events } from './events.js';
