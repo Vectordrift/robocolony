@@ -2214,7 +2214,7 @@ describe('population growth in resolveTick', () => {
     });
     const settlement = makeSettlement({
       tier: 'town',
-      buildings: [{ type: 'farm', level: 5 }],
+      buildings: [{ type: 'farm', level: 20 }], // high level to ensure food surplus at pop 195
       population: 195, // Near town cap of 200
     });
     const hexes = makeHexRing(0, 0);
