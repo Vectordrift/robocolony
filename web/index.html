@@ -464,7 +464,9 @@
       try {
         const res = await fetch(`${API_BASE}/api/worlds/${WORLD_ID}/feed?limit=100`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        const raw = await res.json();
+        // Unwrap auth-proxy envelope if present
+        const data = raw.__untrusted ? raw.data : raw;
 
         // Update status
         document.getElementById('statusDot').classList.remove('offline');
@@ -516,3 +518,4 @@
   </script>
 </body>
 </html>
+
