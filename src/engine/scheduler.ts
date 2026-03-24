@@ -19,6 +19,7 @@ const PUBLIC_EVENT_TYPES = new Set([
   'unit_trained',
   'famine',
   'desertion',
+  'settlement_upgraded',
   'combat',
 ]);
 
@@ -32,6 +33,12 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
       return {
         name: event.data.name,
         tier: event.data.tier,
+      };
+    case 'settlement_upgraded':
+      return {
+        name: event.data.name,
+        previousTier: event.data.previousTier,
+        newTier: event.data.newTier,
       };
     case 'build_complete':
       return {
@@ -228,15 +235,35 @@ export class TickScheduler {
             .where(eq(schema.colonies.id, colony.id));
         }
 
-        // Update settlements (buildings, buildQueue)
+        // Update existing settlements and insert newly founded ones
+        const existingSettlementIds = new Set(dbSettlements.map(s => s.id));
         for (const settlement of result.settlements) {
-          await tx
-            .update(schema.settlements)
-            .set({
+          if (existingSettlementIds.has(settlement.id)) {
+            await tx
+              .update(schema.settlements)
+              .set({
+                buildings: settlement.buildings,
+                tier: settlement.tier,
+                population: settlement.population,
+                buildQueue: settlement.buildQueue,
+              })
+              .where(eq(schema.settlements.id, settlement.id));
+          } else {
+            // Insert newly founded settlement
+            await tx.insert(schema.settlements).values({
+              id: settlement.id,
+              colonyId: settlement.colonyId,
+              worldId: settlement.worldId,
+              name: settlement.name,
+              hexX: settlement.hexX,
+              hexY: settlement.hexY,
+              tier: settlement.tier,
               buildings: settlement.buildings,
               buildQueue: settlement.buildQueue,
-            })
-            .where(eq(schema.settlements.id, settlement.id));
+              loyalty: settlement.loyalty,
+              population: settlement.population,
+            });
+          }
         }
 
         // Update existing units and insert newly trained units
@@ -320,4 +347,6 @@ export class TickScheduler {
     }
   }
 }
+
+
 
