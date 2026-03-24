@@ -12,6 +12,47 @@ import { resolveTick } from './tick.js';
 import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction } from './tick.js';
 import { nanoid } from 'nanoid';
 
+/** Event types visible on the public feed (spectator view) */
+const PUBLIC_EVENT_TYPES = new Set([
+  'settlement_founded',
+  'build_complete',
+  'unit_trained',
+  'famine',
+  'desertion',
+  'combat',
+]);
+
+/**
+ * Build public-safe data for spectator feed.
+ * Strips private info (exact resource amounts) but keeps the interesting bits.
+ */
+function buildPublicData(event: { type: string; colonyId?: string; data: Record<string, unknown> }): Record<string, unknown> | null {
+  switch (event.type) {
+    case 'settlement_founded':
+      return {
+        name: event.data.name,
+        tier: event.data.tier,
+      };
+    case 'build_complete':
+      return {
+        buildingType: event.data.buildingType,
+        level: event.data.level,
+      };
+    case 'unit_trained':
+      return {
+        unitType: event.data.unitType,
+      };
+    case 'famine':
+      return {};
+    case 'desertion':
+      return {
+        unitType: event.data.unitType,
+      };
+    default:
+      return null;
+  }
+}
+
 export interface SchedulerOptions {
   worldId: string;
   db: PostgresJsDatabase<typeof schema>;
@@ -255,14 +296,18 @@ export class TickScheduler {
 
         // Insert events
         for (const event of result.events) {
+          const isPublic = PUBLIC_EVENT_TYPES.has(event.type);
+          const publicData = isPublic ? buildPublicData(event) : null;
+
           await tx.insert(schema.events).values({
             id: nanoid(),
             worldId: this.worldId,
             tick: newTick,
             type: event.type,
-            public: event.type === 'desertion', // desertions are visible to all
+            public: isPublic,
             visibility: event.colonyId ? [event.colonyId] : [],
             data: event.data,
+            ...(publicData ? { publicData } : {}),
           });
         }
       });
