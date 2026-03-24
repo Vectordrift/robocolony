@@ -8,3 +8,5 @@ export { resolveTick, calculateProduction, calculateBuildingUpkeep, calculateUni
 export type { Colony, Settlement, Unit, HexTileState, Resources, TickResult, TickEvent } from './tick.js';
 export { TickScheduler } from './scheduler.js';
 export type { SchedulerOptions } from './scheduler.js';
+export { findPath, pathCost, createTerrainLookup, isPassable, TERRAIN_MOVEMENT_COST } from './pathfinding.js';
+export type { PathResult, TerrainLookup } from './pathfinding.js';
