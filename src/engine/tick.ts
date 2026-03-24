@@ -122,13 +122,13 @@ export const TIER_MULTIPLIER: Record<string, number> = {
 
 /** Building production per level */
 export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
-  farm:       { food: 3 },
-  lumberMill: { timber: 3 },
-  quarry:     { stone: 2 },
-  mine:       { iron: 2 },
+  farm:       { food: 10 },
+  lumberMill: { timber: 6 },
+  quarry:     { stone: 4 },
+  mine:       { iron: 3 },
   barracks:   {},
   granary:    {},
-  market:     { influence: 1 },
+  market:     { influence: 2 },
 };
 
 /** Building upkeep per level (resources consumed per tick) */
@@ -164,11 +164,14 @@ export const VALID_BUILDING_TYPES: BuildingType[] = [
 /** Unit food upkeep per tick */
 export const UNIT_UPKEEP: Record<UnitType, number> = {
   scout: 1,
-  militia: 1,
-  soldier: 2,
-  siege: 3,
-  settler: 2,
+  militia: 2,
+  soldier: 3,
+  siege: 4,
+  settler: 5,
 };
+
+/** Population food consumption per person per tick */
+export const POP_FOOD_CONSUMPTION = 0.5;
 
 /** Unit training costs (resources needed to recruit) */
 export const UNIT_TRAINING_COSTS: Record<UnitType, Partial<Resources>> = {
@@ -1007,9 +1010,6 @@ export function calculateProduction(
     production.iron += hex.resources.iron * 0.5;
   }
 
-  // Base population food production (people farm even without buildings)
-  production.food += settlement.population * 0.1;
-
   return production;
 }
 
@@ -1035,6 +1035,13 @@ export function calculateBuildingUpkeep(settlement: Settlement): Partial<Resourc
  */
 export function calculateUnitUpkeep(units: Unit[]): number {
   return units.reduce((total, unit) => total + (UNIT_UPKEEP[unit.type] ?? 0), 0);
+}
+
+/**
+ * Calculate population food consumption for a settlement.
+ */
+export function calculatePopulationConsumption(settlement: Settlement): number {
+  return settlement.population * POP_FOOD_CONSUMPTION;
 }
 
 // --- Tick Resolution ---
@@ -1216,6 +1223,9 @@ export function resolveTick(
         totalProduction[key] += (production[key] as number) ?? 0;
         totalUpkeep[key] += (upkeep[key] as number) ?? 0;
       }
+
+      // Population food consumption
+      totalUpkeep.food += calculatePopulationConsumption(settlement);
     }
 
     // Unit food upkeep
