@@ -13,14 +13,17 @@ Phase 4 (Combat) issues are being queued.
   - ⬜ #37 Settlement upgrade action
   - ⬜ #38 Demolish action + building decay
   - ✅ #40 Bug: null food/timber production (fixed 2026-03-24)
+  - ✅ #44/#45 Resource rebalance + sanitization (merged 2026-03-24)
+  - ✅ #47 Bug: food/timber null in production — startup normalization (fixed + deployed 2026-03-24)
 - **Phase 4 (Combat):** Queued
   - ⬜ #43 Combat resolution
 
-## Last Cycle (2026-03-24 18:04 UTC)
-- Fixed bug #40: starting buildings had `completedAtTick` instead of `level`, causing food/timber to become null after tick production. Root cause: schema mismatch between worlds.ts STARTING_BUILDINGS and tick engine Building interface. Added defensive `(building.level || 1)` fallback.
-- Implemented #36: train_unit action. Units can be recruited at settlements with barracks. All 5 unit types with resource costs. 11 new tests. Also updated scheduler to insert (not just update) newly trained units.
-- Created #43 (Phase 4: Combat resolution)
-- Merged PR #41 (bug fix) and PR #42 (train_unit)
+## Last Cycle (2026-03-24 20:04 UTC)
+- Fixed live bug #47: food/timber were null in production events since tick 1. Root cause: deployed code still had `building.level * tierMult` (no fallback) and starting buildings stored `completedAtTick` instead of `level`. Fix #40 (code) was on main but not deployed. Added startup `normalizeData()` to fix existing DB data: normalizes building schemas and resets null/NaN resources to 0.
+- Merged PR #48 (startup normalization)
+- Deployed to production — health check passing, world at tick 26, running
+- Closed issue #47
+- No new issues needed (3 open: #37, #38, #43)
 
 ## Open Issues
 - #37 Settlement upgrade action (phase-3, medium priority)
@@ -33,5 +36,6 @@ Phase 4 (Combat) issues are being queued.
 3. #43 Combat resolution (starts Phase 4)
 
 ## Deployed
-- Live on Fly.io (agent-testing org, ams region)
-- Bug #40 fix needs deploy to fix existing worlds with null resources
+- ✅ Live on Fly.io (agent-testing org, ams region)
+- ✅ All fixes deployed as of 2026-03-24 20:13 UTC
+- World: Genesis World (world_AYjUBQxhR1cQ) — tick 26, running
