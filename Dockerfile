@@ -15,7 +15,6 @@ RUN npm install && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 COPY drizzle.config.ts ./
 COPY src/db ./src/db
-COPY web ./web
 EXPOSE 3000
 ENV NODE_ENV=production
 CMD ["sh", "-c", "npx drizzle-kit push --force && node dist/server.js"]
