@@ -432,10 +432,10 @@
     // --- Filter logic ---
     const FILTER_MAP = {
       all: () => true,
-      production: (e) => e.type === 'production' || e.type === 'famine',
-      movement: (e) => e.type.includes('movement') || e.type === 'unit_moved',
-      build: (e) => e.type.includes('build') || e.type === 'settlement_founded',
-      military: (e) => ['combat', 'desertion', 'unit_trained'].includes(e.type),
+      production: (e) => e.type === 'production' || e.type === 'famine' || e.type === '_repeated',
+      movement: (e) => e.type.includes('movement') || e.type === 'unit_moved' || e.type === '_repeated',
+      build: (e) => e.type.includes('build') || e.type === 'settlement_founded' || e.type === '_repeated',
+      military: (e) => ['combat', 'desertion', 'unit_trained', '_repeated'].includes(e.type),
     };
 
     document.querySelectorAll('.feed-controls button').forEach((btn) => {
@@ -484,6 +484,8 @@
           return `<span class="negative">💀 ${d.unitType} deserted (morale: ${Math.round((d.morale || 0) * 100)}%)</span>`;
         case 'combat':
           return `⚔️ Combat at (${d.hexX}, ${d.hexY})`;
+        case '_repeated':
+          return `<span style="color:var(--text-dim);font-style:italic">… ${d.count} identical tick${d.count > 1 ? 's' : ''} skipped</span>`;
         default:
           return `${event.type}: ${JSON.stringify(d).substring(0, 120)}`;
       }
@@ -608,6 +610,66 @@
       `;
     }
 
+    // --- Deduplicate consecutive identical ticks ---
+    function tickFingerprint(events) {
+      // Create a string fingerprint from sorted event types + their data
+      return events
+        .map(e => e.type + ':' + JSON.stringify(e.data || {}))
+        .sort()
+        .join('|');
+    }
+
+    function deduplicateTicks(events) {
+      if (!events || events.length === 0) return events;
+
+      // Group events by tick (events come sorted desc by tick)
+      const tickGroups = new Map();
+      for (const e of events) {
+        if (!tickGroups.has(e.tick)) tickGroups.set(e.tick, []);
+        tickGroups.get(e.tick).push(e);
+      }
+
+      // Walk ticks in descending order, skip if fingerprint matches previous
+      const ticks = [...tickGroups.keys()].sort((a, b) => b - a);
+      const result = [];
+      let lastFingerprint = null;
+      let skippedCount = 0;
+
+      for (const tick of ticks) {
+        const group = tickGroups.get(tick);
+        const fp = tickFingerprint(group);
+
+        if (fp === lastFingerprint) {
+          skippedCount++;
+          continue;
+        }
+
+        // If we skipped ticks, add a marker
+        if (skippedCount > 0) {
+          result.push({
+            tick: tick + 1,
+            type: '_repeated',
+            data: { count: skippedCount },
+          });
+          skippedCount = 0;
+        }
+
+        result.push(...group);
+        lastFingerprint = fp;
+      }
+
+      // Trailing skipped ticks
+      if (skippedCount > 0) {
+        result.push({
+          tick: ticks[ticks.length - 1],
+          type: '_repeated',
+          data: { count: skippedCount },
+        });
+      }
+
+      return result;
+    }
+
     // --- Fetch and update ---
     async function fetchFeed() {
       try {
@@ -631,8 +693,8 @@
         // Update leaderboard
         renderLeaderboard(data.colonies);
 
-        // Update events
-        allEvents = data.events;
+        // Update events — deduplicate consecutive identical ticks
+        allEvents = deduplicateTicks(data.events);
         renderEvents();
 
         lastTick = data.world.currentTick;
