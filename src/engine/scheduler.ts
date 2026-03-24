@@ -21,6 +21,7 @@ const PUBLIC_EVENT_TYPES = new Set([
   'desertion',
   'settlement_upgraded',
   'combat',
+  'shortage',
 ]);
 
 /**
@@ -57,6 +58,11 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
       return {
         count: event.data.count,
         summary: event.data.summary,
+      };
+    case 'shortage':
+      return {
+        resource: event.data.resource,
+        deficit: event.data.deficit,
       };
     default:
       return null;
