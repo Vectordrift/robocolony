@@ -8,6 +8,8 @@
 import type { HexCoord } from './hex.js';
 import { hexNeighbors, hexDistance } from './hex.js';
 import type { HexResources } from './mapgen.js';
+import { findPath, movementStepsThisTick, createHexLookup } from './pathfinding.js';
+import type { HexLookup } from './pathfinding.js';
 
 // --- Types ---
 
@@ -56,6 +58,7 @@ export interface Unit {
   hexY: number;
   health: number;
   morale: number;
+  movementQueue?: HexCoord[];
 }
 
 export type UnitType = 'scout' | 'militia' | 'soldier' | 'siege' | 'settler';
@@ -66,6 +69,19 @@ export interface HexTileState {
   terrain: string;
   resources: HexResources;
   settlementId: string | null;
+}
+
+export interface QueuedAction {
+  id: string;
+  colonyId: string;
+  type: string;
+  params: Record<string, unknown>;
+}
+
+export interface ActionResult {
+  actionId: string;
+  status: 'resolved' | 'failed';
+  result?: string;
 }
 
 export interface TickEvent {
@@ -82,6 +98,7 @@ export interface TickResult {
   units: Unit[];
   events: TickEvent[];
   desertedUnitIds: string[];
+  actionResults: ActionResult[];
 }
 
 // --- Constants ---
@@ -137,6 +154,178 @@ export const MORALE_RECOVERY_RATE = 0.05;
 
 function hexKey(x: number, y: number): string {
   return `${x},${y}`;
+}
+
+// --- Movement Resolution ---
+
+/**
+ * Resolve move_unit actions: compute path and set movement queue.
+ * Then advance all units with existing movement queues.
+ */
+export function resolveMovement(
+  units: Unit[],
+  actions: QueuedAction[],
+  hexLookup: HexLookup,
+): { units: Unit[]; events: TickEvent[]; actionResults: ActionResult[] } {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+
+  // Build unit lookup for ownership/existence checks
+  const unitMap = new Map<string, Unit>();
+  for (const u of units) {
+    unitMap.set(u.id, u);
+  }
+
+  // Phase 1: Process move_unit actions — compute paths and set queues
+  const moveActions = actions.filter(a => a.type === 'move_unit');
+
+  for (const action of moveActions) {
+    const unitId = action.params.unitId as string;
+    const targetX = action.params.targetX as number;
+    const targetY = action.params.targetY as number;
+
+    const unit = unitMap.get(unitId);
+    if (!unit) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Unit ${unitId} not found`,
+      });
+      continue;
+    }
+
+    // Verify colony ownership
+    if (unit.colonyId !== action.colonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Unit ${unitId} does not belong to colony ${action.colonyId}`,
+      });
+      continue;
+    }
+
+    const from: HexCoord = { q: unit.hexX, r: unit.hexY };
+    const to: HexCoord = { q: targetX, r: targetY };
+
+    // Cancel movement: move to current position clears queue
+    if (from.q === to.q && from.r === to.r) {
+      unit.movementQueue = [];
+      actionResults.push({
+        actionId: action.id,
+        status: 'resolved',
+        result: 'Movement cancelled',
+      });
+      events.push({
+        type: 'movement_cancelled',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: { hexX: unit.hexX, hexY: unit.hexY },
+      });
+      continue;
+    }
+
+    // Compute path using A*
+    const path = findPath(from, to, hexLookup);
+
+    if (!path || path.length === 0) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `No path from (${from.q},${from.r}) to (${to.q},${to.r})`,
+      });
+      events.push({
+        type: 'movement_failed',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: {
+          from: { x: from.q, y: from.r },
+          to: { x: to.q, y: to.r },
+          reason: 'no_path',
+        },
+      });
+      continue;
+    }
+
+    // Set (or replace) movement queue
+    unit.movementQueue = path;
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: `Path computed: ${path.length} steps`,
+    });
+    events.push({
+      type: 'movement_queued',
+      colonyId: unit.colonyId,
+      unitId: unit.id,
+      data: {
+        from: { x: from.q, y: from.r },
+        to: { x: to.q, y: to.r },
+        pathLength: path.length,
+      },
+    });
+  }
+
+  // Phase 2: Advance all units with movement queues
+  for (const unit of units) {
+    if (!unit.movementQueue || unit.movementQueue.length === 0) continue;
+
+    const steps = movementStepsThisTick(unit.movementQueue, unit.type, hexLookup);
+
+    if (steps === 0) {
+      // Can't move (all remaining hexes impassable?) — clear queue
+      unit.movementQueue = [];
+      events.push({
+        type: 'movement_blocked',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: {
+          hexX: unit.hexX,
+          hexY: unit.hexY,
+          reason: 'impassable',
+        },
+      });
+      continue;
+    }
+
+    const moved = unit.movementQueue.slice(0, steps);
+    const destination = moved[moved.length - 1];
+
+    // Move unit
+    const prevX = unit.hexX;
+    const prevY = unit.hexY;
+    unit.hexX = destination.q;
+    unit.hexY = destination.r;
+
+    // Drain queue
+    unit.movementQueue = unit.movementQueue.slice(steps);
+
+    events.push({
+      type: 'unit_moved',
+      colonyId: unit.colonyId,
+      unitId: unit.id,
+      data: {
+        from: { x: prevX, y: prevY },
+        to: { x: unit.hexX, y: unit.hexY },
+        steps: moved.map(s => ({ x: s.q, y: s.r })),
+        remainingPath: unit.movementQueue.length,
+      },
+    });
+
+    // Movement complete?
+    if (unit.movementQueue.length === 0) {
+      events.push({
+        type: 'movement_complete',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: {
+          hexX: unit.hexX,
+          hexY: unit.hexY,
+        },
+      });
+    }
+  }
+
+  return { units, events, actionResults };
 }
 
 // --- Production ---
@@ -204,25 +393,44 @@ export function calculateUnitUpkeep(units: Unit[]): number {
 /**
  * Resolve a single game tick.
  *
- * 1. Calculate production for each settlement
- * 2. Calculate upkeep (buildings + units)
- * 3. Apply net resources to each colony
- * 4. Handle deficits: morale loss → desertion
- * 5. Handle surplus: morale recovery
+ * 1. Resolve actions (movement, etc.)
+ * 2. Calculate production for each settlement
+ * 3. Calculate upkeep (buildings + units)
+ * 4. Apply net resources to each colony
+ * 5. Handle deficits: morale loss → desertion
+ * 6. Handle surplus: morale recovery
  */
 export function resolveTick(
   colonies: Colony[],
   settlements: Settlement[],
   units: Unit[],
   hexes: HexTileState[],
+  actions: QueuedAction[] = [],
 ): TickResult {
   const events: TickEvent[] = [];
   const desertedUnitIds: string[] = [];
+  let actionResults: ActionResult[] = [];
 
   // Build hex lookup
   const hexMap = new Map<string, HexTileState>();
   for (const hex of hexes) {
     hexMap.set(hexKey(hex.x, hex.y), hex);
+  }
+
+  // Deep clone units so we can mutate
+  const updatedUnits = units.map(u => ({
+    ...u,
+    movementQueue: u.movementQueue ? [...u.movementQueue] : [],
+  }));
+
+  // --- Phase 0: Resolve actions (movement) + advance movement queues ---
+  // Always run movement resolution to advance existing queues, even without new actions
+  const hasMovingUnits = updatedUnits.some(u => u.movementQueue && u.movementQueue.length > 0);
+  if (actions.length > 0 || hasMovingUnits) {
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const moveResult = resolveMovement(updatedUnits, actions, hexLookup);
+    events.push(...moveResult.events);
+    actionResults = moveResult.actionResults;
   }
 
   // Group settlements and units by colony
@@ -234,7 +442,7 @@ export function resolveTick(
     list.push(s);
     colonySettlements.set(s.colonyId, list);
   }
-  for (const u of units) {
+  for (const u of updatedUnits) {
     const list = colonyUnits.get(u.colonyId) ?? [];
     list.push(u);
     colonyUnits.set(u.colonyId, list);
@@ -246,7 +454,6 @@ export function resolveTick(
     resources: { ...c.resources },
   }));
 
-  const updatedUnits = units.map(u => ({ ...u }));
   const updatedSettlements = settlements.map(s => ({ ...s, buildings: [...s.buildings] }));
 
   for (const colony of updatedColonies) {
@@ -341,5 +548,6 @@ export function resolveTick(
     units: survivingUnits,
     events,
     desertedUnitIds,
+    actionResults,
   };
 }

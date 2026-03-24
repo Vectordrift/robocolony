@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveTick,
+  resolveMovement,
   calculateProduction,
   calculateBuildingUpkeep,
   calculateUnitUpkeep,
@@ -15,7 +16,9 @@ import {
   type Unit,
   type HexTileState,
   type Resources,
+  type QueuedAction,
 } from '../tick.js';
+import { createHexLookup } from '../pathfinding.js';
 
 // --- Factories ---
 
@@ -80,6 +83,42 @@ function makeHexRing(centerX: number, centerY: number): HexTileState[] {
     makeHex(centerX, centerY),
     ...directions.map(([dq, dr]) => makeHex(centerX + dq, centerY + dr)),
   ];
+}
+
+function makeAction(overrides: Partial<QueuedAction> = {}): QueuedAction {
+  return {
+    id: 'action-1',
+    colonyId: 'colony-1',
+    type: 'move_unit',
+    params: { unitId: 'unit-1', targetX: 3, targetY: 0 },
+    ...overrides,
+  };
+}
+
+/**
+ * Generate a line of plains hexes from (0,0) to (maxQ,0).
+ */
+function makePlainLine(maxQ: number): HexTileState[] {
+  const hexes: HexTileState[] = [];
+  for (let q = 0; q <= maxQ; q++) {
+    hexes.push(makeHex(q, 0));
+  }
+  return hexes;
+}
+
+/**
+ * Generate a grid of plains hexes centered around (0,0) with given radius.
+ */
+function makePlainGrid(radius: number): HexTileState[] {
+  const hexes: HexTileState[] = [];
+  for (let q = -radius; q <= radius; q++) {
+    const r1 = Math.max(-radius, -q - radius);
+    const r2 = Math.min(radius, -q + radius);
+    for (let r = r1; r <= r2; r++) {
+      hexes.push(makeHex(q, r));
+    }
+  }
+  return hexes;
 }
 
 // --- calculateProduction ---
@@ -191,6 +230,177 @@ describe('calculateUnitUpkeep', () => {
   });
 });
 
+// --- resolveMovement ---
+
+describe('resolveMovement', () => {
+  it('computes path and sets movement queue for move_unit action', () => {
+    const hexes = makePlainLine(5);
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [makeUnit({ hexX: 0, hexY: 0, type: 'scout' })];
+    const actions = [makeAction({ params: { unitId: 'unit-1', targetX: 5, targetY: 0 } })];
+
+    const result = resolveMovement(units, actions, hexLookup);
+
+    // Scout moves 3 hexes per tick on plains
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.events.some(e => e.type === 'movement_queued')).toBe(true);
+    expect(result.events.some(e => e.type === 'unit_moved')).toBe(true);
+
+    // Scout speed 3 on plains: moves 3 hexes this tick
+    expect(units[0].hexX).toBe(3);
+    expect(units[0].hexY).toBe(0);
+    expect(units[0].movementQueue?.length).toBe(2); // 5 steps total, moved 3, 2 remaining
+  });
+
+  it('moves settler 1 hex per tick', () => {
+    const hexes = makePlainLine(3);
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [makeUnit({ hexX: 0, hexY: 0, type: 'settler' })];
+    const actions = [makeAction({ params: { unitId: 'unit-1', targetX: 3, targetY: 0 } })];
+
+    const result = resolveMovement(units, actions, hexLookup);
+
+    // Settler speed 1: moves 1 hex per tick
+    expect(units[0].hexX).toBe(1);
+    expect(units[0].hexY).toBe(0);
+    expect(units[0].movementQueue?.length).toBe(2);
+  });
+
+  it('fails when path is blocked by ocean', () => {
+    const hexes = [
+      makeHex(0, 0),
+      makeHex(1, 0, { terrain: 'ocean' }),
+      makeHex(2, 0),
+    ];
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [makeUnit({ hexX: 0, hexY: 0 })];
+    const actions = [makeAction({ params: { unitId: 'unit-1', targetX: 2, targetY: 0 } })];
+
+    const result = resolveMovement(units, actions, hexLookup);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('No path');
+    expect(units[0].hexX).toBe(0); // didn't move
+  });
+
+  it('replaces existing movement queue with new move_unit', () => {
+    const hexes = makePlainGrid(5);
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [makeUnit({
+      hexX: 0, hexY: 0,
+      type: 'settler',
+      movementQueue: [{ q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }],
+    })];
+    // New action sends them to (0,3) instead
+    const actions = [makeAction({ params: { unitId: 'unit-1', targetX: 0, targetY: 3 } })];
+
+    const result = resolveMovement(units, actions, hexLookup);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    // Old queue replaced; should now be heading toward (0,3)
+    // Settler speed 1: moved 1 step
+    expect(units[0].hexX).toBe(0);
+    expect(units[0].hexY).toBe(1);
+  });
+
+  it('cancels movement when target is current position', () => {
+    const hexes = makePlainLine(3);
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [makeUnit({
+      hexX: 1, hexY: 0,
+      movementQueue: [{ q: 2, r: 0 }, { q: 3, r: 0 }],
+    })];
+    const actions = [makeAction({ params: { unitId: 'unit-1', targetX: 1, targetY: 0 } })];
+
+    const result = resolveMovement(units, actions, hexLookup);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.actionResults[0].result).toBe('Movement cancelled');
+    expect(units[0].movementQueue).toEqual([]);
+    expect(units[0].hexX).toBe(1); // didn't move
+  });
+
+  it('fails for non-existent unit', () => {
+    const hexes = makePlainLine(3);
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units: Unit[] = [];
+    const actions = [makeAction({ params: { unitId: 'nonexistent', targetX: 1, targetY: 0 } })];
+
+    const result = resolveMovement(units, actions, hexLookup);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('not found');
+  });
+
+  it('fails for wrong colony ownership', () => {
+    const hexes = makePlainLine(3);
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [makeUnit({ colonyId: 'colony-2' })];
+    const actions = [makeAction({ colonyId: 'colony-1', params: { unitId: 'unit-1', targetX: 1, targetY: 0 } })];
+
+    const result = resolveMovement(units, actions, hexLookup);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('does not belong');
+  });
+
+  it('advances existing movement queue without new action', () => {
+    const hexes = makePlainLine(5);
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [makeUnit({
+      hexX: 0, hexY: 0,
+      type: 'scout',
+      movementQueue: [{ q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }, { q: 4, r: 0 }],
+    })];
+    // No new actions — just advance existing queue
+    const result = resolveMovement(units, [], hexLookup);
+
+    // Scout speed 3: moves 3 hexes on plains
+    expect(units[0].hexX).toBe(3);
+    expect(units[0].hexY).toBe(0);
+    expect(units[0].movementQueue?.length).toBe(1); // 4 - 3 = 1 remaining
+    expect(result.events.some(e => e.type === 'unit_moved')).toBe(true);
+  });
+
+  it('completes movement when queue is fully drained', () => {
+    const hexes = makePlainLine(2);
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [makeUnit({
+      hexX: 0, hexY: 0,
+      type: 'scout', // speed 3
+      movementQueue: [{ q: 1, r: 0 }, { q: 2, r: 0 }], // only 2 steps
+    })];
+
+    const result = resolveMovement(units, [], hexLookup);
+
+    expect(units[0].hexX).toBe(2);
+    expect(units[0].movementQueue).toEqual([]);
+    expect(result.events.some(e => e.type === 'movement_complete')).toBe(true);
+  });
+
+  it('respects terrain costs: forest slows movement', () => {
+    const hexes = [
+      makeHex(0, 0, { terrain: 'plains' }),
+      makeHex(1, 0, { terrain: 'forest' }), // cost 2
+      makeHex(2, 0, { terrain: 'plains' }),
+      makeHex(3, 0, { terrain: 'plains' }),
+    ];
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [makeUnit({
+      hexX: 0, hexY: 0,
+      type: 'scout', // speed 3
+      movementQueue: [{ q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }],
+    })];
+
+    const result = resolveMovement(units, [], hexLookup);
+
+    // Forest costs 2 + plains costs 1 = 3, exactly budget. Moves 2 hexes.
+    expect(units[0].hexX).toBe(2);
+    expect(units[0].hexY).toBe(0);
+    expect(units[0].movementQueue?.length).toBe(1); // 1 remaining
+  });
+});
+
 // --- resolveTick ---
 
 describe('resolveTick', () => {
@@ -291,8 +501,7 @@ describe('resolveTick', () => {
     // Colony 1 should gain food (farm + hexes)
     expect(result.colonies.find(c => c.id === 'c1')!.resources.food).toBeGreaterThan(100);
 
-    // Colony 2 should be in famine (no production, 3 food upkeep, started at 5)
-    // Actually 5 - 3 = 2, not negative. Let's check.
+    // Colony 2 should lose food (no production, 3 food upkeep, started at 5)
     const c2Resources = result.colonies.find(c => c.id === 'c2')!.resources.food;
     expect(c2Resources).toBeLessThan(5);
   });
@@ -317,5 +526,84 @@ describe('resolveTick', () => {
 
     // Original colony should not be mutated
     expect(colony.resources.food).toBe(originalFood);
+  });
+
+  // --- Movement integration in resolveTick ---
+
+  it('processes move_unit actions and moves units', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ population: 0 });
+    const hexes = makePlainLine(5);
+    const units = [makeUnit({ hexX: 0, hexY: 0, type: 'scout' })];
+    const actions: QueuedAction[] = [
+      makeAction({ params: { unitId: 'unit-1', targetX: 5, targetY: 0 } }),
+    ];
+
+    const result = resolveTick([colony], [settlement], units, hexes, actions);
+
+    // Scout moved toward target
+    expect(result.units[0].hexX).toBeGreaterThan(0);
+    expect(result.actionResults.length).toBe(1);
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.events.some(e => e.type === 'unit_moved')).toBe(true);
+  });
+
+  it('returns empty actionResults when no actions provided', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ population: 10 });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [], hexes);
+
+    expect(result.actionResults).toEqual([]);
+  });
+
+  it('returns failed actionResults for invalid moves', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ population: 0 });
+    const hexes = [
+      makeHex(0, 0),
+      makeHex(1, 0, { terrain: 'ocean' }),
+      makeHex(2, 0),
+    ];
+    const units = [makeUnit({ hexX: 0, hexY: 0 })];
+    const actions: QueuedAction[] = [
+      makeAction({ params: { unitId: 'unit-1', targetX: 2, targetY: 0 } }),
+    ];
+
+    const result = resolveTick([colony], [settlement], units, hexes, actions);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.units[0].hexX).toBe(0); // didn't move
+  });
+
+  it('continues draining movement queue across ticks without new actions', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ population: 0 });
+    const hexes = makePlainLine(8);
+
+    // Tick 1: set path
+    const units1 = [makeUnit({ hexX: 0, hexY: 0, type: 'militia' })]; // speed 2
+    const actions1: QueuedAction[] = [
+      makeAction({ params: { unitId: 'unit-1', targetX: 6, targetY: 0 } }),
+    ];
+    const result1 = resolveTick([colony], [settlement], units1, hexes, actions1);
+
+    // Militia speed 2: moved to (2,0), 4 remaining
+    expect(result1.units[0].hexX).toBe(2);
+    expect(result1.units[0].movementQueue?.length).toBe(4);
+
+    // Tick 2: no new actions, continue movement
+    const result2 = resolveTick([colony], [settlement], result1.units, hexes);
+
+    expect(result2.units[0].hexX).toBe(4);
+    expect(result2.units[0].movementQueue?.length).toBe(2);
+
+    // Tick 3: complete
+    const result3 = resolveTick([colony], [settlement], result2.units, hexes);
+
+    expect(result3.units[0].hexX).toBe(6);
+    expect(result3.units[0].movementQueue).toEqual([]);
+    expect(result3.events.some(e => e.type === 'movement_complete')).toBe(true);
   });
 });
