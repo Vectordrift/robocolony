@@ -1452,6 +1452,22 @@ export function resolveTick(
       },
     });
 
+    // --- Resource floor: clamp non-food resources to 0 ---
+    // Food is handled separately in the famine section below.
+    // Other resources (timber, stone, iron, influence) must not go negative.
+    for (const key of ['timber', 'stone', 'iron', 'influence'] as (keyof Resources)[]) {
+      if (colony.resources[key] < 0) {
+        events.push({
+          type: 'resource_deficit',
+          colonyId: colony.id,
+          data: {
+            resource: key,
+            deficit: colony.resources[key],
+          },
+        });
+        colony.resources[key] = 0;
+      }
+    }
 
     // --- Population growth ---
     // +1 population per POP_GROWTH_PER_FOOD excess food, capped by tier max
