@@ -186,13 +186,13 @@ export const UNIT_TRAINING_COSTS: Record<UnitType, Partial<Resources>> = {
 export const VALID_UNIT_TYPES: UnitType[] = ['scout', 'militia', 'soldier', 'siege', 'settler'];
 
 /** Morale loss per tick when food is negative */
-export const MORALE_LOSS_RATE = 0.15;
+export const MORALE_LOSS_RATE = 0.05;
 
 /** Morale threshold below which a unit deserts */
 export const DESERTION_THRESHOLD = 0.1;
 
 /** Morale recovery per tick when food is positive */
-export const MORALE_RECOVERY_RATE = 0.05;
+export const MORALE_RECOVERY_RATE = 0.10;
 
 /** Resource cost to found a new settlement */
 export const FOUNDING_COST: Partial<Resources> = {
@@ -1493,18 +1493,27 @@ export function resolveTick(
       });
 
       // All units of this colony lose morale
+      const tickDesertions: Array<{ type: string; id: string; morale: number }> = [];
       for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
         unit.morale = Math.max(0, unit.morale - MORALE_LOSS_RATE);
 
         if (unit.morale <= DESERTION_THRESHOLD) {
           desertedUnitIds.push(unit.id);
-          events.push({
-            type: 'desertion',
-            colonyId: colony.id,
-            unitId: unit.id,
-            data: { unitType: unit.type, morale: unit.morale },
-          });
+          tickDesertions.push({ type: unit.type, id: unit.id, morale: unit.morale });
         }
+      }
+
+      // Emit a single aggregated desertion event (instead of one per unit)
+      if (tickDesertions.length > 0) {
+        events.push({
+          type: 'desertion',
+          colonyId: colony.id,
+          data: {
+            count: tickDesertions.length,
+            units: tickDesertions.map(d => ({ unitType: d.type, unitId: d.id })),
+            summary: tickDesertions.map(d => d.type).join(', '),
+          },
+        });
       }
 
       // Clamp food to 0 (debt doesn't carry over)
