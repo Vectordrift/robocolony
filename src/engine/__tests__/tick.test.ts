@@ -3,11 +3,15 @@ import {
   resolveTick,
   resolveMovement,
   resolveFoundSettlement,
+  resolveBuilding,
   calculateProduction,
   calculateBuildingUpkeep,
   calculateUnitUpkeep,
   TIER_MULTIPLIER,
   BUILDING_PRODUCTION,
+  BUILDING_COSTS,
+  BUILD_TIME,
+  VALID_BUILDING_TYPES,
   UNIT_UPKEEP,
   MORALE_LOSS_RATE,
   MORALE_RECOVERY_RATE,
@@ -21,6 +25,7 @@ import {
   type HexTileState,
   type Resources,
   type QueuedAction,
+  type BuildingType,
 } from '../tick.js';
 import { createHexLookup } from '../pathfinding.js';
 
@@ -47,6 +52,7 @@ function makeSettlement(overrides: Partial<Settlement> = {}): Settlement {
     hexY: 0,
     tier: 'outpost',
     buildings: [],
+    buildQueue: [],
     loyalty: 100,
     population: 10,
     ...overrides,
@@ -95,6 +101,16 @@ function makeAction(overrides: Partial<QueuedAction> = {}): QueuedAction {
     colonyId: 'colony-1',
     type: 'move_unit',
     params: { unitId: 'unit-1', targetX: 3, targetY: 0 },
+    ...overrides,
+  };
+}
+
+function makeBuildAction(overrides: Partial<QueuedAction> = {}): QueuedAction {
+  return {
+    id: 'action-build-1',
+    colonyId: 'colony-1',
+    type: 'build',
+    params: { settlementId: 'settlement-1', buildingType: 'farm' },
     ...overrides,
   };
 }
@@ -231,6 +247,267 @@ describe('calculateUnitUpkeep', () => {
       makeUnit({ type: 'siege' }),     // 3
     ];
     expect(calculateUnitUpkeep(units)).toBe(6);
+  });
+});
+
+// --- resolveBuilding ---
+
+describe('resolveBuilding', () => {
+  it('queues a building and deducts resources', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 50 } });
+    const settlement = makeSettlement();
+    const action = makeBuildAction();
+
+    const result = resolveBuilding([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.actionResults[0].result).toContain('farm');
+    expect(result.actionResults[0].result).toContain('construction started');
+
+    // Build queue should have the farm (queued then advanced in same call)
+    expect(settlement.buildQueue).toHaveLength(1);
+    expect(settlement.buildQueue[0].type).toBe('farm');
+    expect(settlement.buildQueue[0].ticksRemaining).toBe(BUILD_TIME - 1);
+
+    // Farm costs 20 timber
+    expect(colony.resources.timber).toBe(50 - 20);
+  });
+
+  it('deducts correct resources for each building type', () => {
+    for (const bType of VALID_BUILDING_TYPES) {
+      const cost = BUILDING_COSTS[bType];
+      const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 } });
+      const settlement = makeSettlement({ id: `s-${bType}` });
+      const action = makeBuildAction({
+        id: `act-${bType}`,
+        params: { settlementId: `s-${bType}`, buildingType: bType },
+      });
+
+      resolveBuilding([settlement], [colony], [action]);
+
+      for (const [resource, amount] of Object.entries(cost)) {
+        expect(colony.resources[resource as keyof Resources]).toBe(500 - (amount as number));
+      }
+    }
+  });
+
+  it('generates build_started event', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 50 } });
+    const settlement = makeSettlement();
+    const action = makeBuildAction();
+
+    const result = resolveBuilding([settlement], [colony], [action]);
+
+    const event = result.events.find(e => e.type === 'build_started');
+    expect(event).toBeDefined();
+    expect(event!.colonyId).toBe('colony-1');
+    expect(event!.settlementId).toBe('settlement-1');
+    expect(event!.data.buildingType).toBe('farm');
+    expect(event!.data.ticksRemaining).toBe(BUILD_TIME);
+  });
+
+  it('advances build queue and completes building after BUILD_TIME ticks', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildQueue: [{ type: 'farm', ticksRemaining: 1 }],
+    });
+
+    const result = resolveBuilding([settlement], [colony], []);
+
+    // Building should be completed
+    expect(settlement.buildings).toHaveLength(1);
+    expect(settlement.buildings[0].type).toBe('farm');
+    expect(settlement.buildings[0].level).toBe(1);
+    expect(settlement.buildQueue).toHaveLength(0);
+
+    // build_complete event
+    const event = result.events.find(e => e.type === 'build_complete');
+    expect(event).toBeDefined();
+    expect(event!.data.buildingType).toBe('farm');
+    expect(event!.data.level).toBe(1);
+  });
+
+  it('decrements ticksRemaining when not yet complete', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildQueue: [{ type: 'farm', ticksRemaining: 3 }],
+    });
+
+    const result = resolveBuilding([settlement], [colony], []);
+
+    expect(settlement.buildQueue).toHaveLength(1);
+    expect(settlement.buildQueue[0].ticksRemaining).toBe(2);
+    expect(settlement.buildings).toHaveLength(0);
+
+    // No build_complete event
+    expect(result.events.find(e => e.type === 'build_complete')).toBeUndefined();
+  });
+
+  it('handles multiple items in build queue', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildQueue: [
+        { type: 'farm', ticksRemaining: 1 },      // completes
+        { type: 'quarry', ticksRemaining: 2 },     // advances to 1
+      ],
+    });
+
+    const result = resolveBuilding([settlement], [colony], []);
+
+    expect(settlement.buildings).toHaveLength(1);
+    expect(settlement.buildings[0].type).toBe('farm');
+    expect(settlement.buildQueue).toHaveLength(1);
+    expect(settlement.buildQueue[0].type).toBe('quarry');
+    expect(settlement.buildQueue[0].ticksRemaining).toBe(1);
+  });
+
+  it('fails when settlement not found', () => {
+    const colony = makeColony();
+    const action = makeBuildAction({
+      params: { settlementId: 'nonexistent', buildingType: 'farm' },
+    });
+
+    const result = resolveBuilding([], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('not found');
+  });
+
+  it('fails when settlement belongs to different colony', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ colonyId: 'colony-2' });
+    const action = makeBuildAction({ colonyId: 'colony-1' });
+
+    const result = resolveBuilding([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('does not belong');
+  });
+
+  it('fails for invalid building type', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement();
+    const action = makeBuildAction({
+      params: { settlementId: 'settlement-1', buildingType: 'spaceship' },
+    });
+
+    const result = resolveBuilding([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Invalid building type');
+  });
+
+  it('fails when settlement already has the building type', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+    });
+    const action = makeBuildAction({
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    });
+
+    const result = resolveBuilding([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('already has a farm');
+  });
+
+  it('fails when building type is already in build queue', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildQueue: [{ type: 'farm', ticksRemaining: 2 }],
+    });
+    const action = makeBuildAction({
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    });
+
+    const result = resolveBuilding([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('already in the build queue');
+  });
+
+  it('fails when colony has insufficient resources', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 5, stone: 30, iron: 10, influence: 50 } });
+    const settlement = makeSettlement();
+    const action = makeBuildAction({
+      params: { settlementId: 'settlement-1', buildingType: 'farm' }, // costs 20 timber
+    });
+
+    const result = resolveBuilding([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Insufficient resources');
+  });
+
+  it('fails when colony not found', () => {
+    const settlement = makeSettlement();
+    const action = makeBuildAction();
+
+    const result = resolveBuilding([settlement], [], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Colony');
+    expect(result.actionResults[0].result).toContain('not found');
+  });
+
+  it('queues multiple different buildings in same tick', () => {
+    const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 } });
+    const settlement = makeSettlement();
+    const actions = [
+      makeBuildAction({ id: 'act-1', params: { settlementId: 'settlement-1', buildingType: 'farm' } }),
+      makeBuildAction({ id: 'act-2', params: { settlementId: 'settlement-1', buildingType: 'mine' } }),
+    ];
+
+    const result = resolveBuilding([settlement], [colony], actions);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.actionResults[1].status).toBe('resolved');
+    expect(settlement.buildQueue).toHaveLength(2);
+    expect(settlement.buildQueue[0].type).toBe('farm');
+    expect(settlement.buildQueue[1].type).toBe('mine');
+  });
+
+  it('rejects second build of same type in same tick', () => {
+    const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 } });
+    const settlement = makeSettlement();
+    const actions = [
+      makeBuildAction({ id: 'act-1', params: { settlementId: 'settlement-1', buildingType: 'farm' } }),
+      makeBuildAction({ id: 'act-2', params: { settlementId: 'settlement-1', buildingType: 'farm' } }),
+    ];
+
+    const result = resolveBuilding([settlement], [colony], actions);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.actionResults[1].status).toBe('failed');
+    expect(result.actionResults[1].result).toContain('already in the build queue');
+  });
+
+  it('completes build while also queuing a new build in same tick', () => {
+    const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 } });
+    const settlement = makeSettlement({
+      buildQueue: [{ type: 'farm', ticksRemaining: 1 }],
+    });
+    const action = makeBuildAction({
+      params: { settlementId: 'settlement-1', buildingType: 'mine' },
+    });
+
+    const result = resolveBuilding([settlement], [colony], [action]);
+
+    // Farm should complete
+    expect(settlement.buildings).toHaveLength(1);
+    expect(settlement.buildings[0].type).toBe('farm');
+
+    // Mine should be queued
+    // The mine was queued first (Phase 1), then build queue advances (Phase 2)
+    // Mine added with ticksRemaining: 3, then decremented to 2
+    expect(settlement.buildQueue).toHaveLength(1);
+    expect(settlement.buildQueue[0].type).toBe('mine');
+    expect(settlement.buildQueue[0].ticksRemaining).toBe(2);
+
+    // Both events present
+    expect(result.events.some(e => e.type === 'build_complete')).toBe(true);
+    expect(result.events.some(e => e.type === 'build_started')).toBe(true);
   });
 });
 
@@ -1030,5 +1307,155 @@ describe('resolveTick', () => {
     expect(scoutUnit).toBeDefined();
     expect(scoutUnit!.hexX).toBeGreaterThan(0);
     expect(result.actionResults.find(ar => ar.actionId === 'act-move')?.status).toBe('resolved');
+  });
+
+  // --- Build action integration in resolveTick ---
+
+  it('resolves build action: deducts resources and adds to build queue', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 50 } });
+    const settlement = makeSettlement();
+    const hexes = makeHexRing(0, 0);
+
+    const actions: QueuedAction[] = [
+      makeBuildAction(),
+    ];
+
+    const result = resolveTick([colony], [settlement], [], hexes, actions);
+
+    // Build action resolved
+    const buildResult = result.actionResults.find(ar => ar.actionId === 'action-build-1');
+    expect(buildResult?.status).toBe('resolved');
+
+    // Resources deducted (farm costs 20 timber)
+    expect(result.colonies[0].resources.timber).toBeLessThan(50);
+
+    // Build queue populated
+    const s = result.settlements[0];
+    expect(s.buildQueue.length).toBe(1);
+    expect(s.buildQueue[0].type).toBe('farm');
+    // ticksRemaining should be BUILD_TIME - 1 (queued then advanced in same tick)
+    expect(s.buildQueue[0].ticksRemaining).toBe(BUILD_TIME - 1);
+
+    // build_started event
+    expect(result.events.some(e => e.type === 'build_started')).toBe(true);
+  });
+
+  it('completes building after BUILD_TIME ticks via resolveTick', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildQueue: [{ type: 'farm', ticksRemaining: 1 }],
+    });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [], hexes);
+
+    // Farm should be complete
+    const s = result.settlements[0];
+    expect(s.buildings).toHaveLength(1);
+    expect(s.buildings[0].type).toBe('farm');
+    expect(s.buildings[0].level).toBe(1);
+    expect(s.buildQueue).toHaveLength(0);
+
+    // build_complete event
+    expect(result.events.some(e => e.type === 'build_complete')).toBe(true);
+
+    // Completed building should contribute to production
+    const productionEvent = result.events.find(e => e.type === 'production');
+    expect(productionEvent).toBeDefined();
+    const produced = productionEvent!.data.produced as Resources;
+    expect(produced.food).toBeGreaterThan(0);
+  });
+
+  it('build queue progresses across multiple ticks', () => {
+    const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 } });
+    const settlement = makeSettlement();
+    const hexes = makeHexRing(0, 0);
+
+    // Tick 1: submit build action
+    const actions: QueuedAction[] = [makeBuildAction()];
+    const result1 = resolveTick([colony], [settlement], [], hexes, actions);
+
+    // Farm queued, ticksRemaining = BUILD_TIME - 1 = 2
+    expect(result1.settlements[0].buildQueue[0].ticksRemaining).toBe(BUILD_TIME - 1);
+    expect(result1.settlements[0].buildings).toHaveLength(0);
+
+    // Tick 2: no actions, queue advances
+    const result2 = resolveTick(result1.colonies, result1.settlements, [], hexes);
+    expect(result2.settlements[0].buildQueue[0].ticksRemaining).toBe(BUILD_TIME - 2);
+    expect(result2.settlements[0].buildings).toHaveLength(0);
+
+    // Tick 3: building completes
+    const result3 = resolveTick(result2.colonies, result2.settlements, [], hexes);
+    expect(result3.settlements[0].buildQueue).toHaveLength(0);
+    expect(result3.settlements[0].buildings).toHaveLength(1);
+    expect(result3.settlements[0].buildings[0].type).toBe('farm');
+    expect(result3.events.some(e => e.type === 'build_complete')).toBe(true);
+  });
+
+  it('rejects build action with insufficient resources in resolveTick', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 5, stone: 30, iron: 10, influence: 50 } });
+    const settlement = makeSettlement();
+    const hexes = makeHexRing(0, 0);
+
+    const actions: QueuedAction[] = [makeBuildAction()]; // farm costs 20 timber
+
+    const result = resolveTick([colony], [settlement], [], hexes, actions);
+
+    const buildResult = result.actionResults.find(ar => ar.actionId === 'action-build-1');
+    expect(buildResult?.status).toBe('failed');
+    expect(buildResult?.result).toContain('Insufficient resources');
+    expect(result.settlements[0].buildQueue).toHaveLength(0);
+  });
+
+  it('rejects duplicate building type in resolveTick', () => {
+    const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+    });
+    const hexes = makeHexRing(0, 0);
+
+    const actions: QueuedAction[] = [makeBuildAction()]; // farm already exists
+
+    const result = resolveTick([colony], [settlement], [], hexes, actions);
+
+    const buildResult = result.actionResults.find(ar => ar.actionId === 'action-build-1');
+    expect(buildResult?.status).toBe('failed');
+    expect(buildResult?.result).toContain('already has a farm');
+  });
+
+  it('handles mixed build and move actions in same tick', () => {
+    const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 } });
+    const settlement = makeSettlement();
+    const hexes = makePlainGrid(5);
+    const scout = makeUnit({ type: 'scout', hexX: 0, hexY: 0 });
+
+    const actions: QueuedAction[] = [
+      makeBuildAction(),
+      makeAction({ id: 'act-move', params: { unitId: 'unit-1', targetX: 3, targetY: 0 } }),
+    ];
+
+    const result = resolveTick([colony], [settlement], [scout], hexes, actions);
+
+    // Build resolved
+    expect(result.actionResults.find(ar => ar.actionId === 'action-build-1')?.status).toBe('resolved');
+    // Move resolved
+    expect(result.actionResults.find(ar => ar.actionId === 'act-move')?.status).toBe('resolved');
+    // Scout moved
+    expect(result.units[0].hexX).toBeGreaterThan(0);
+    // Farm queued
+    expect(result.settlements[0].buildQueue.some(bq => bq.type === 'farm')).toBe(true);
+  });
+
+  it('does not mutate input settlement buildQueue', () => {
+    const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 } });
+    const settlement = makeSettlement();
+    const originalBuildQueue = [...settlement.buildQueue];
+    const hexes = makeHexRing(0, 0);
+
+    const actions: QueuedAction[] = [makeBuildAction()];
+    resolveTick([colony], [settlement], [], hexes, actions);
+
+    // Original settlement should not be mutated
+    expect(settlement.buildQueue).toEqual(originalBuildQueue);
   });
 });

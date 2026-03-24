@@ -40,6 +40,7 @@ export interface Settlement {
   hexY: number;
   tier: 'outpost' | 'town' | 'city';
   buildings: Building[];
+  buildQueue: BuildQueueEntry[];
   loyalty: number;
   population: number;
 }
@@ -47,6 +48,11 @@ export interface Settlement {
 export interface Building {
   type: BuildingType;
   level: number;
+}
+
+export interface BuildQueueEntry {
+  type: BuildingType;
+  ticksRemaining: number;
 }
 
 export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market';
@@ -136,6 +142,25 @@ export const BUILDING_UPKEEP: Record<BuildingType, Partial<Resources>> = {
   market:     { food: 1 },
 };
 
+/** Building construction costs */
+export const BUILDING_COSTS: Record<BuildingType, Partial<Resources>> = {
+  farm:       { timber: 20 },
+  lumberMill: { timber: 10, stone: 10 },
+  quarry:     { stone: 20, iron: 10 },
+  mine:       { stone: 30, timber: 20 },
+  barracks:   { timber: 40, stone: 20, iron: 10 },
+  granary:    { timber: 25, stone: 10 },
+  market:     { stone: 30, timber: 15, iron: 5 },
+};
+
+/** Ticks required to construct any building */
+export const BUILD_TIME = 3;
+
+/** All valid building types */
+export const VALID_BUILDING_TYPES: BuildingType[] = [
+  'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market',
+];
+
 /** Unit food upkeep per tick */
 export const UNIT_UPKEEP: Record<UnitType, number> = {
   scout: 1,
@@ -173,6 +198,207 @@ const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 
 function hexKey(x: number, y: number): string {
   return `${x},${y}`;
+}
+
+/**
+ * Check if a colony has enough resources for a cost.
+ */
+function hasResources(resources: Resources, cost: Partial<Resources>): boolean {
+  for (const [key, amount] of Object.entries(cost)) {
+    if ((amount as number) > 0 && resources[key as keyof Resources] < (amount as number)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Deduct a resource cost from colony resources.
+ */
+function deductResources(resources: Resources, cost: Partial<Resources>): void {
+  for (const [key, amount] of Object.entries(cost)) {
+    if ((amount as number) > 0) {
+      resources[key as keyof Resources] -= amount as number;
+    }
+  }
+}
+
+// --- Building Construction ---
+
+export interface BuildResult {
+  settlements: Settlement[];
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+/**
+ * Resolve build actions: validate and queue new buildings.
+ * Then advance all existing build queues (decrement ticksRemaining,
+ * move completed buildings to the buildings array).
+ */
+export function resolveBuilding(
+  settlements: Settlement[],
+  colonies: Colony[],
+  actions: QueuedAction[],
+): BuildResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+
+  // Build lookups
+  const settlementMap = new Map<string, Settlement>();
+  for (const s of settlements) {
+    settlementMap.set(s.id, s);
+  }
+  const colonyMap = new Map<string, Colony>();
+  for (const c of colonies) {
+    colonyMap.set(c.id, c);
+  }
+
+  // Phase 1: Process build actions — validate and add to build queue
+  const buildActions = actions.filter(a => a.type === 'build');
+
+  for (const action of buildActions) {
+    const settlementId = action.params.settlementId as string;
+    const buildingType = action.params.buildingType as string;
+
+    // 1. Settlement exists
+    const settlement = settlementMap.get(settlementId);
+    if (!settlement) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} not found`,
+      });
+      continue;
+    }
+
+    // 2. Colony ownership
+    if (settlement.colonyId !== action.colonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+      });
+      continue;
+    }
+
+    // 3. Valid building type
+    if (!VALID_BUILDING_TYPES.includes(buildingType as BuildingType)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Invalid building type: ${buildingType}. Valid types: ${VALID_BUILDING_TYPES.join(', ')}`,
+      });
+      continue;
+    }
+
+    const bType = buildingType as BuildingType;
+
+    // 4. Settlement doesn't already have this building type
+    if (settlement.buildings.some(b => b.type === bType)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} already has a ${bType}`,
+      });
+      continue;
+    }
+
+    // 5. Not already in build queue
+    if (settlement.buildQueue.some(bq => bq.type === bType)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `${bType} is already in the build queue for settlement ${settlementId}`,
+      });
+      continue;
+    }
+
+    // 6. Colony has enough resources
+    const colony = colonyMap.get(action.colonyId);
+    if (!colony) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Colony ${action.colonyId} not found`,
+      });
+      continue;
+    }
+
+    const cost = BUILDING_COSTS[bType];
+    if (!hasResources(colony.resources, cost)) {
+      const costStr = Object.entries(cost)
+        .filter(([, v]) => (v as number) > 0)
+        .map(([k, v]) => `${v} ${k}`)
+        .join(', ');
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Insufficient resources for ${bType}: need ${costStr}`,
+      });
+      continue;
+    }
+
+    // --- All checks passed: deduct resources and add to build queue ---
+    deductResources(colony.resources, cost);
+
+    settlement.buildQueue.push({
+      type: bType,
+      ticksRemaining: BUILD_TIME,
+    });
+
+    events.push({
+      type: 'build_started',
+      colonyId: action.colonyId,
+      settlementId: settlement.id,
+      data: {
+        buildingType: bType,
+        ticksRemaining: BUILD_TIME,
+        cost,
+      },
+    });
+
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: `${bType} construction started at ${settlement.name} (${BUILD_TIME} ticks)`,
+    });
+  }
+
+  // Phase 2: Advance all build queues (decrement ticksRemaining)
+  for (const settlement of settlements) {
+    if (settlement.buildQueue.length === 0) continue;
+
+    const completed: BuildQueueEntry[] = [];
+    const remaining: BuildQueueEntry[] = [];
+
+    for (const entry of settlement.buildQueue) {
+      const newTicks = entry.ticksRemaining - 1;
+      if (newTicks <= 0) {
+        completed.push(entry);
+      } else {
+        remaining.push({ ...entry, ticksRemaining: newTicks });
+      }
+    }
+
+    // Move completed buildings to buildings array
+    for (const entry of completed) {
+      settlement.buildings.push({ type: entry.type, level: 1 });
+      events.push({
+        type: 'build_complete',
+        colonyId: settlement.colonyId,
+        settlementId: settlement.id,
+        data: {
+          buildingType: entry.type,
+          level: 1,
+        },
+      });
+    }
+
+    settlement.buildQueue = remaining;
+  }
+
+  return { settlements, events, actionResults };
 }
 
 // --- Settlement Founding ---
@@ -367,6 +593,7 @@ export function resolveFoundSettlement(
       hexY: unit.hexY,
       tier: 'outpost',
       buildings: [],
+      buildQueue: [],
       loyalty: 100,
       population: 10,
     };
@@ -653,11 +880,12 @@ export function calculateUnitUpkeep(units: Unit[]): number {
  * 0. Resolve found_settlement actions (before movement — consumed settlers don't move)
  * 1. Resolve movement actions + advance movement queues
  * 2. Compute fog of war reveals for moved units + new settlements
- * 3. Calculate production for each settlement (including new ones)
- * 4. Calculate upkeep (buildings + units)
- * 5. Apply net resources to each colony
- * 6. Handle deficits: morale loss → desertion
- * 7. Handle surplus: morale recovery
+ * 3. Resolve build actions + advance build queues
+ * 4. Calculate production for each settlement (including new ones)
+ * 5. Calculate upkeep (buildings + units)
+ * 6. Apply net resources to each colony
+ * 7. Handle deficits: morale loss → desertion
+ * 8. Handle surplus: morale recovery
  */
 export function resolveTick(
   colonies: Colony[],
@@ -695,8 +923,12 @@ export function resolveTick(
     movementQueue: u.movementQueue ? [...u.movementQueue] : [],
   }));
 
-  // Deep clone settlements so we can mutate
-  let updatedSettlements = settlements.map(s => ({ ...s, buildings: [...s.buildings] }));
+  // Deep clone settlements so we can mutate (including buildQueue)
+  let updatedSettlements = settlements.map(s => ({
+    ...s,
+    buildings: [...s.buildings],
+    buildQueue: (s.buildQueue ?? []).map(bq => ({ ...bq })),
+  }));
 
   // --- Phase -1: Resolve found_settlement actions (before movement) ---
   const foundActions = actions.filter(a => a.type === 'found_settlement');
@@ -756,6 +988,14 @@ export function resolveTick(
     const fogResult = computeFogReveals(movedUnits, allHexCoords, alreadyExplored);
     fogReveals.push(...fogResult.reveals);
     events.push(...fogResult.events);
+  }
+
+  // --- Phase 1: Resolve build actions + advance build queues ---
+  const buildActions = actions.filter(a => a.type === 'build');
+  if (buildActions.length > 0 || updatedSettlements.some(s => s.buildQueue.length > 0)) {
+    const buildResult = resolveBuilding(updatedSettlements, updatedColonies, actions);
+    events.push(...buildResult.events);
+    actionResults.push(...buildResult.actionResults);
   }
 
   // Group settlements and units by colony

@@ -9,7 +9,7 @@ import { eq, and } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema/index.js';
 import { resolveTick } from './tick.js';
-import type { Colony, Settlement, Unit, HexTileState, Resources, Building, QueuedAction } from './tick.js';
+import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction } from './tick.js';
 import { nanoid } from 'nanoid';
 
 export interface SchedulerOptions {
@@ -134,6 +134,7 @@ export class TickScheduler {
         hexY: s.hexY,
         tier: s.tier as 'outpost' | 'town' | 'city',
         buildings: (s.buildings ?? []) as Building[],
+        buildQueue: (s.buildQueue ?? []) as BuildQueueEntry[],
         loyalty: s.loyalty,
         population: s.population,
       }));
@@ -184,6 +185,17 @@ export class TickScheduler {
             .where(eq(schema.colonies.id, colony.id));
         }
 
+        // Update settlements (buildings, buildQueue)
+        for (const settlement of result.settlements) {
+          await tx
+            .update(schema.settlements)
+            .set({
+              buildings: settlement.buildings,
+              buildQueue: settlement.buildQueue,
+            })
+            .where(eq(schema.settlements.id, settlement.id));
+        }
+
         // Update units (morale, position, movementQueue)
         for (const unit of result.units) {
           await tx
@@ -212,7 +224,7 @@ export class TickScheduler {
             .where(eq(schema.actions.id, ar.actionId));
         }
 
-        // Mark any remaining queued actions as resolved (non-movement actions not yet handled)
+        // Mark any remaining queued actions as resolved (action types not yet handled)
         // This prevents them from being re-processed next tick
         const processedIds = new Set(result.actionResults.map(ar => ar.actionId));
         for (const action of dbActions) {
