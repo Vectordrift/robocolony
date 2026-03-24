@@ -4,6 +4,7 @@ import { healthRoutes } from './routes/health.js';
 import { worldRoutes } from './routes/worlds.js';
 import { stateRoutes } from './routes/state.js';
 import { actionRoutes } from './routes/actions.js';
+import { eventRoutes } from './routes/events.js';
 
 export function buildApp() {
   const app = Fastify({
@@ -17,6 +18,7 @@ export function buildApp() {
   app.register(worldRoutes);
   app.register(stateRoutes);
   app.register(actionRoutes);
+  app.register(eventRoutes);
 
   return app;
 }
