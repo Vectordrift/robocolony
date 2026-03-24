@@ -423,7 +423,7 @@ describe('resolveFoundSettlement', () => {
       id: 'settler-1',
       type: 'settler',
       hexX: 10,
-      hexY: 10,
+      hexY: 0,
       ...overrides,
     });
   }
@@ -445,7 +445,7 @@ describe('resolveFoundSettlement', () => {
     expect(result.newSettlements[0].tier).toBe('outpost');
     expect(result.newSettlements[0].population).toBe(10);
     expect(result.newSettlements[0].hexX).toBe(10);
-    expect(result.newSettlements[0].hexY).toBe(10);
+    expect(result.newSettlements[0].hexY).toBe(0);
     expect(result.newSettlements[0].name).toBe('New Outpost');
     expect(result.consumedUnitIds).toContain('settler-1');
     expect(result.units.find(u => u.id === 'settler-1')).toBeUndefined();
@@ -482,7 +482,7 @@ describe('resolveFoundSettlement', () => {
     expect(event!.colonyId).toBe('colony-1');
     expect(event!.data.name).toBe('New Outpost');
     expect(event!.data.hexX).toBe(10);
-    expect(event!.data.hexY).toBe(10);
+    expect(event!.data.hexY).toBe(0);
   });
 
   it('generates fog reveals around new settlement', () => {
@@ -657,7 +657,7 @@ describe('resolveFoundSettlement', () => {
 
   it('prevents same settler from founding twice in one tick', () => {
     const colony = makeColony({ resources: { food: 500, timber: 200, stone: 30, iron: 10, influence: 50 } });
-    const settler = makeSettler({ hexX: 10, hexY: 10 });
+    const settler = makeSettler();
     const hexes = makePlainGrid(15);
     const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
 
