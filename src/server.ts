@@ -1,14 +1,21 @@
 import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
 import cors from '@fastify/cors';
 import { healthRoutes } from './routes/health.js';
 import { worldRoutes } from './routes/worlds.js';
 import { stateRoutes } from './routes/state.js';
 import { actionRoutes } from './routes/actions.js';
 import { eventRoutes } from './routes/events.js';
+import { feedRoutes } from './routes/feed.js';
 import { db } from './db/index.js';
 import { worlds, settlements, colonies } from './db/schema/index.js';
 import { eq } from 'drizzle-orm';
 import { TickScheduler } from './engine/scheduler.js';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export function buildApp() {
   const app = Fastify({
@@ -23,6 +30,16 @@ export function buildApp() {
   app.register(stateRoutes);
   app.register(actionRoutes);
   app.register(eventRoutes);
+  app.register(feedRoutes);
+
+  // Serve static website from web/ directory
+  // In dist/, the web/ folder is at ../web relative to compiled JS
+  const webRoot = join(__dirname, '..', 'web');
+  app.register(fastifyStatic, {
+    root: webRoot,
+    prefix: '/',
+    decorateReply: false,
+  });
 
   return app;
 }
