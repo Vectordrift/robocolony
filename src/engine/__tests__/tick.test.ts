@@ -5,6 +5,7 @@ import {
   resolveFoundSettlement,
   resolveBuilding,
   resolveTrainUnit,
+  resolveUpgradeSettlement,
   calculateProduction,
   calculateBuildingUpkeep,
   calculateUnitUpkeep,
@@ -24,6 +25,10 @@ import {
   MIN_SETTLEMENT_DISTANCE,
   FOUNDING_REVEAL_RADIUS,
   POP_FOOD_CONSUMPTION,
+  UPGRADE_COSTS,
+  TIER_ORDER,
+  MAX_POPULATION,
+  POP_GROWTH_PER_FOOD,
   type Colony,
   type Settlement,
   type Unit,
@@ -1834,5 +1839,454 @@ describe('resolveTick with train_unit', () => {
     expect(resultWithTrain.colonies[0].resources.food).toBeLessThan(
       resultNoTrain.colonies[0].resources.food,
     );
+  });
+});
+
+
+
+// --- resolveUpgradeSettlement ---
+
+function makeUpgradeAction(overrides: Partial<QueuedAction> = {}): QueuedAction {
+  return {
+    id: 'action-upgrade-1',
+    colonyId: 'colony-1',
+    type: 'upgrade_settlement',
+    params: { settlementId: 'settlement-1' },
+    ...overrides,
+  };
+}
+
+describe('resolveUpgradeSettlement', () => {
+  it('upgrades outpost to town when requirements met', () => {
+    const colony = makeColony({
+      resources: { food: 300, timber: 200, stone: 150, iron: 50, influence: 50 },
+    });
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      population: 50,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+      ],
+    });
+    const action = makeUpgradeAction();
+
+    const result = resolveUpgradeSettlement([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.actionResults[0].result).toContain('outpost');
+    expect(result.actionResults[0].result).toContain('town');
+    expect(settlement.tier).toBe('town');
+
+    // Resources deducted (town costs: 200 food, 150 timber, 100 stone)
+    expect(colony.resources.food).toBe(300 - 200);
+    expect(colony.resources.timber).toBe(200 - 150);
+    expect(colony.resources.stone).toBe(150 - 100);
+  });
+
+  it('upgrades town to city when requirements met', () => {
+    const colony = makeColony({
+      resources: { food: 600, timber: 400, stone: 300, iron: 200, influence: 50 },
+    });
+    const settlement = makeSettlement({
+      tier: 'town',
+      population: 200,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+        { type: 'mine', level: 1 },
+        { type: 'barracks', level: 1 },
+      ],
+    });
+    const action = makeUpgradeAction();
+
+    const result = resolveUpgradeSettlement([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(settlement.tier).toBe('city');
+
+    // City costs: 500 food, 300 timber, 200 stone, 100 iron
+    expect(colony.resources.food).toBe(600 - 500);
+    expect(colony.resources.timber).toBe(400 - 300);
+    expect(colony.resources.stone).toBe(300 - 200);
+    expect(colony.resources.iron).toBe(200 - 100);
+  });
+
+  it('generates settlement_upgraded event', () => {
+    const colony = makeColony({
+      resources: { food: 300, timber: 200, stone: 150, iron: 50, influence: 50 },
+    });
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      population: 50,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+      ],
+    });
+    const action = makeUpgradeAction();
+
+    const result = resolveUpgradeSettlement([settlement], [colony], [action]);
+
+    const event = result.events.find(e => e.type === 'settlement_upgraded');
+    expect(event).toBeDefined();
+    expect(event!.colonyId).toBe('colony-1');
+    expect(event!.settlementId).toBe('settlement-1');
+    expect(event!.data.previousTier).toBe('outpost');
+    expect(event!.data.newTier).toBe('town');
+    expect(event!.data.name).toBe('Outpost Alpha');
+  });
+
+  it('fails when settlement is already city (max tier)', () => {
+    const colony = makeColony({
+      resources: { food: 1000, timber: 1000, stone: 1000, iron: 1000, influence: 100 },
+    });
+    const settlement = makeSettlement({
+      tier: 'city',
+      population: 500,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+        { type: 'mine', level: 1 },
+        { type: 'barracks', level: 1 },
+      ],
+    });
+    const action = makeUpgradeAction();
+
+    const result = resolveUpgradeSettlement([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('maximum tier');
+    expect(settlement.tier).toBe('city');
+  });
+
+  it('fails when colony has insufficient resources', () => {
+    const colony = makeColony({
+      resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 50 },
+    });
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      population: 50,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+      ],
+    });
+    const action = makeUpgradeAction();
+
+    const result = resolveUpgradeSettlement([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Insufficient resources');
+    expect(settlement.tier).toBe('outpost');
+  });
+
+  it('fails when population is too low', () => {
+    const colony = makeColony({
+      resources: { food: 300, timber: 200, stone: 150, iron: 50, influence: 50 },
+    });
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      population: 30, // Need 50 for town
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+      ],
+    });
+    const action = makeUpgradeAction();
+
+    const result = resolveUpgradeSettlement([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Insufficient population');
+    expect(result.actionResults[0].result).toContain('50');
+    expect(settlement.tier).toBe('outpost');
+  });
+
+  it('fails when not enough buildings', () => {
+    const colony = makeColony({
+      resources: { food: 300, timber: 200, stone: 150, iron: 50, influence: 50 },
+    });
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      population: 50,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        // Only 2 buildings, need 3 for town
+      ],
+    });
+    const action = makeUpgradeAction();
+
+    const result = resolveUpgradeSettlement([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Insufficient buildings');
+    expect(result.actionResults[0].result).toContain('3');
+    expect(settlement.tier).toBe('outpost');
+  });
+
+  it('fails when settlement not found', () => {
+    const colony = makeColony();
+    const action = makeUpgradeAction({
+      params: { settlementId: 'nonexistent' },
+    });
+
+    const result = resolveUpgradeSettlement([], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('not found');
+  });
+
+  it('fails when settlement belongs to different colony', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ colonyId: 'colony-2' });
+    const action = makeUpgradeAction({ colonyId: 'colony-1' });
+
+    const result = resolveUpgradeSettlement([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('does not belong');
+  });
+
+  it('fails when colony not found', () => {
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      population: 50,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+      ],
+    });
+    const action = makeUpgradeAction();
+
+    const result = resolveUpgradeSettlement([settlement], [], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('not found');
+  });
+
+  it('returns empty results when no upgrade actions', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement();
+    const moveAction = makeAction(); // move_unit, not upgrade_settlement
+
+    const result = resolveUpgradeSettlement([settlement], [colony], [moveAction]);
+
+    expect(result.events).toHaveLength(0);
+    expect(result.actionResults).toHaveLength(0);
+  });
+});
+
+// --- Population growth ---
+
+describe('population growth in resolveTick', () => {
+  it('population grows when food surplus exists', () => {
+    const colony = makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    // Farm level 3 produces 30 food. Pop 10 consumes 5. Net ~25+ with hex yields.
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 3 }],
+      population: 10,
+    });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [], hexes);
+
+    // Population should have grown
+    expect(result.settlements[0].population).toBeGreaterThan(10);
+  });
+
+  it('population does not grow beyond tier cap', () => {
+    const colony = makeColony({
+      resources: { food: 5000, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    // Outpost cap = 50. Start at 49 with massive food surplus.
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      buildings: [{ type: 'farm', level: 5 }],
+      population: 49,
+    });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [], hexes);
+
+    // Should cap at 50 (outpost max)
+    expect(result.settlements[0].population).toBeLessThanOrEqual(MAX_POPULATION.outpost);
+  });
+
+  it('population does not grow when food is negative', () => {
+    const colony = makeColony({
+      resources: { food: 5, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    // No production, pop 10 consumes 5, 2 soldiers consume 6 → net -6
+    const settlement = makeSettlement({
+      population: 10,
+    });
+    const units = [
+      makeUnit({ id: 'u1', type: 'soldier' }),
+      makeUnit({ id: 'u2', type: 'soldier' }),
+    ];
+
+    const result = resolveTick([colony], [settlement], units, []);
+
+    // Population should NOT grow (food went negative)
+    expect(result.settlements[0].population).toBe(10);
+  });
+
+  it('population grows faster with higher food surplus', () => {
+    // Small surplus
+    const colony1 = makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    const settlement1 = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }], // produces 10 food
+      population: 10, // consumes 5
+    });
+
+    // Large surplus
+    const colony2 = makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    const settlement2 = makeSettlement({
+      id: 'settlement-2',
+      buildings: [{ type: 'farm', level: 5 }], // produces 50 food
+      population: 10, // consumes 5
+    });
+
+    const hexes = makeHexRing(0, 0);
+
+    const result1 = resolveTick([colony1], [settlement1], [], hexes);
+    const result2 = resolveTick([colony2], [settlement2], [], hexes);
+
+    // Both should grow, but the one with higher surplus should grow more
+    expect(result2.settlements[0].population).toBeGreaterThanOrEqual(
+      result1.settlements[0].population,
+    );
+  });
+
+  it('town has higher population cap than outpost', () => {
+    const colony = makeColony({
+      resources: { food: 5000, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    const settlement = makeSettlement({
+      tier: 'town',
+      buildings: [{ type: 'farm', level: 5 }],
+      population: 195, // Near town cap of 200
+    });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [], hexes);
+
+    // Should grow but cap at 200 (town max)
+    expect(result.settlements[0].population).toBeLessThanOrEqual(MAX_POPULATION.town);
+    expect(result.settlements[0].population).toBeGreaterThan(195);
+  });
+
+  it('generates population_growth event', () => {
+    const colony = makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 3 }],
+      population: 10,
+    });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [], hexes);
+
+    const growthEvent = result.events.find(e => e.type === 'population_growth');
+    expect(growthEvent).toBeDefined();
+    expect(growthEvent!.colonyId).toBe('colony-1');
+    expect(growthEvent!.settlementId).toBe('settlement-1');
+    expect(growthEvent!.data.previousPopulation).toBe(10);
+    expect((growthEvent!.data.newPopulation as number)).toBeGreaterThan(10);
+  });
+});
+
+// --- resolveTick with upgrade_settlement ---
+
+describe('resolveTick with upgrade_settlement', () => {
+  it('integrates upgrade_settlement action into full tick', () => {
+    const colony = makeColony({
+      resources: { food: 500, timber: 300, stone: 200, iron: 100, influence: 100 },
+    });
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      population: 50,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+      ],
+    });
+    const hexes = makeHexRing(0, 0);
+    const action = makeUpgradeAction();
+
+    const result = resolveTick([colony], [settlement], [], hexes, [action]);
+
+    // Upgrade resolved
+    const upgradeResult = result.actionResults.find(ar => ar.actionId === 'action-upgrade-1');
+    expect(upgradeResult?.status).toBe('resolved');
+
+    // Settlement is now a town
+    expect(result.settlements[0].tier).toBe('town');
+
+    // settlement_upgraded event
+    expect(result.events.some(e => e.type === 'settlement_upgraded')).toBe(true);
+
+    // Town tier multiplier should boost production in the same tick
+    const productionEvent = result.events.find(e => e.type === 'production');
+    expect(productionEvent).toBeDefined();
+  });
+
+  it('town tier boosts production in same tick after upgrade', () => {
+    // Run a tick without upgrade first
+    const colony1 = makeColony({
+      resources: { food: 500, timber: 300, stone: 200, iron: 100, influence: 100 },
+    });
+    const settlement1 = makeSettlement({
+      tier: 'outpost',
+      population: 50,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+      ],
+    });
+    const hexes = makeHexRing(0, 0);
+    const resultNoUpgrade = resolveTick([colony1], [settlement1], [], hexes);
+
+    // Now run with upgrade
+    const colony2 = makeColony({
+      resources: { food: 500, timber: 300, stone: 200, iron: 100, influence: 100 },
+    });
+    const settlement2 = makeSettlement({
+      tier: 'outpost',
+      population: 50,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+      ],
+    });
+    const resultWithUpgrade = resolveTick([colony2], [settlement2], [], hexes, [makeUpgradeAction()]);
+
+    // With upgrade: production should be 1.5x (town), but resources were also deducted for upgrade
+    // Check that production event shows higher production
+    const prod1 = resultNoUpgrade.events.find(e => e.type === 'production')!.data.produced as Resources;
+    const prod2 = resultWithUpgrade.events.find(e => e.type === 'production')!.data.produced as Resources;
+
+    // Town multiplier 1.5 vs outpost 1.0 — building production should be higher
+    // Farm at outpost: 10, at town: 15
+    expect(prod2.food).toBeGreaterThan(prod1.food);
   });
 });
