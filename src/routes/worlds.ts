@@ -41,8 +41,8 @@ const DEFAULT_RESOURCES = {
 };
 
 const STARTING_BUILDINGS = [
-  { type: 'farm', completedAtTick: 0 },
-  { type: 'lumberMill', completedAtTick: 0 },
+  { type: 'farm', level: 1 },
+  { type: 'lumberMill', level: 1 },
 ];
 
 const STARTING_UNITS: Array<{ type: string; count: number }> = [
