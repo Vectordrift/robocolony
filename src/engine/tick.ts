@@ -10,7 +10,7 @@ import { hexNeighbors, hexDistance } from './hex.js';
 import type { HexResources } from './mapgen.js';
 import { findPath, movementStepsThisTick, createHexLookup } from './pathfinding.js';
 import type { HexLookup } from './pathfinding.js';
-import { computeFogReveals } from './fog.js';
+import { computeFogReveals, hexesWithinRadius } from './fog.js';
 import type { HexExploration } from './fog.js';
 
 // --- Types ---
@@ -154,10 +154,263 @@ export const DESERTION_THRESHOLD = 0.1;
 /** Morale recovery per tick when food is positive */
 export const MORALE_RECOVERY_RATE = 0.05;
 
+/** Resource cost to found a new settlement */
+export const FOUNDING_COST: Partial<Resources> = {
+  food: 100,
+  timber: 50,
+};
+
+/** Minimum hex distance between any two settlements */
+export const MIN_SETTLEMENT_DISTANCE = 3;
+
+/** Fog reveal radius for a newly founded settlement */
+export const FOUNDING_REVEAL_RADIUS = 2;
+
+/** Terrains where settlements cannot be founded */
+const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
+
 // --- Helpers ---
 
 function hexKey(x: number, y: number): string {
   return `${x},${y}`;
+}
+
+// --- Settlement Founding ---
+
+export interface FoundSettlementResult {
+  /** Units remaining after consuming settlers */
+  units: Unit[];
+  /** New settlements created this tick */
+  newSettlements: Settlement[];
+  /** IDs of consumed settler units */
+  consumedUnitIds: string[];
+  events: TickEvent[];
+  actionResults: ActionResult[];
+  /** Fog reveals from newly founded settlements */
+  fogReveals: HexExploration[];
+}
+
+/**
+ * Resolve found_settlement actions.
+ *
+ * Validates:
+ * - Unit exists and belongs to the colony
+ * - Unit is a settler
+ * - Hex terrain is foundable (not ocean/mountains)
+ * - Hex has no existing settlement
+ * - Hex is at least MIN_SETTLEMENT_DISTANCE from all other settlements
+ * - Colony has enough resources (food + timber)
+ *
+ * On success: settler consumed, outpost created, resources deducted, fog revealed.
+ */
+export function resolveFoundSettlement(
+  units: Unit[],
+  colonies: Colony[],
+  settlements: Settlement[],
+  hexes: HexTileState[],
+  actions: QueuedAction[],
+  allHexCoords: Set<string>,
+): FoundSettlementResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+  const newSettlements: Settlement[] = [];
+  const consumedUnitIds: string[] = [];
+  const fogReveals: HexExploration[] = [];
+
+  const foundActions = actions.filter(a => a.type === 'found_settlement');
+  if (foundActions.length === 0) {
+    return { units, newSettlements, consumedUnitIds, events, actionResults, fogReveals };
+  }
+
+  // Build lookups
+  const unitMap = new Map<string, Unit>();
+  for (const u of units) {
+    unitMap.set(u.id, u);
+  }
+  const colonyMap = new Map<string, Colony>();
+  for (const c of colonies) {
+    colonyMap.set(c.id, c);
+  }
+  const hexMap = new Map<string, HexTileState>();
+  for (const hex of hexes) {
+    hexMap.set(hexKey(hex.x, hex.y), hex);
+  }
+
+  // Collect all existing settlements + newly created ones (for distance checks)
+  const allSettlementPositions: HexCoord[] = settlements.map(s => ({ q: s.hexX, r: s.hexY }));
+
+  for (const action of foundActions) {
+    const unitId = action.params.unitId as string;
+    const settlementName = action.params.name as string;
+
+    // 1. Unit exists
+    const unit = unitMap.get(unitId);
+    if (!unit) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Unit ${unitId} not found`,
+      });
+      continue;
+    }
+
+    // 2. Colony ownership
+    if (unit.colonyId !== action.colonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Unit ${unitId} does not belong to colony ${action.colonyId}`,
+      });
+      continue;
+    }
+
+    // 3. Unit is a settler
+    if (unit.type !== 'settler') {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Unit ${unitId} is a ${unit.type}, not a settler`,
+      });
+      continue;
+    }
+
+    // 4. Unit not already consumed this tick
+    if (consumedUnitIds.includes(unit.id)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Unit ${unitId} was already consumed this tick`,
+      });
+      continue;
+    }
+
+    // 5. Hex terrain is foundable
+    const hex = hexMap.get(hexKey(unit.hexX, unit.hexY));
+    if (!hex) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Hex (${unit.hexX},${unit.hexY}) not found`,
+      });
+      continue;
+    }
+
+    if (UNFOUNDABLE_TERRAIN.has(hex.terrain)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Cannot found settlement on ${hex.terrain} terrain`,
+      });
+      continue;
+    }
+
+    // 6. No existing settlement on this hex
+    if (hex.settlementId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Hex (${unit.hexX},${unit.hexY}) already has a settlement`,
+      });
+      continue;
+    }
+
+    // 7. Minimum distance from all other settlements
+    const settlerPos: HexCoord = { q: unit.hexX, r: unit.hexY };
+    const tooClose = allSettlementPositions.some(
+      pos => hexDistance(settlerPos, pos) < MIN_SETTLEMENT_DISTANCE,
+    );
+    if (tooClose) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Too close to an existing settlement (minimum distance: ${MIN_SETTLEMENT_DISTANCE})`,
+      });
+      continue;
+    }
+
+    // 8. Colony has enough resources
+    const colony = colonyMap.get(action.colonyId);
+    if (!colony) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Colony ${action.colonyId} not found`,
+      });
+      continue;
+    }
+
+    const foodCost = FOUNDING_COST.food ?? 0;
+    const timberCost = FOUNDING_COST.timber ?? 0;
+
+    if (colony.resources.food < foodCost || colony.resources.timber < timberCost) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Insufficient resources: need ${foodCost} food and ${timberCost} timber (have ${colony.resources.food} food, ${colony.resources.timber} timber)`,
+      });
+      continue;
+    }
+
+    // --- All checks passed: found the settlement ---
+
+    // Deduct resources
+    colony.resources.food -= foodCost;
+    colony.resources.timber -= timberCost;
+
+    // Create new settlement
+    const newSettlement: Settlement = {
+      id: `settlement_${unit.hexX}_${unit.hexY}_${Date.now()}`,
+      colonyId: unit.colonyId,
+      worldId: unit.worldId,
+      name: settlementName || `Outpost at (${unit.hexX},${unit.hexY})`,
+      hexX: unit.hexX,
+      hexY: unit.hexY,
+      tier: 'outpost',
+      buildings: [],
+      loyalty: 100,
+      population: 10,
+    };
+    newSettlements.push(newSettlement);
+
+    // Track position for subsequent distance checks
+    allSettlementPositions.push(settlerPos);
+
+    // Mark settler as consumed
+    consumedUnitIds.push(unit.id);
+
+    // Fog reveal around new settlement
+    const revealedHexes = hexesWithinRadius(settlerPos, FOUNDING_REVEAL_RADIUS, allHexCoords);
+    for (const rHex of revealedHexes) {
+      fogReveals.push({ colonyId: unit.colonyId, hex: rHex });
+    }
+
+    // Events
+    events.push({
+      type: 'settlement_founded',
+      colonyId: unit.colonyId,
+      settlementId: newSettlement.id,
+      unitId: unit.id,
+      data: {
+        name: newSettlement.name,
+        hexX: unit.hexX,
+        hexY: unit.hexY,
+        tier: 'outpost',
+        population: 10,
+        resourceCost: { food: foodCost, timber: timberCost },
+      },
+    });
+
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: `Settlement "${newSettlement.name}" founded at (${unit.hexX},${unit.hexY})`,
+    });
+  }
+
+  // Remove consumed settlers
+  const remainingUnits = units.filter(u => !consumedUnitIds.includes(u.id));
+
+  return { units: remainingUnits, newSettlements, consumedUnitIds, events, actionResults, fogReveals };
 }
 
 // --- Movement Resolution ---
@@ -397,9 +650,10 @@ export function calculateUnitUpkeep(units: Unit[]): number {
 /**
  * Resolve a single game tick.
  *
- * 1. Resolve actions (movement, etc.)
- * 2. Compute fog of war reveals for moved units
- * 3. Calculate production for each settlement
+ * 0. Resolve found_settlement actions (before movement — consumed settlers don't move)
+ * 1. Resolve movement actions + advance movement queues
+ * 2. Compute fog of war reveals for moved units + new settlements
+ * 3. Calculate production for each settlement (including new ones)
  * 4. Calculate upkeep (buildings + units)
  * 5. Apply net resources to each colony
  * 6. Handle deficits: morale loss → desertion
@@ -423,11 +677,48 @@ export function resolveTick(
     hexMap.set(hexKey(hex.x, hex.y), hex);
   }
 
+  // Build set of all valid hex coordinates (used for fog reveals)
+  const allHexCoords = new Set<string>();
+  for (const hex of hexes) {
+    allHexCoords.add(`${hex.x},${hex.y}`);
+  }
+
+  // Deep clone colonies so we can mutate
+  const updatedColonies = colonies.map(c => ({
+    ...c,
+    resources: { ...c.resources },
+  }));
+
   // Deep clone units so we can mutate
-  const updatedUnits = units.map(u => ({
+  let updatedUnits = units.map(u => ({
     ...u,
     movementQueue: u.movementQueue ? [...u.movementQueue] : [],
   }));
+
+  // Deep clone settlements so we can mutate
+  let updatedSettlements = settlements.map(s => ({ ...s, buildings: [...s.buildings] }));
+
+  // --- Phase -1: Resolve found_settlement actions (before movement) ---
+  const foundActions = actions.filter(a => a.type === 'found_settlement');
+  if (foundActions.length > 0) {
+    const foundResult = resolveFoundSettlement(
+      updatedUnits,
+      updatedColonies,
+      updatedSettlements,
+      hexes,
+      actions,
+      allHexCoords,
+    );
+
+    updatedUnits = foundResult.units.map(u => ({
+      ...u,
+      movementQueue: u.movementQueue ? [...u.movementQueue] : [],
+    }));
+    updatedSettlements = [...updatedSettlements, ...foundResult.newSettlements];
+    events.push(...foundResult.events);
+    actionResults.push(...foundResult.actionResults);
+    fogReveals.push(...foundResult.fogReveals);
+  }
 
   // Track unit positions before movement for fog-of-war
   const unitPositionsBefore = new Map<string, { x: number; y: number }>();
@@ -435,14 +726,14 @@ export function resolveTick(
     unitPositionsBefore.set(u.id, { x: u.hexX, y: u.hexY });
   }
 
-  // --- Phase 0: Resolve actions (movement) + advance movement queues ---
-  // Always run movement resolution to advance existing queues, even without new actions
+  // --- Phase 0: Resolve movement actions + advance movement queues ---
   const hasMovingUnits = updatedUnits.some(u => u.movementQueue && u.movementQueue.length > 0);
-  if (actions.length > 0 || hasMovingUnits) {
+  const nonFoundActions = actions.filter(a => a.type !== 'found_settlement');
+  if (nonFoundActions.length > 0 || hasMovingUnits) {
     const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
-    const moveResult = resolveMovement(updatedUnits, actions, hexLookup);
+    const moveResult = resolveMovement(updatedUnits, nonFoundActions, hexLookup);
     events.push(...moveResult.events);
-    actionResults = moveResult.actionResults;
+    actionResults.push(...moveResult.actionResults);
   }
 
   // --- Phase 0.5: Fog of war reveals for units that moved ---
@@ -452,12 +743,6 @@ export function resolveTick(
   });
 
   if (movedUnits.length > 0) {
-    // Build set of all valid hex coordinates
-    const allHexCoords = new Set<string>();
-    for (const hex of hexes) {
-      allHexCoords.add(`${hex.x},${hex.y}`);
-    }
-
     // Build already-explored map from hex data
     const alreadyExplored = new Map<string, boolean>();
     for (const hex of hexes) {
@@ -469,7 +754,7 @@ export function resolveTick(
     }
 
     const fogResult = computeFogReveals(movedUnits, allHexCoords, alreadyExplored);
-    fogReveals = fogResult.reveals;
+    fogReveals.push(...fogResult.reveals);
     events.push(...fogResult.events);
   }
 
@@ -477,7 +762,7 @@ export function resolveTick(
   const colonySettlements = new Map<string, Settlement[]>();
   const colonyUnits = new Map<string, Unit[]>();
 
-  for (const s of settlements) {
+  for (const s of updatedSettlements) {
     const list = colonySettlements.get(s.colonyId) ?? [];
     list.push(s);
     colonySettlements.set(s.colonyId, list);
@@ -487,14 +772,6 @@ export function resolveTick(
     list.push(u);
     colonyUnits.set(u.colonyId, list);
   }
-
-  // Deep clone colonies so we can mutate
-  const updatedColonies = colonies.map(c => ({
-    ...c,
-    resources: { ...c.resources },
-  }));
-
-  const updatedSettlements = settlements.map(s => ({ ...s, buildings: [...s.buildings] }));
 
   for (const colony of updatedColonies) {
     if (colony.status !== 'active') continue;
