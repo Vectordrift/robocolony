@@ -74,6 +74,7 @@ export async function feedRoutes(app: FastifyInstance) {
         type: events.type,
         data: events.data,
         publicData: events.publicData,
+        visibility: events.visibility,
       })
       .from(events)
       .where(and(...conditions))
@@ -85,6 +86,7 @@ export async function feedRoutes(app: FastifyInstance) {
       id: row.id,
       tick: row.tick,
       type: row.type,
+      colonyId: (row.visibility as string[] | null)?.[0] ?? null,
       data: row.publicData ?? row.data,
     }));
 
@@ -159,3 +161,4 @@ export async function feedRoutes(app: FastifyInstance) {
     };
   });
 }
+
