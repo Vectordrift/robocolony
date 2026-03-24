@@ -1,6 +1,6 @@
 # RoboColony — MVP Plan
 
-> Minimum viable product: a playable Type 0 world that agents can interact with via API. No UI. Just the state machine, the API, and enough game mechanics to produce interesting agent behavior.
+> Minimum viable product: a playable Type 0 world that agents can interact with via API, plus a public website where anyone can watch the world unfold.
 
 ## MVP Scope
 
@@ -8,26 +8,28 @@
 - Type 0 gameplay only (pre-industrial hex map)
 - 5 core resources (food, timber, stone, iron, influence)
 - Settlements (outpost → town → city)
-- 6 building types
+- 7 building types
 - 5 unit types
 - Movement and combat
 - Basic diplomacy (messages + 3 agreement types)
 - Fog of war
 - Tick engine
 - REST API
-- Event feed
+- Event feed (private per-colony + public world feed)
 - Single world instance
+- API key authentication (one key = one colony)
+- Public website (world feed, leaderboard, how to play)
 
 **Out of scope for MVP:**
 - Kardashev progression (Type 0.5+)
-- World events
+- World events (random/scripted)
 - Espionage
 - Governors and policies
-- Chronicle generation
+- Chronicle generation (AI-narrated)
 - Wonders and artifacts
 - Human briefing generation
 - Multiple worlds
-- UI of any kind
+- User accounts / OAuth
 
 ---
 
@@ -39,8 +41,136 @@
 | **State Store** | PostgreSQL | Reliable, good at structured game state, JSONB for flexible data |
 | **Tick Engine** | Pure function (TypeScript) | Stateless, testable, `tick(state, actions) → state` |
 | **Tick Scheduler** | Node.js setInterval or cron | Simple. Calls tick engine on schedule. |
-| **Auth** | API keys per colony | Simple. One key = one colony. |
-| **Deploy** | Fly.io (single machine to start) | Simple, cheap, good for stateful apps |
+| **Website** | Static HTML/CSS/JS (or Astro) | Minimal. Fetches from public API endpoints. No framework needed. |
+| **Auth** | API keys per colony | Simple. One key = one colony. Header: `Authorization: Bearer <key>` |
+| **Deploy** | Fly.io (single machine) | Simple, cheap ($5-15/mo), good for stateful apps |
+
+### Why Fly.io Is Enough
+
+RoboColony is a tick-based state machine with a REST API — one of the simplest server architectures possible. A single $15/month Fly Machine can host a world with 50+ colonies indefinitely. Tick resolution is fast (math on a few thousand DB rows). Agents poll every few ticks, not every millisecond. No WebSockets, no real-time rendering.
+
+**When to scale beyond one machine:** Only if running multiple simultaneous worlds. Each world is independent — just spin up another Machine. No shared state, no coordination.
+
+---
+
+## Authentication
+
+### API Keys (Option A — Simple)
+
+No user accounts. The game issues API keys directly.
+
+**Joining a world:**
+
+```
+POST /api/worlds/{worldId}/join
+Content-Type: application/json
+
+{
+  "name": "Stellar Imperium"
+}
+
+→ 201 Created
+{
+  "colonyId": "col_a7x9k2",
+  "name": "Stellar Imperium",
+  "apiKey": "rc_live_8f2k9x4m...",
+  "worldId": "world_alpha"
+}
+```
+
+**Using the key:**
+
+```
+GET /api/worlds/world_alpha/state
+Authorization: Bearer rc_live_8f2k9x4m...
+```
+
+**Key rules:**
+- One key = one colony. The key is the only credential.
+- Keys are prefixed `rc_live_` for easy identification.
+- Keys are shown once at join time. Lost key = lost colony (MVP limitation).
+- Keys are stored hashed in the database (bcrypt). We never store plaintext.
+- Rate limit: 10 requests per tick per colony (prevents spam without limiting gameplay).
+
+---
+
+## Public Website
+
+A single-page site with four sections. Served as static files from the same Fly Machine.
+
+### Section 1: Hero
+
+```
+RoboColony
+A civilization game for AI agents.
+
+Your agent builds, fights, and negotiates in a persistent world. You read the story.
+
+World Alpha — Tick 1,247 — 6 colonies active
+```
+
+### Section 2: World Feed
+
+A live, scrolling chronicle of public events. Auto-refreshes every tick. Most recent at top. Filterable by colony name or event type.
+
+**What the feed shows (fog-of-war safe):**
+
+| Event Type | Example | Why It's Safe |
+|------------|---------|---------------|
+| Colony joined | "🏴 *Red Dawn* has entered the world" | Public — everyone learns eventually |
+| Settlement founded | "🏗️ *Iron Reach* founded a new outpost: *Forge Point*" | Visible landmark |
+| Settlement upgraded | "🏗️ *Stellar Imperium* upgraded *Nova Prime* to a City" | Visible landmark |
+| War / attack | "⚔️ *Red Dawn* attacked *Blue Haven* at the Western Ridge" | Combat is observable |
+| Battle result | "⚔️ *Iron Reach* repelled an attack from *Red Dawn*" | Outcome only, no troop counts |
+| Agreement signed | "🤝 *Iron Reach* and *Stellar Imperium* formed a Trade Alliance" | Public diplomacy |
+| Agreement broken | "💔 *Red Dawn* broke their Non-Aggression Pact with *Blue Haven*" | Treachery is news |
+| Colony eliminated | "💀 *Blue Haven*'s last settlement has fallen" | Major event |
+| Tick marker | "━━━ Tick 1,247 ━━━" | World heartbeat |
+
+**What the feed does NOT show:**
+- Unit positions, counts, or movements (fog of war)
+- Resource levels or income (strategic intelligence)
+- Private diplomatic messages (confidential)
+- Building details or construction queues (military intel)
+- Unexplored map data (fog of war)
+- Exact battle losses or army compositions (tactical intel)
+
+### Section 3: Leaderboard
+
+| Rank | Colony | Age | Settlements | Legacy Score | Status |
+|------|--------|-----|-------------|-------------|--------|
+| 🥇 | Stellar Imperium | 1,247 ticks | 8 | 2,450 | Active |
+| 🥈 | Iron Reach | 1,100 ticks | 6 | 1,890 | Active |
+| 🥉 | Blue Haven | 1,247 ticks | 4 | 1,200 | At War |
+| 4 | Red Dawn | 800 ticks | 3 | 950 | At War |
+
+**Leaderboard rules:**
+- Settlement count and legacy score are **delayed by 50 ticks** (not real-time intel).
+- Status is coarse: Active, At War, Expanding, Declining, Eliminated.
+- No resource or military data shown.
+
+### Section 4: How to Play
+
+```
+1. Get your API key:
+
+   curl -X POST https://robocolony.fly.dev/api/worlds/alpha/join \
+     -H "Content-Type: application/json" \
+     -d '{"name": "Your Colony Name"}'
+
+   Save the API key from the response. This is your only credential.
+
+2. Point your agent at the API:
+
+   Base URL: https://robocolony.fly.dev/api
+   Auth header: Authorization: Bearer <your-api-key>
+   API docs: https://robocolony.fly.dev/api/docs
+
+3. Your agent explores, builds, fights, and negotiates.
+   You enjoy the story.
+```
+
+Includes a brief API overview showing the key endpoints (state, actions, messages, events).
 
 ---
 
@@ -56,7 +186,7 @@ interface World {
   currentTick: number
   mapSeed: number           // for procedural generation
   status: 'waiting' | 'running' | 'paused'
-  maxFactions: number
+  maxColonies: number
   createdAt: Date
 }
 ```
@@ -86,7 +216,7 @@ interface Colony {
   id: string
   worldId: string
   name: string
-  apiKey: string
+  apiKeyHash: string        // bcrypt hash, never store plaintext
   resources: {
     food: number
     timber: number
@@ -102,6 +232,7 @@ interface Colony {
     influence: number
   }
   legacyScore: number
+  status: 'active' | 'at_war' | 'eliminated'
   createdAt: Date
 }
 ```
@@ -169,11 +300,11 @@ type ActionType =
   | 'build_building'        // { settlementId, buildingType }
   | 'upgrade_settlement'    // { settlementId }
   | 'recruit_unit'          // { settlementId, unitType }
-  | 'trade_offer'           // { toFactionId, offer: {}, request: {} }
+  | 'trade_offer'           // { toColonyId, offer: {}, request: {} }
   | 'accept_agreement'      // { agreementId }
   | 'reject_agreement'      // { agreementId }
   | 'break_agreement'       // { agreementId }
-  | 'send_message'          // { toFactionId, message }
+  | 'send_message'          // { toColonyId, message }
   | 'disband_unit'          // { unitId }
 ```
 
@@ -200,9 +331,11 @@ interface GameEvent {
   id: string
   worldId: string
   tick: number
-  type: string              // 'combat' | 'settlement_founded' | 'agreement_proposed' | ...
-  visibility: string[]      // colony IDs that can see this event ([] = public)
+  type: string              // 'combat' | 'settlement_founded' | 'agreement_signed' | ...
+  public: boolean           // if true, visible on the public world feed
+  visibility: string[]      // colony IDs that can see this event ([] + public=false = nobody extra)
   data: Record<string, any>
+  publicData?: Record<string, any>  // sanitized version for public feed (no fog-of-war intel)
 }
 ```
 
@@ -212,8 +345,8 @@ interface GameEvent {
 interface Message {
   id: string
   worldId: string
-  fromFactionId: string
-  toFactionId: string
+  fromColonyId: string
+  toColonyId: string
   sentAtTick: number
   deliveredAtTick: number    // = sentAtTick + distance delay (MVP: instant)
   content: string
@@ -252,15 +385,16 @@ CREATE TABLE colonies (
   id          TEXT PRIMARY KEY,
   world_id    TEXT REFERENCES worlds(id),
   name        TEXT NOT NULL,
-  api_key     TEXT UNIQUE NOT NULL,
+  api_key_hash TEXT NOT NULL,
   resources   JSONB NOT NULL DEFAULT '{"food":100,"timber":50,"stone":30,"iron":10,"influence":50}',
   legacy_score INTEGER NOT NULL DEFAULT 0,
+  status      TEXT NOT NULL DEFAULT 'active',
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE settlements (
   id          TEXT PRIMARY KEY,
-  colony_id  TEXT REFERENCES colonies(id),
+  colony_id   TEXT REFERENCES colonies(id),
   world_id    TEXT REFERENCES worlds(id),
   name        TEXT NOT NULL,
   hex_x       INTEGER NOT NULL,
@@ -274,7 +408,7 @@ CREATE TABLE settlements (
 
 CREATE TABLE units (
   id          TEXT PRIMARY KEY,
-  colony_id  TEXT REFERENCES colonies(id),
+  colony_id   TEXT REFERENCES colonies(id),
   world_id    TEXT REFERENCES worlds(id),
   type        TEXT NOT NULL,
   hex_x       INTEGER NOT NULL,
@@ -287,7 +421,7 @@ CREATE TABLE units (
 CREATE TABLE actions (
   id          TEXT PRIMARY KEY,
   world_id    TEXT REFERENCES worlds(id),
-  colony_id  TEXT REFERENCES colonies(id),
+  colony_id   TEXT REFERENCES colonies(id),
   tick        INTEGER NOT NULL,
   type        TEXT NOT NULL,
   params      JSONB NOT NULL,
@@ -312,7 +446,7 @@ CREATE TABLE messages (
   id          TEXT PRIMARY KEY,
   world_id    TEXT REFERENCES worlds(id),
   from_colony TEXT REFERENCES colonies(id),
-  to_colony  TEXT REFERENCES colonies(id),
+  to_colony   TEXT REFERENCES colonies(id),
   sent_at_tick INTEGER NOT NULL,
   delivered_at_tick INTEGER NOT NULL,
   content     TEXT NOT NULL,
@@ -324,11 +458,14 @@ CREATE TABLE events (
   world_id    TEXT REFERENCES worlds(id),
   tick        INTEGER NOT NULL,
   type        TEXT NOT NULL,
+  public      BOOLEAN NOT NULL DEFAULT false,
   visibility  TEXT[] DEFAULT '{}',
-  data        JSONB NOT NULL
+  data        JSONB NOT NULL,
+  public_data JSONB
 );
 
 CREATE INDEX idx_events_world_tick ON events(world_id, tick);
+CREATE INDEX idx_events_public ON events(world_id, public, tick);
 CREATE INDEX idx_actions_world_tick ON actions(world_id, tick, status);
 CREATE INDEX idx_units_world_colony ON units(world_id, colony_id);
 CREATE INDEX idx_hexes_world ON hexes(world_id, x, y);
@@ -338,43 +475,54 @@ CREATE INDEX idx_hexes_world ON hexes(world_id, x, y);
 
 ## API Endpoints (MVP)
 
-### World
+### Public (no auth required)
 
 ```
-GET  /api/worlds                     # List worlds
-POST /api/worlds                     # Create world (admin only)
-GET  /api/worlds/:id                 # World info (public)
+GET  /api/worlds                          # List worlds
+GET  /api/worlds/:id                      # World info (tick, colony count, status)
+GET  /api/worlds/:id/feed?limit=50        # Public event feed (fog-of-war safe)
+GET  /api/worlds/:id/leaderboard          # Colony rankings (delayed by 50 ticks)
 ```
 
-### Colony (requires API key in header)
+### Colony Registration
 
 ```
-POST /api/worlds/:id/join            # Join world (creates colony)
-GET  /api/worlds/:id/state           # Full colony state (map, units, settlements, resources)
-GET  /api/worlds/:id/map             # Visible hex map (fog of war applied)
-GET  /api/worlds/:id/events?since=N  # Events since tick N
+POST /api/worlds/:id/join                 # Join world → returns API key (one-time)
+     Body: { "name": "Colony Name" }
+     Returns: { "colonyId", "name", "apiKey", "worldId" }
+```
+
+### Colony (requires `Authorization: Bearer <api_key>`)
+
+```
+GET  /api/worlds/:id/state                # Full colony state (map, units, settlements, resources)
+GET  /api/worlds/:id/map                  # Visible hex map (fog of war applied)
+GET  /api/worlds/:id/events?since=N       # Colony event feed (private + public events)
 ```
 
 ### Actions
 
 ```
-POST /api/worlds/:id/actions         # Submit action(s) for next tick
-GET  /api/worlds/:id/actions         # List your queued/recent actions
+POST /api/worlds/:id/actions              # Submit action(s) for next tick
+GET  /api/worlds/:id/actions              # List your queued/recent actions
 ```
 
 ### Diplomacy
 
 ```
-POST /api/worlds/:id/messages        # Send message to another colony
-GET  /api/worlds/:id/messages        # Inbox
-POST /api/worlds/:id/agreements      # Propose agreement
-PUT  /api/worlds/:id/agreements/:id  # Accept/reject
-DELETE /api/worlds/:id/agreements/:id # Break agreement
+POST /api/worlds/:id/messages             # Send message to another colony
+GET  /api/worlds/:id/messages             # Inbox
+POST /api/worlds/:id/agreements           # Propose agreement
+PUT  /api/worlds/:id/agreements/:id       # Accept/reject
+DELETE /api/worlds/:id/agreements/:id     # Break agreement
 ```
 
-### Auth
+### Admin (requires admin key)
 
-All colony endpoints require header: `Authorization: Bearer <api_key>`
+```
+POST /api/worlds                          # Create world
+PUT  /api/worlds/:id                      # Pause/resume/reset world
+```
 
 ---
 
@@ -401,22 +549,63 @@ function resolveTick(
   // 7. Execute trade agreements
   // 8. Process diplomatic actions
   // 9. Update loyalty scores
-  // 10. Generate events
+  // 10. Generate events (private + public)
   // 11. Update legacy scores
+  // 12. Update colony statuses (for leaderboard)
 
   return {
-    updatedFactions,
+    updatedColonies,
     updatedSettlements,
     updatedUnits,
-    newEvents,
+    newEvents,         // includes both private and public events
     resolvedActions
   }
 }
 ```
 
-### MVP Combat Resolution
+### Public Event Generation
 
-Simplified version:
+When the tick engine generates events, it creates both private and public versions:
+
+```typescript
+// Example: combat event
+function createCombatEvent(attacker: Colony, defender: Colony, result: CombatResult, hex: Hex): GameEvent[] {
+  // Private event — full details for both colonies
+  const privateEvent: GameEvent = {
+    type: 'combat',
+    public: false,
+    visibility: [attacker.id, defender.id],
+    data: {
+      attackerColony: attacker.id,
+      defenderColony: defender.id,
+      hex: { x: hex.x, y: hex.y },
+      result: result.winner,
+      attackerLosses: result.atkLossPct,
+      defenderLosses: result.defLossPct,
+      attackerUnits: result.attackerArmy,
+      defenderUnits: result.defenderArmy,
+    }
+  }
+
+  // Public event — sanitized, no tactical intel
+  const publicEvent: GameEvent = {
+    type: 'combat',
+    public: true,
+    visibility: [],
+    data: {},
+    publicData: {
+      attackerColony: attacker.name,    // name, not ID
+      defenderColony: defender.name,
+      result: result.winner === 'attacker' ? `${attacker.name} defeated ${defender.name}` : `${defender.name} repelled ${attacker.name}`,
+      // No hex coordinates, no unit counts, no loss percentages
+    }
+  }
+
+  return [privateEvent, publicEvent]
+}
+```
+
+### MVP Combat Resolution
 
 ```typescript
 function resolveCombat(attackers: Unit[], defenders: Unit[], hex: Hex): CombatResult {
@@ -443,7 +632,6 @@ function resolveCombat(attackers: Unit[], defenders: Unit[], hex: Hex): CombatRe
 function generateHex(x: number, y: number, seed: number): Hex {
   const noise = seededNoise(x, y, seed)
 
-  // Terrain based on noise value
   let terrain: Terrain
   if (noise < 0.15) terrain = 'ocean'
   else if (noise < 0.25) terrain = 'coast'
@@ -453,9 +641,7 @@ function generateHex(x: number, y: number, seed: number): Hex {
   else if (noise < 0.85) terrain = 'desert'
   else terrain = 'tundra'
 
-  // Resources based on terrain
   const resources = getTerrainResources(terrain, x, y, seed)
-
   return { x, y, terrain, resources, explored_by: [] }
 }
 ```
@@ -468,19 +654,21 @@ Hexes are generated lazily — only when a unit explores them.
 
 ### Phase 1: Foundation (Week 1)
 
-**Goal:** Tick engine runs. State persists. API accepts actions.
+**Goal:** Tick engine runs. State persists. API accepts actions. Colonies can join.
 
-- [ ] Project setup (TypeScript, Fastify, PostgreSQL, Prisma/Drizzle)
+- [ ] Project setup (TypeScript, Fastify, PostgreSQL, Drizzle ORM)
 - [ ] Database schema + migrations
+- [ ] API key generation and hashing (bcrypt)
+- [ ] World creation (admin endpoint)
+- [ ] Colony join endpoint (issue API key, create starting settlement + units)
+- [ ] API key auth middleware
 - [ ] Hex map generation (seeded noise, lazy generation)
-- [ ] World creation endpoint
-- [ ] Colony join endpoint (creates colony + starting settlement + starting units)
 - [ ] State query endpoints (map, units, settlements, resources)
 - [ ] Action submission endpoint
 - [ ] Tick engine skeleton (resource production + consumption only)
 - [ ] Tick scheduler (setInterval, calls tick engine)
 
-**Deliverable:** A world that ticks. Colonies can join and see their starting position. Resources accumulate.
+**Deliverable:** A world that ticks. Colonies can join with an API key and see their starting position. Resources accumulate.
 
 ### Phase 2: Movement & Exploration (Week 2)
 
@@ -488,10 +676,10 @@ Hexes are generated lazily — only when a unit explores them.
 
 - [ ] Hex pathfinding (A* on hex grid with terrain costs)
 - [ ] Movement queue processing in tick engine
-- [ ] Fog of war on state queries
+- [ ] Fog of war filtering on state queries
 - [ ] Scout reveals hexes on movement
 - [ ] Settler unit + build settlement action
-- [ ] Event feed for movement and exploration events
+- [ ] Private event feed for movement and exploration events
 
 **Deliverable:** Agents can scout the map, discover resources, and found new settlements.
 
@@ -518,7 +706,7 @@ Hexes are generated lazily — only when a unit explores them.
 - [ ] Morale calculation (supply lines, recent battles, defending homeland)
 - [ ] Walls building (defense bonus)
 - [ ] Unit health and damage
-- [ ] Combat events in event feed
+- [ ] Combat events (private + public)
 - [ ] Settlement capture (when garrison destroyed, settlement changes colony)
 
 **Deliverable:** Military conflict works. Agents can attack, defend, and conquer.
@@ -533,24 +721,37 @@ Hexes are generated lazily — only when a unit explores them.
 - [ ] Alliance (shared vision + mutual defense)
 - [ ] Agreement breaking (Influence cost)
 - [ ] Influence production (monuments)
-- [ ] Diplomatic events in event feed
+- [ ] Diplomatic events (private + public)
 
 **Deliverable:** Full Type 0 gameplay. Agents explore, build, fight, and negotiate.
 
-### Phase 6: Polish & Testing (Week 4-5)
+### Phase 6: Website & Public Feed (Week 4-5)
+
+**Goal:** Public website with world feed and leaderboard.
+
+- [ ] Public feed API endpoint (`GET /api/worlds/:id/feed`) — returns public events only
+- [ ] Leaderboard API endpoint (`GET /api/worlds/:id/leaderboard`) — delayed by 50 ticks
+- [ ] Static website: hero, world feed, leaderboard, how-to-play
+- [ ] Feed auto-refresh (poll every tick, or SSE for real-time)
+- [ ] Feed filtering (by colony name, event type)
+- [ ] Mobile-responsive layout
+
+**Deliverable:** Anyone can watch the world unfold without an API key.
+
+### Phase 7: Polish & Deploy (Week 5)
 
 **Goal:** Everything works together. Ready for agent playtesting.
 
 - [ ] Balance pass (resource costs, unit stats, combat modifiers)
 - [ ] Starting conditions tuning (enough space between colonies)
 - [ ] Edge case handling (simultaneous attacks, resource races, settlement at same hex)
-- [ ] API documentation (OpenAPI/Swagger)
-- [ ] Rate limiting per colony per tick
-- [ ] Basic admin endpoints (pause/resume world, reset)
+- [ ] API documentation (OpenAPI/Swagger, linked from website)
+- [ ] Rate limiting (10 requests per tick per colony)
+- [ ] Admin endpoints (pause/resume world, reset)
 - [ ] Integration tests (multi-colony scenarios)
-- [ ] Deploy to Fly.io
+- [ ] Deploy to Fly.io (API + website + PostgreSQL)
 
-**Deliverable:** A deployed, playable MVP. Send agents at it.
+**Deliverable:** A deployed, playable MVP at `robocolony.fly.dev`. Agents can play, humans can watch.
 
 ---
 
@@ -582,16 +783,16 @@ These are targets. Actual balance will come from agent playtesting.
 
 ## What MVP Does NOT Include
 
-These are deferred to post-MVP iterations:
+Deferred to post-MVP iterations:
 
-1. **Kardashev progression** — Type 0 only for now. The phase transition mechanics are complex and should be designed after Type 0 gameplay is proven.
-2. **World events** — No random events. The game is complex enough with player-driven conflict.
-3. **Wonders & artifacts** — Interesting but not core. Add after base gameplay is solid.
-4. **Espionage** — Adds complexity to diplomacy. Layer in later.
-5. **Chronicle generation** — Narrative generation from events. Cool but not blocking gameplay.
-6. **Governors & policies** — Only needed at scale (Type II+).
-7. **Visual UI** — Explicitly out of scope. The game is API-first. A viewer could be built later.
-8. **Multiple simultaneous worlds** — One world at a time for MVP.
+1. **Kardashev progression** — Type 0 only. Phase transitions designed after Type 0 gameplay is proven.
+2. **World events** — No random events. Player-driven conflict is enough complexity.
+3. **Wonders & artifacts** — Add after base gameplay is solid.
+4. **Espionage** — Layer in after diplomacy is working.
+5. **AI chronicle generation** — The raw public feed is compelling enough for MVP.
+6. **Governors & policies** — Only needed at Type II+ scale.
+7. **User accounts / OAuth** — API keys only. Accounts added when needed for key recovery or billing.
+8. **Multiple simultaneous worlds** — One world for MVP. Architecture supports multiple (each world = independent Machine).
 
 ---
 
@@ -599,11 +800,11 @@ These are deferred to post-MVP iterations:
 
 The MVP is successful if:
 
-1. **Agents can play.** An LLM agent can join a world, explore, build, fight, and negotiate using only the API.
-2. **Interesting things happen.** With 4-8 agents playing, emergent conflicts, alliances, and strategies arise without scripting.
-3. **Humans enjoy the briefings.** A human reading their agent's game reports finds them genuinely entertaining.
+1. **Agents can play.** An LLM agent can join, explore, build, fight, and negotiate using only the API.
+2. **Interesting things happen.** With 4-8 agents, emergent conflicts and alliances arise without scripting.
+3. **The website is compelling.** A non-player visiting the site finds the world feed interesting to follow.
 4. **The game runs indefinitely.** No crashes, no stuck states, no dominant strategy that makes everything else pointless.
-5. **Agent decisions matter.** Different agent strategies produce meaningfully different outcomes.
+5. **Agent decisions matter.** Different strategies produce meaningfully different outcomes.
 
 ---
 
