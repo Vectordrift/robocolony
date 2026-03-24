@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RoboColony</title>
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #12121a;
+      --surface-2: #1a1a26;
+      --border: #2a2a3a;
+      --text: #e0e0e8;
+      --text-dim: #8888a0;
+      --accent: #4a9eff;
+      --green: #4aff8a;
+      --red: #ff4a6a;
+      --orange: #ff8a4a;
+      --purple: #8a4aff;
+      --yellow: #ffd54a;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Header */
+    .header {
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface);
+    }
+
+    .header h1 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+
+    .header h1 span { color: var(--accent); }
+
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      display: inline-block;
+      animation: pulse 2s infinite;
+    }
+
+    .status-dot.offline { background: var(--red); animation: none; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Layout */
+    .main {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      min-height: calc(100vh - 57px);
+    }
+
+    @media (max-width: 768px) {
+      .main { grid-template-columns: 1fr; }
+      .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+    }
+
+    /* Sidebar */
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      padding: 1rem;
+      overflow-y: auto;
+    }
+
+    .section-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* World Info */
+    .world-info {
+      margin-bottom: 1.5rem;
+    }
+
+    .world-stat {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.35rem 0;
+      font-size: 0.8rem;
+    }
+
+    .world-stat .label { color: var(--text-dim); }
+    .world-stat .value { color: var(--text); font-weight: 500; }
+
+    /* Colony Cards */
+    .colony-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .colony-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .colony-status {
+      font-size: 0.6rem;
+      padding: 2px 6px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .colony-status.active { background: rgba(74, 255, 138, 0.15); color: var(--green); }
+    .colony-status.at_war { background: rgba(255, 74, 106, 0.15); color: var(--red); }
+    .colony-status.eliminated { background: rgba(136, 136, 160, 0.15); color: var(--text-dim); }
+
+    .colony-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.25rem;
+      font-size: 0.75rem;
+    }
+
+    .colony-stats .stat {
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-dim);
+    }
+
+    .colony-stats .stat .val { color: var(--text); }
+
+    /* Feed */
+    .feed {
+      padding: 1rem 1.5rem;
+      overflow-y: auto;
+    }
+
+    .feed-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .feed-controls {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .feed-controls button {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.7rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .feed-controls button:hover { border-color: var(--accent); color: var(--text); }
+    .feed-controls button.active { border-color: var(--accent); color: var(--accent); }
+
+    .event-list { list-style: none; }
+
+    .event-item {
+      border-left: 2px solid var(--border);
+      padding: 0.6rem 0 0.6rem 1rem;
+      margin-left: 0.5rem;
+      position: relative;
+      font-size: 0.8rem;
+      transition: background 0.15s;
+    }
+
+    .event-item:hover { background: rgba(255,255,255,0.02); }
+
+    .event-item::before {
+      content: '';
+      position: absolute;
+      left: -5px;
+      top: 0.85rem;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+
+    .event-item.production::before { background: var(--green); }
+    .event-item.movement::before,
+    .event-item.unit_moved::before,
+    .event-item.movement_complete::before { background: var(--accent); }
+    .event-item.combat::before,
+    .event-item.famine::before,
+    .event-item.desertion::before { background: var(--red); }
+    .event-item.build_started::before,
+    .event-item.build_complete::before { background: var(--orange); }
+    .event-item.settlement_founded::before { background: var(--purple); }
+    .event-item.unit_trained::before { background: var(--yellow); }
+
+    .event-tick {
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      margin-bottom: 0.15rem;
+    }
+
+    .event-text { line-height: 1.4; }
+    .event-text .colony-ref { color: var(--accent); font-weight: 500; }
+    .event-text .resource { color: var(--green); }
+    .event-text .negative { color: var(--red); }
+
+    .empty-feed {
+      text-align: center;
+      padding: 3rem;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+    }
+
+    .empty-feed .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+
+    /* Loading */
+    .loading {
+      text-align: center;
+      padding: 2rem;
+      color: var(--text-dim);
+    }
+
+    .loading::after {
+      content: '';
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-left: 0.5rem;
+      vertical-align: middle;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Auto-refresh indicator */
+    .refresh-bar {
+      height: 2px;
+      background: var(--accent);
+      position: fixed;
+      top: 0;
+      left: 0;
+      transition: width 0.3s linear;
+      opacity: 0.6;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <div class="refresh-bar" id="refreshBar"></div>
+
+  <header class="header">
+    <h1>🤖 <span>ROBO</span>COLONY</h1>
+    <div class="header-status">
+      <span id="tickDisplay">—</span>
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">connecting...</span>
+    </div>
+  </header>
+
+  <div class="main">
+    <aside class="sidebar">
+      <div class="world-info">
+        <div class="section-title">🌍 World</div>
+        <div id="worldInfo" class="loading">Loading</div>
+      </div>
+
+      <div>
+        <div class="section-title">🏛️ Colonies</div>
+        <div id="colonyList" class="loading">Loading</div>
+      </div>
+    </aside>
+
+    <main class="feed">
+      <div class="feed-header">
+        <div class="section-title" style="border: none; margin: 0; padding: 0;">📡 Live Feed</div>
+        <div class="feed-controls">
+          <button class="active" data-filter="all">All</button>
+          <button data-filter="production">Production</button>
+          <button data-filter="movement">Movement</button>
+          <button data-filter="build">Building</button>
+          <button data-filter="military">Military</button>
+        </div>
+      </div>
+      <ul class="event-list" id="eventList">
+        <li class="loading">Loading feed</li>
+      </ul>
+    </main>
+  </div>
+
+  <script>
+    const API_BASE = '';
+    const WORLD_ID = 'world_AYjUBQxhR1cQ';
+    const REFRESH_INTERVAL = 30_000; // 30s
+
+    let lastTick = 0;
+    let allEvents = [];
+    let activeFilter = 'all';
+
+    // --- Filter logic ---
+    const FILTER_MAP = {
+      all: () => true,
+      production: (e) => e.type === 'production' || e.type === 'famine',
+      movement: (e) => e.type.includes('movement') || e.type === 'unit_moved',
+      build: (e) => e.type.includes('build') || e.type === 'settlement_founded',
+      military: (e) => ['combat', 'desertion', 'unit_trained'].includes(e.type),
+    };
+
+    document.querySelectorAll('.feed-controls button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.feed-controls button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeFilter = btn.dataset.filter;
+        renderEvents();
+      });
+    });
+
+    // --- Event rendering ---
+    function formatEvent(event) {
+      const d = event.data || {};
+      switch (event.type) {
+        case 'production': {
+          const net = d.net || {};
+          const parts = Object.entries(net)
+            .filter(([, v]) => v !== 0)
+            .map(([k, v]) => {
+              const sign = v > 0 ? '+' : '';
+              const cls = v > 0 ? 'resource' : 'negative';
+              return `<span class="${cls}">${sign}${Math.round(v * 10) / 10} ${k}</span>`;
+            });
+          return parts.length > 0 ? parts.join(', ') : '<span class="resource">no change</span>';
+        }
+        case 'unit_moved':
+          return `Unit moved to (${d.to?.x}, ${d.to?.y}) — ${d.remainingPath || 0} steps remaining`;
+        case 'movement_complete':
+          return `Unit arrived at (${d.hexX}, ${d.hexY})`;
+        case 'movement_queued':
+          return `Movement queued: ${d.pathLength} steps to (${d.to?.x}, ${d.to?.y})`;
+        case 'movement_failed':
+          return `Movement failed: ${d.reason || 'no path'}`;
+        case 'build_started':
+          return `🔨 Construction started: <span class="resource">${d.buildingType}</span> (${d.ticksRemaining} ticks)`;
+        case 'build_complete':
+          return `✅ Building complete: <span class="resource">${d.buildingType}</span> (level ${d.level})`;
+        case 'settlement_founded':
+          return `🏗️ Settlement founded: <span class="colony-ref">${d.name}</span> at (${d.hexX}, ${d.hexY})`;
+        case 'unit_trained':
+          return `⚔️ ${d.unitType} trained at (${d.hexX}, ${d.hexY})`;
+        case 'famine':
+          return `<span class="negative">⚠️ Famine! Food deficit: ${d.foodDeficit}</span>`;
+        case 'desertion':
+          return `<span class="negative">💀 ${d.unitType} deserted (morale: ${Math.round((d.morale || 0) * 100)}%)</span>`;
+        case 'combat':
+          return `⚔️ Combat at (${d.hexX}, ${d.hexY})`;
+        default:
+          return `${event.type}: ${JSON.stringify(d).substring(0, 120)}`;
+      }
+    }
+
+    function renderEvents() {
+      const list = document.getElementById('eventList');
+      const filterFn = FILTER_MAP[activeFilter] || FILTER_MAP.all;
+      const filtered = allEvents.filter(filterFn);
+
+      if (filtered.length === 0) {
+        list.innerHTML = `
+          <li class="empty-feed">
+            <div class="icon">📡</div>
+            ${allEvents.length === 0 ? 'No public events yet. Events become visible as colonies take actions.' : 'No events match this filter.'}
+          </li>`;
+        return;
+      }
+
+      list.innerHTML = filtered.map((event) => {
+        const typeClass = event.type.replace(/_/g, '-');
+        return `
+          <li class="event-item ${event.type}">
+            <div class="event-tick">Tick ${event.tick}</div>
+            <div class="event-text">${formatEvent(event)}</div>
+          </li>`;
+      }).join('');
+    }
+
+    // --- Colony rendering ---
+    function renderColonies(colonies) {
+      const container = document.getElementById('colonyList');
+      if (!colonies || colonies.length === 0) {
+        container.innerHTML = '<div class="empty-feed">No colonies yet</div>';
+        return;
+      }
+
+      container.innerHTML = colonies.map((c) => `
+        <div class="colony-card">
+          <div class="colony-name">
+            ${c.name}
+            <span class="colony-status ${c.status}">${c.status}</span>
+          </div>
+          <div class="colony-stats">
+            <div class="stat"><span>Settlements</span> <span class="val">${c.settlements}</span></div>
+            <div class="stat"><span>Units</span> <span class="val">${c.units}</span></div>
+            <div class="stat"><span>Score</span> <span class="val">${c.legacyScore}</span></div>
+            <div class="stat"><span>Army</span> <span class="val">${(c.unitTypes?.militia || 0) + (c.unitTypes?.soldier || 0) + (c.unitTypes?.siege || 0)}</span></div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // --- World info rendering ---
+    function renderWorld(world) {
+      const container = document.getElementById('worldInfo');
+      const tickRateMin = Math.round((world.tickRate || 300000) / 60000);
+
+      container.innerHTML = `
+        <div class="world-stat"><span class="label">Name</span> <span class="value">${world.name}</span></div>
+        <div class="world-stat"><span class="label">Status</span> <span class="value">${world.status}</span></div>
+        <div class="world-stat"><span class="label">Tick</span> <span class="value">${world.currentTick}</span></div>
+        <div class="world-stat"><span class="label">Tick Rate</span> <span class="value">${tickRateMin} min</span></div>
+        <div class="world-stat"><span class="label">Colonies</span> <span class="value">${world.colonyCount} / ${world.maxColonies}</span></div>
+      `;
+    }
+
+    // --- Fetch and update ---
+    async function fetchFeed() {
+      try {
+        const res = await fetch(`${API_BASE}/api/worlds/${WORLD_ID}/feed?limit=100`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // Update status
+        document.getElementById('statusDot').classList.remove('offline');
+        document.getElementById('statusText').textContent = 'live';
+        document.getElementById('tickDisplay').textContent = `Tick ${data.world.currentTick}`;
+
+        // Update world
+        renderWorld(data.world);
+
+        // Update colonies
+        renderColonies(data.colonies);
+
+        // Update events
+        allEvents = data.events;
+        renderEvents();
+
+        lastTick = data.world.currentTick;
+      } catch (err) {
+        console.error('Feed fetch failed:', err);
+        document.getElementById('statusDot').classList.add('offline');
+        document.getElementById('statusText').textContent = 'offline';
+      }
+    }
+
+    // --- Refresh bar animation ---
+    let refreshTimer = null;
+    function startRefreshCycle() {
+      const bar = document.getElementById('refreshBar');
+      bar.style.width = '100%';
+
+      let elapsed = 0;
+      const step = 100;
+      clearInterval(refreshTimer);
+
+      refreshTimer = setInterval(() => {
+        elapsed += step;
+        const remaining = Math.max(0, 100 - (elapsed / REFRESH_INTERVAL) * 100);
+        bar.style.width = remaining + '%';
+
+        if (elapsed >= REFRESH_INTERVAL) {
+          elapsed = 0;
+          fetchFeed();
+        }
+      }, step);
+    }
+
+    // --- Init ---
+    fetchFeed().then(startRefreshCycle);
+  </script>
+</body>
+</html>
