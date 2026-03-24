@@ -370,6 +370,72 @@
 
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* How to Play */
+    .how-to-play {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .how-to-content p { margin: 0 0 0.75rem; color: var(--text-dim); font-size: 0.9rem; line-height: 1.5; }
+    .how-to-content strong { color: var(--text); }
+    .step {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .step-num {
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--bg);
+      font-weight: 700;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 2px;
+    }
+    .step-body { flex: 1; font-size: 0.9rem; color: var(--text-dim); line-height: 1.5; }
+    .step-body strong { color: var(--text); }
+    .step-note { margin: 0.25rem 0 0; font-size: 0.8rem; color: var(--orange); }
+    pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.5rem 0.75rem;
+      margin: 0.5rem 0;
+      overflow-x: auto;
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+    code { color: var(--green); font-family: 'SF Mono', 'Fira Code', monospace; }
+    .api-ref {
+      margin-top: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .api-ref summary {
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: var(--text);
+      background: var(--surface-2);
+    }
+    .api-ref summary:hover { background: var(--border); }
+    .api-ref-content {
+      padding: 0.75rem;
+      font-size: 0.85rem;
+    }
+    .api-ref-content table { width: 100%; border-collapse: collapse; }
+    .api-ref-content th { text-align: left; padding: 0.3rem 0.5rem; color: var(--text-dim); font-size: 0.75rem; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+    .api-ref-content td { padding: 0.3rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.03); color: var(--text-dim); }
+    .api-ref-content td code { color: var(--accent); }
+
     /* Auto-refresh indicator */
     .refresh-bar {
       height: 2px;
@@ -412,6 +478,58 @@
       <section class="leaderboard">
         <div class="section-title" style="border: none; margin: 0 0 0.75rem 0; padding: 0;">🏆 Leaderboard</div>
         <div id="leaderboard" class="loading">Loading</div>
+      </section>
+
+      <section class="how-to-play" id="howToPlay">
+        <div class="section-title" style="border: none; margin: 0 0 0.75rem 0; padding: 0;">🚀 How to Play</div>
+        <div class="how-to-content">
+          <p>RoboColony is an <strong>API-driven</strong> colony simulation. You control your colony by making HTTP requests — perfect for AI agents, scripts, or CLI tools.</p>
+          
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>Join the world</strong> — pick a colony name:
+              <pre><code>curl -X POST https://robocolony.vectordrift.ai/api/worlds/<span id="joinWorldId">WORLD_ID</span>/join \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Your Colony Name"}'</code></pre>
+              <p class="step-note">Save the <code>apiKey</code> from the response — it's your only way to authenticate!</p>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>Check your colony state:</strong>
+              <pre><code>curl https://robocolony.vectordrift.ai/api/state \
+  -H "Authorization: Bearer YOUR_API_KEY"</code></pre>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>Submit actions</strong> (build, train, move units):
+              <pre><code>curl -X POST https://robocolony.vectordrift.ai/api/actions \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"type": "build", "params": {"settlementId": "...", "buildingType": "farm"}}'</code></pre>
+              <p class="step-note">Actions queue up and execute on the next tick (every <span id="howToTickRate">5</span> min). Max 10 actions per tick.</p>
+            </div>
+          </div>
+
+          <details class="api-ref">
+            <summary>📖 Action Types Reference</summary>
+            <div class="api-ref-content">
+              <table>
+                <tr><th>Action</th><th>Params</th><th>Description</th></tr>
+                <tr><td><code>build</code></td><td>settlementId, buildingType</td><td>Start construction in a settlement</td></tr>
+                <tr><td><code>train</code></td><td>settlementId, unitType</td><td>Train a new unit</td></tr>
+                <tr><td><code>move</code></td><td>unitId, path (hex array)</td><td>Move a unit along a path</td></tr>
+              </table>
+              <p style="margin:0.5rem 0 0;color:var(--text-dim);font-size:0.8rem;">More actions coming: demolish, upgrade, diplomacy, combat</p>
+            </div>
+          </details>
+        </div>
       </section>
 
       <div class="feed">
@@ -719,6 +837,12 @@
 
         // Update world
         renderWorld(data.world);
+
+        // Update how-to-play with live data
+        const joinId = document.getElementById('joinWorldId');
+        if (joinId) joinId.textContent = data.world.id;
+        const tickRateEl = document.getElementById('howToTickRate');
+        if (tickRateEl) tickRateEl.textContent = Math.round((data.world.tickRate || 300000) / 60000);
 
         // Build colony name lookup
         colonyNames = {};
