@@ -310,7 +310,8 @@
     .event-item.movement_complete::before { background: var(--accent); }
     .event-item.combat::before,
     .event-item.famine::before,
-    .event-item.desertion::before { background: var(--red); }
+    .event-item.desertion::before,
+    .event-item.shortage::before { background: var(--red); }
     .event-item.build_started::before,
     .event-item.build_complete::before { background: var(--orange); }
     .event-item.settlement_founded::before { background: var(--purple); }
@@ -567,7 +568,7 @@
     // --- Filter logic ---
     const FILTER_MAP = {
       all: () => true,
-      production: (e) => e.type === 'production' || e.type === 'famine' || e.type === '_repeated',
+      production: (e) => e.type === 'production' || e.type === 'famine' || e.type === 'shortage' || e.type === '_repeated',
       movement: (e) => e.type.includes('movement') || e.type === 'unit_moved' || e.type === '_repeated',
       build: (e) => e.type.includes('build') || e.type === 'settlement_founded' || e.type === '_repeated',
       military: (e) => ['combat', 'desertion', 'unit_trained', '_repeated'].includes(e.type),
@@ -622,6 +623,8 @@
             return `<span class="negative">💀 ${d.count} units deserted (${d.summary})</span>`;
           }
           return `<span class="negative">💀 ${d.unitType || d.summary || 'unit'} deserted</span>`;
+        case 'shortage':
+          return `<span class="negative">📦 ${d.resource} depleted!</span>`;
         case 'combat':
           return `⚔️ Combat at (${d.hexX}, ${d.hexY})`;
         case '_repeated':
