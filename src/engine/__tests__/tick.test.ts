@@ -4,6 +4,7 @@ import {
   resolveMovement,
   resolveFoundSettlement,
   resolveBuilding,
+  resolveTrainUnit,
   calculateProduction,
   calculateBuildingUpkeep,
   calculateUnitUpkeep,
@@ -13,6 +14,8 @@ import {
   BUILD_TIME,
   VALID_BUILDING_TYPES,
   UNIT_UPKEEP,
+  UNIT_TRAINING_COSTS,
+  VALID_UNIT_TYPES,
   MORALE_LOSS_RATE,
   MORALE_RECOVERY_RATE,
   DESERTION_THRESHOLD,
@@ -101,6 +104,16 @@ function makeAction(overrides: Partial<QueuedAction> = {}): QueuedAction {
     colonyId: 'colony-1',
     type: 'move_unit',
     params: { unitId: 'unit-1', targetX: 3, targetY: 0 },
+    ...overrides,
+  };
+}
+
+function makeTrainAction(overrides: Partial<QueuedAction> = {}): QueuedAction {
+  return {
+    id: 'action-train-1',
+    colonyId: 'colony-1',
+    type: 'train_unit',
+    params: { settlementId: 'settlement-1', unitType: 'scout' },
     ...overrides,
   };
 }
@@ -1497,5 +1510,237 @@ describe('resolveTick', () => {
 
     // Original settlement should not be mutated
     expect(settlement.buildQueue).toEqual(originalBuildQueue);
+  });
+});
+
+// --- resolveTrainUnit ---
+
+describe('resolveTrainUnit', () => {
+  it('trains a unit at a settlement with barracks', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+    const action = makeTrainAction({ params: { settlementId: 'settlement-1', unitType: 'scout' } });
+
+    const result = resolveTrainUnit([colony], [settlement], [action]);
+
+    expect(result.newUnits).toHaveLength(1);
+    expect(result.newUnits[0].type).toBe('scout');
+    expect(result.newUnits[0].hexX).toBe(settlement.hexX);
+    expect(result.newUnits[0].hexY).toBe(settlement.hexY);
+    expect(result.newUnits[0].colonyId).toBe('colony-1');
+    expect(result.newUnits[0].health).toBe(100);
+    expect(result.newUnits[0].morale).toBe(1.0);
+    expect(result.actionResults[0].status).toBe('resolved');
+  });
+
+  it('deducts correct resources for each unit type', () => {
+    for (const unitType of VALID_UNIT_TYPES) {
+      const colony = makeColony({
+        resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+      });
+      const settlement = makeSettlement({
+        buildings: [{ type: 'barracks', level: 1 }],
+      });
+      const action = makeTrainAction({
+        id: `action-train-${unitType}`,
+        params: { settlementId: 'settlement-1', unitType },
+      });
+
+      resolveTrainUnit([colony], [settlement], [action]);
+
+      const cost = UNIT_TRAINING_COSTS[unitType];
+      for (const [resource, amount] of Object.entries(cost)) {
+        expect(colony.resources[resource as keyof typeof colony.resources])
+          .toBe(500 - (amount as number));
+      }
+    }
+  });
+
+  it('generates unit_trained event', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+    const action = makeTrainAction();
+
+    const result = resolveTrainUnit([colony], [settlement], [action]);
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0].type).toBe('unit_trained');
+    expect(result.events[0].colonyId).toBe('colony-1');
+    expect(result.events[0].settlementId).toBe('settlement-1');
+    expect(result.events[0].data.unitType).toBe('scout');
+  });
+
+  it('fails when settlement not found', () => {
+    const colony = makeColony();
+    const action = makeTrainAction({ params: { settlementId: 'nonexistent', unitType: 'scout' } });
+
+    const result = resolveTrainUnit([colony], [], [action]);
+
+    expect(result.newUnits).toHaveLength(0);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('not found');
+  });
+
+  it('fails when settlement belongs to different colony', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      colonyId: 'other-colony',
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+    const action = makeTrainAction();
+
+    const result = resolveTrainUnit([colony], [settlement], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('does not belong');
+  });
+
+  it('fails when settlement has no barracks', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+    });
+    const action = makeTrainAction();
+
+    const result = resolveTrainUnit([colony], [settlement], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('barracks');
+  });
+
+  it('fails for invalid unit type', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+    const action = makeTrainAction({ params: { settlementId: 'settlement-1', unitType: 'dragon' } });
+
+    const result = resolveTrainUnit([colony], [settlement], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Invalid unit type');
+  });
+
+  it('fails when colony has insufficient resources', () => {
+    const colony = makeColony({
+      resources: { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 },
+    });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+    const action = makeTrainAction();
+
+    const result = resolveTrainUnit([colony], [settlement], [action]);
+
+    expect(result.newUnits).toHaveLength(0);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Insufficient resources');
+  });
+
+  it('trains multiple units in one tick', () => {
+    const colony = makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+    const actions = [
+      makeTrainAction({ id: 'train-1', params: { settlementId: 'settlement-1', unitType: 'scout' } }),
+      makeTrainAction({ id: 'train-2', params: { settlementId: 'settlement-1', unitType: 'militia' } }),
+    ];
+
+    const result = resolveTrainUnit([colony], [settlement], actions);
+
+    expect(result.newUnits).toHaveLength(2);
+    expect(result.newUnits[0].type).toBe('scout');
+    expect(result.newUnits[1].type).toBe('militia');
+    expect(result.actionResults).toHaveLength(2);
+    expect(result.actionResults.every(ar => ar.status === 'resolved')).toBe(true);
+  });
+
+  it('generates unique unit IDs', () => {
+    const colony = makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+    const actions = [
+      makeTrainAction({ id: 'train-1', params: { settlementId: 'settlement-1', unitType: 'scout' } }),
+      makeTrainAction({ id: 'train-2', params: { settlementId: 'settlement-1', unitType: 'scout' } }),
+    ];
+
+    const result = resolveTrainUnit([colony], [settlement], actions);
+
+    expect(result.newUnits[0].id).not.toBe(result.newUnits[1].id);
+    expect(result.newUnits[0].id).toMatch(/^unit_/);
+    expect(result.newUnits[1].id).toMatch(/^unit_/);
+  });
+});
+
+// --- resolveTick with train_unit ---
+
+describe('resolveTick with train_unit', () => {
+  it('integrates train_unit action into full tick', () => {
+    const colony = makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+    const hexes = makeHexRing(0, 0);
+    const action = makeTrainAction();
+
+    const result = resolveTick([colony], [settlement], [], hexes, [action]);
+
+    // New unit should appear in result
+    const newUnit = result.units.find(u => u.type === 'scout');
+    expect(newUnit).toBeDefined();
+    expect(newUnit!.hexX).toBe(0);
+    expect(newUnit!.hexY).toBe(0);
+
+    // Action should be resolved
+    expect(result.actionResults.find(ar => ar.actionId === 'action-train-1')?.status).toBe('resolved');
+
+    // Event should be emitted
+    expect(result.events.some(e => e.type === 'unit_trained')).toBe(true);
+  });
+
+  it('trained unit is included in food upkeep calculation', () => {
+    const colony = makeColony({
+      resources: { food: 100, timber: 100, stone: 100, iron: 100, influence: 100 },
+    });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+    const hexes = makeHexRing(0, 0);
+
+    // Run tick WITHOUT training
+    const resultNoTrain = resolveTick(
+      [makeColony({ resources: { ...colony.resources } })],
+      [makeSettlement({ buildings: [{ type: 'barracks', level: 1 }] })],
+      [],
+      hexes,
+    );
+
+    // Run tick WITH training a soldier (food upkeep = 2)
+    const resultWithTrain = resolveTick(
+      [makeColony({ resources: { ...colony.resources } })],
+      [makeSettlement({ buildings: [{ type: 'barracks', level: 1 }] })],
+      [],
+      hexes,
+      [makeTrainAction({ params: { settlementId: 'settlement-1', unitType: 'soldier' } })],
+    );
+
+    // The colony with a trained soldier should have less food due to:
+    // 1. Training cost (25 food)
+    // 2. Soldier upkeep (2 food/tick)
+    expect(resultWithTrain.colonies[0].resources.food).toBeLessThan(
+      resultNoTrain.colonies[0].resources.food,
+    );
   });
 });
