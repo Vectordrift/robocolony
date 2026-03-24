@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { buildApp } from '../server.js';
+import { buildApp } from '../../server.js';
 
 describe('Health endpoint', () => {
   const app = buildApp();
