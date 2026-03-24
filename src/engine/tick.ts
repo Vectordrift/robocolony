@@ -423,8 +423,10 @@ export function resolveTick(
     movementQueue: u.movementQueue ? [...u.movementQueue] : [],
   }));
 
-  // --- Phase 0: Resolve actions (movement) ---
-  if (actions.length > 0) {
+  // --- Phase 0: Resolve actions (movement) + advance movement queues ---
+  // Always run movement resolution to advance existing queues, even without new actions
+  const hasMovingUnits = updatedUnits.some(u => u.movementQueue && u.movementQueue.length > 0);
+  if (actions.length > 0 || hasMovingUnits) {
     const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
     const moveResult = resolveMovement(updatedUnits, actions, hexLookup);
     events.push(...moveResult.events);
