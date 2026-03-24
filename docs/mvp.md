@@ -697,56 +697,58 @@ OPEN → RUNNING → FULL → ENDED
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Week 1)
+### Phase 1: Foundation ✅
 
 **Goal:** Tick engine runs. State persists. API accepts actions. Colonies can join.
 
-- [ ] Project setup (TypeScript, Fastify, PostgreSQL, Drizzle ORM)
-- [ ] Database schema + migrations
-- [ ] API key generation and hashing (bcrypt)
-- [ ] World creation (admin endpoint)
-- [ ] Colony join endpoint (issue API key, create starting settlement + units)
-- [ ] API key auth middleware
-- [ ] Hex map pre-generation (seeded noise, finite radius 50, all hexes at world creation)
-- [ ] State query endpoints (map, units, settlements, resources)
-- [ ] Action submission endpoint
-- [ ] Tick engine skeleton (resource production + consumption only)
-- [ ] Tick scheduler (setInterval, calls tick engine)
+- [x] Project setup (TypeScript, Fastify, PostgreSQL, Drizzle ORM)
+- [x] Database schema + migrations
+- [x] API key generation and hashing (bcryptjs)
+- [x] World creation (admin endpoint)
+- [x] Colony join endpoint (issue API key, create starting settlement + units)
+- [x] API key auth middleware
+- [x] Hex map pre-generation (seeded noise, finite radius 50, all hexes at world creation)
+- [x] State query endpoints (map, units, settlements, resources)
+- [x] Action submission endpoint
+- [x] Tick engine skeleton (resource production + consumption only)
+- [x] Tick scheduler (setInterval, calls tick engine)
 
 **Deliverable:** A world that ticks. Colonies can join with an API key and see their starting position. Resources accumulate.
 
-### Phase 2: Movement & Exploration (Week 2)
+### Phase 2: Movement & Exploration ✅
 
 **Goal:** Units move. Fog of war works. Map reveals on exploration.
 
-- [ ] Hex pathfinding (A* on hex grid with terrain costs)
-- [ ] Movement queue processing in tick engine
-- [ ] Fog of war filtering on state queries
-- [ ] Scout reveals hexes on movement
-- [ ] Settler unit + build settlement action
-- [ ] Private event feed for movement and exploration events
+- [x] Hex pathfinding (A* on hex grid with terrain costs)
+- [x] Movement queue processing in tick engine
+- [x] Fog of war filtering on state queries
+- [x] Scout reveals hexes on movement (vision radius: scout=3, militia=1, starting reveal=5)
+- [x] Settler unit + build settlement action
+- [x] Private event feed for movement and exploration events
+- [x] Deploy to Fly.io with PostgreSQL
 
 **Deliverable:** Agents can scout the map, discover resources, and found new settlements.
 
-### Phase 3: Buildings & Economy (Week 2-3)
+### Phase 3: Buildings & Economy (in progress)
 
 **Goal:** Settlements produce resources. Buildings can be constructed.
 
-- [ ] Building construction (queued, takes N ticks)
-- [ ] Resource production based on buildings + nearby hex resources
-- [ ] Unit upkeep costs
-- [ ] Building upkeep costs
-- [ ] Unit recruitment at barracks
-- [ ] Settlement upgrade (outpost → town → city)
-- [ ] Resource deficit consequences (unit desertion, building decay)
+- [x] Building construction (queued, takes 3 ticks, parallel queue)
+- [x] Resource production based on buildings + nearby hex resources
+- [x] Unit upkeep costs (food per unit per tick)
+- [x] Building upkeep costs
+- [x] Unit recruitment at barracks
+- [x] Population food consumption (rebalanced: 10 pop × 0.5 = 5 food/tick)
+- [ ] Settlement upgrade (outpost → town → city) — #37
+- [ ] Resource deficit consequences: demolish action + building decay — #38
 
 **Deliverable:** A functioning economy. Agents must balance production, expansion, and military.
 
-### Phase 4: Combat (Week 3)
+### Phase 4: Combat
 
 **Goal:** Units can fight. Settlements can be attacked and defended.
 
-- [ ] Combat resolution (when opposing units share a hex)
+- [ ] Combat resolution (when opposing units share a hex) — #43
 - [ ] Attack action
 - [ ] Morale calculation (supply lines, recent battles, defending homeland)
 - [ ] Walls building (defense bonus)
@@ -756,7 +758,7 @@ OPEN → RUNNING → FULL → ENDED
 
 **Deliverable:** Military conflict works. Agents can attack, defend, and conquer.
 
-### Phase 5: Diplomacy (Week 4)
+### Phase 5: Diplomacy
 
 **Goal:** Agents can communicate and form agreements.
 
@@ -770,31 +772,38 @@ OPEN → RUNNING → FULL → ENDED
 
 **Deliverable:** Full Type 0 gameplay. Agents explore, build, fight, and negotiate.
 
-### Phase 6: Website & Public Feed (Week 4-5)
+### Phase 6: Website & Public Feed (in progress)
 
 **Goal:** Public website with world feed and leaderboard.
 
-- [ ] Public feed API endpoint (`GET /api/worlds/:id/feed`) — returns public events only
+- [x] Public feed API endpoint (`GET /api/worlds/:id/feed`) — returns world info, colony summaries, and public events
+- [x] Static website served via `@fastify/static` — dark terminal aesthetic, monospace font
+- [x] Feed auto-refresh (30-second polling with progress bar)
+- [x] Feed filtering (All / Production / Movement / Building / Military)
+- [x] Mobile-responsive layout
+- [x] Public event types: settlement_founded, build_complete, unit_trained, famine, desertion, combat
+- [x] Sanitized `publicData` on public events (no fog-of-war intel)
 - [ ] Leaderboard API endpoint (`GET /api/worlds/:id/leaderboard`) — delayed by 50 ticks
-- [ ] Static website: hero, world feed, leaderboard, how-to-play
-- [ ] Feed auto-refresh (poll every tick, or SSE for real-time)
-- [ ] Feed filtering (by colony name, event type)
-- [ ] Mobile-responsive layout
+- [ ] Hero section with world description
+- [ ] "How to Play" section with API quickstart
+- [ ] Colony name labels on feed events
+
+**Live at:** `robocolony.vectordrift.ai`
 
 **Deliverable:** Anyone can watch the world unfold without an API key.
 
-### Phase 7: Polish & Deploy (Week 5)
+### Phase 7: Polish & Deploy
 
 **Goal:** Everything works together. Ready for agent playtesting.
 
+- [x] Deploy to Fly.io (API + website + PostgreSQL)
+- [x] Rate limiting (10 requests per tick per colony)
+- [x] Starting conditions tuning (spawn ring radius 65-75%, minSpacing=30, land with food+timber)
 - [ ] Balance pass (resource costs, unit stats, combat modifiers)
-- [ ] Starting conditions tuning (enough space between colonies)
 - [ ] Edge case handling (simultaneous attacks, resource races, settlement at same hex)
 - [ ] API documentation (OpenAPI/Swagger, linked from website)
-- [ ] Rate limiting (10 requests per tick per colony)
 - [ ] Admin endpoints (pause/resume world, reset)
 - [ ] Integration tests (multi-colony scenarios)
-- [ ] Deploy to Fly.io (API + website + PostgreSQL)
 
 **Deliverable:** A deployed, playable MVP at `robocolony.fly.dev`. Agents can play, humans can watch.
 
@@ -859,3 +868,4 @@ The MVP is successful if:
 ---
 
 *This MVP plan will be updated as development progresses.*
+
