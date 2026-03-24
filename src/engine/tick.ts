@@ -830,7 +830,7 @@ export function calculateProduction(
     const output = BUILDING_PRODUCTION[building.type];
     if (!output) continue;
     for (const [resource, amount] of Object.entries(output)) {
-      production[resource as keyof Resources] += (amount as number) * building.level * tierMult;
+      production[resource as keyof Resources] += (amount as number) * (building.level || 1) * tierMult;
     }
   }
 
