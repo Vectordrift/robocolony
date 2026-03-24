@@ -1,4 +1,4 @@
-// Game engine — tick resolution, map generation, combat
+// Game engine — tick resolution, map generation, combat, pathfinding
 export { hexDistance, hexDistanceFromOrigin, hexesInRadius, hexNeighbors, hexRing } from './hex.js';
 export type { HexCoord } from './hex.js';
 export { createRng, noiseAt, multiOctaveNoise } from './noise.js';
@@ -8,3 +8,5 @@ export { resolveTick, calculateProduction, calculateBuildingUpkeep, calculateUni
 export type { Colony, Settlement, Unit, HexTileState, Resources, TickResult, TickEvent } from './tick.js';
 export { TickScheduler } from './scheduler.js';
 export type { SchedulerOptions } from './scheduler.js';
+export { findPath, movementStepsThisTick, createHexLookup, TERRAIN_COST, UNIT_SPEED, VISION_RADIUS } from './pathfinding.js';
+export type { HexLookup } from './pathfinding.js';
