@@ -9,7 +9,7 @@ import { eq, and } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema/index.js';
 import { resolveTick } from './tick.js';
-import type { Colony, Settlement, Unit, HexTileState, Resources, Building } from './tick.js';
+import type { Colony, Settlement, Unit, HexTileState, Resources, Building, QueuedAction } from './tick.js';
 import { nanoid } from 'nanoid';
 
 export interface SchedulerOptions {
@@ -82,6 +82,8 @@ export class TickScheduler {
         return;
       }
 
+      const newTick = world.currentTick + 1;
+
       const dbColonies = await this.db
         .select()
         .from(schema.colonies)
@@ -101,6 +103,18 @@ export class TickScheduler {
         .select()
         .from(schema.hexes)
         .where(eq(schema.hexes.worldId, this.worldId));
+
+      // Load queued actions for this tick
+      const dbActions = await this.db
+        .select()
+        .from(schema.actions)
+        .where(
+          and(
+            eq(schema.actions.worldId, this.worldId),
+            eq(schema.actions.tick, newTick),
+            eq(schema.actions.status, 'queued'),
+          ),
+        );
 
       // Map DB rows to tick engine types
       const colonies: Colony[] = dbColonies.map(c => ({
@@ -133,6 +147,7 @@ export class TickScheduler {
         hexY: u.hexY,
         health: u.health,
         morale: u.morale,
+        movementQueue: (u.movementQueue ?? []) as Unit['movementQueue'],
       }));
 
       const hexes: HexTileState[] = dbHexes.map(h => ({
@@ -143,9 +158,15 @@ export class TickScheduler {
         settlementId: h.settlementId,
       }));
 
+      const queuedActions: QueuedAction[] = dbActions.map(a => ({
+        id: a.id,
+        colonyId: a.colonyId,
+        type: a.type,
+        params: a.params as Record<string, unknown>,
+      }));
+
       // Resolve tick
-      const result = resolveTick(colonies, settlements, units, hexes);
-      const newTick = world.currentTick + 1;
+      const result = resolveTick(colonies, settlements, units, hexes, queuedActions);
 
       // Persist results
       await this.db.transaction(async (tx) => {
@@ -163,11 +184,16 @@ export class TickScheduler {
             .where(eq(schema.colonies.id, colony.id));
         }
 
-        // Update unit morale
+        // Update units (morale, position, movementQueue)
         for (const unit of result.units) {
           await tx
             .update(schema.units)
-            .set({ morale: unit.morale })
+            .set({
+              morale: unit.morale,
+              hexX: unit.hexX,
+              hexY: unit.hexY,
+              movementQueue: unit.movementQueue ?? [],
+            })
             .where(eq(schema.units.id, unit.id));
         }
 
@@ -176,6 +202,26 @@ export class TickScheduler {
           await tx
             .delete(schema.units)
             .where(eq(schema.units.id, unitId));
+        }
+
+        // Update action statuses
+        for (const ar of result.actionResults) {
+          await tx
+            .update(schema.actions)
+            .set({ status: ar.status, result: ar.result ?? null })
+            .where(eq(schema.actions.id, ar.actionId));
+        }
+
+        // Mark any remaining queued actions as resolved (non-movement actions not yet handled)
+        // This prevents them from being re-processed next tick
+        const processedIds = new Set(result.actionResults.map(ar => ar.actionId));
+        for (const action of dbActions) {
+          if (!processedIds.has(action.id)) {
+            await tx
+              .update(schema.actions)
+              .set({ status: 'resolved', result: 'Action type not yet implemented' })
+              .where(eq(schema.actions.id, action.id));
+          }
         }
 
         // Insert events
