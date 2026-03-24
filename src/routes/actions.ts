@@ -198,7 +198,6 @@ export async function actionRoutes(app: FastifyInstance) {
       }
       body.actions = body.actions.slice(0, remainingSlots);
       truncated = true;
-    });
     }
 
     // Validate all actions first (fail fast)
