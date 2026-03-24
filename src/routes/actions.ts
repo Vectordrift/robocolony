@@ -187,15 +187,18 @@ export async function actionRoutes(app: FastifyInstance) {
     const currentQueuedCount = Number(existingCount[0]?.count ?? 0);
     const remainingSlots = MAX_ACTIONS_PER_TICK - currentQueuedCount;
 
+    // Truncate batch to fit remaining slots (partial accept)
+    let truncated = false;
     if (body.actions.length > remainingSlots) {
-      return reply.code(429).send({
-        error: 'rate_limit',
-        message: `Batch of ${body.actions.length} actions exceeds the limit. Max ${MAX_ACTIONS_PER_TICK} actions per tick, you have ${currentQueuedCount} already queued and ${remainingSlots} slot${remainingSlots === 1 ? '' : 's'} remaining. Send ${remainingSlots} or fewer actions.`,
-        submitted: body.actions.length,
-        queued: currentQueuedCount,
-        remaining: remainingSlots,
-        maxPerTick: MAX_ACTIONS_PER_TICK,
-      });
+      if (remainingSlots <= 0) {
+        return reply.code(429).send({
+          error: 'rate_limit',
+          message: `Rate limit: max ${MAX_ACTIONS_PER_TICK} actions per tick. You have ${currentQueuedCount} queued, 0 remaining.`,
+        });
+      }
+      body.actions = body.actions.slice(0, remainingSlots);
+      truncated = true;
+    });
     }
 
     // Validate all actions first (fail fast)
@@ -251,6 +254,10 @@ export async function actionRoutes(app: FastifyInstance) {
       submitted: inserted.length,
       tick: nextTick,
       actions: inserted,
+      ...(truncated ? {
+        truncated: true,
+        message: `Batch truncated: ${inserted.length} of your actions accepted (max ${MAX_ACTIONS_PER_TICK}/tick, ${currentQueuedCount} already queued).`,
+      } : {}),
     });
   });
 
