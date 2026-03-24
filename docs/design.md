@@ -62,7 +62,21 @@ The world is a hex grid. Hexes are the fundamental unit of space at every scale:
 - **Type II:** Each hex is a planetary body or orbital zone within a star system.
 - **Type III:** Each hex is a star system. Each system contains a sub-map of planetary hexes.
 
-The map is **procedurally generated** and **expands at the edges**. There is always more frontier to explore. New territory is generated as scouts approach the edge of known space.
+The map is **procedurally generated** with a **finite boundary**. At Type 0, the world is a bounded landmass surrounded by impassable ocean. All hexes are pre-generated at world creation (seeded noise), creating a fixed-size arena that drives competition for limited space and resources.
+
+**World size (Type 0):** Radius 50 hexes from center → ~7,850 total hexes, ~5,500 land hexes (70% land, 30% ocean/coast). Enough room for 8 colonies with ~690 land hexes each.
+
+**Colony placement:** Colonies spawn in a ring pattern at radius ~35 from center, spaced 30-40 hexes apart. This ensures equal access to both contested center territory and frontier behind them.
+
+**World lifecycle:**
+- **OPEN** — Accepting colonies. Tick engine starts when first colony joins.
+- **RUNNING** — Normal gameplay. New colonies can join while unclaimed buildable land > 300 hexes.
+- **FULL** — Too little unclaimed land. No new colonies. Join endpoint returns available worlds.
+- **ENDED** — Victory condition met (>50% land control, wonder completed, or last rival eliminated). World becomes read-only archive.
+
+**Finite maps drive progression:** When the world is full and resources exhausted, colonies naturally need the next layer (orbital/star system) — this is what triggers the Kardashev phase transition. Infinite maps would remove this pressure.
+
+**Multi-world:** When a world fills up, a new world is created (new seed, fresh map). Post-MVP, colonies that reach Type II can discover other worlds (other server instances). Each world runs independently.
 
 ### Hex Properties
 
