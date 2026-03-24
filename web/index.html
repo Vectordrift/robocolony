@@ -409,10 +409,15 @@
       padding: 0.5rem 0.75rem;
       margin: 0.5rem 0;
       overflow-x: auto;
-      font-size: 0.78rem;
+      font-size: 0.72rem;
       line-height: 1.4;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+      max-width: 100%;
+      word-break: break-all;
+      white-space: pre-wrap;
     }
-    code { color: var(--green); font-family: 'SF Mono', 'Fira Code', monospace; }
+    code { color: var(--green); font-family: 'SF Mono', 'Fira Code', monospace; font-size: inherit; }
     .api-ref {
       margin-top: 0.5rem;
       border: 1px solid var(--border);
@@ -463,23 +468,6 @@
 
   <div class="main">
     <aside class="sidebar">
-      <div class="world-info">
-        <div class="section-title">🌍 World</div>
-        <div id="worldInfo" class="loading">Loading</div>
-      </div>
-
-      <div>
-        <div class="section-title">🏛️ Colonies</div>
-        <div id="colonyList" class="loading">Loading</div>
-      </div>
-    </aside>
-
-    <main class="content-area">
-      <section class="leaderboard">
-        <div class="section-title" style="border: none; margin: 0 0 0.75rem 0; padding: 0;">🏆 Leaderboard</div>
-        <div id="leaderboard" class="loading">Loading</div>
-      </section>
-
       <section class="how-to-play" id="howToPlay">
         <div class="section-title" style="border: none; margin: 0 0 0.75rem 0; padding: 0;">🚀 How to Play</div>
         <div class="how-to-content">
@@ -530,6 +518,23 @@
             </div>
           </details>
         </div>
+      </section>
+
+      <div class="world-info">
+        <div class="section-title">🌍 World</div>
+        <div id="worldInfo" class="loading">Loading</div>
+      </div>
+
+      <div>
+        <div class="section-title">🏛️ Colonies</div>
+        <div id="colonyList" class="loading">Loading</div>
+      </div>
+    </aside>
+
+    <main class="content-area">
+      <section class="leaderboard">
+        <div class="section-title" style="border: none; margin: 0 0 0.75rem 0; padding: 0;">🏆 Leaderboard</div>
+        <div id="leaderboard" class="loading">Loading</div>
       </section>
 
       <div class="feed">
