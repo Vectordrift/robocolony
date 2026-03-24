@@ -8,6 +8,7 @@ import {
   calculateProduction,
   calculateBuildingUpkeep,
   calculateUnitUpkeep,
+  calculatePopulationConsumption,
   TIER_MULTIPLIER,
   BUILDING_PRODUCTION,
   BUILDING_COSTS,
@@ -22,6 +23,7 @@ import {
   FOUNDING_COST,
   MIN_SETTLEMENT_DISTANCE,
   FOUNDING_REVEAL_RADIUS,
+  POP_FOOD_CONSUMPTION,
   type Colony,
   type Settlement,
   type Unit,
@@ -157,14 +159,14 @@ function makePlainGrid(radius: number): HexTileState[] {
 // --- calculateProduction ---
 
 describe('calculateProduction', () => {
-  it('returns base population food with no buildings', () => {
+  it('returns only hex yields with no buildings and no population production', () => {
     const settlement = makeSettlement({ population: 10 });
     const hexes = makeHexRing(0, 0);
     const production = calculateProduction(settlement, hexes);
 
-    // 10 * 0.1 = 1.0 from population
-    // 7 hexes * 3 food * 0.5 = 10.5 from hex yields
-    expect(production.food).toBeCloseTo(11.5);
+    // No population food production (removed)
+    // 7 hexes * 3 food * 0.5 = 10.5 from hex yields only
+    expect(production.food).toBeCloseTo(10.5);
   });
 
   it('calculates building production scaled by tier', () => {
@@ -175,8 +177,8 @@ describe('calculateProduction', () => {
     });
     const production = calculateProduction(settlement, []);
 
-    // farm: 3 * 2 (level) * 2.0 (city) = 12
-    expect(production.food).toBeCloseTo(12);
+    // farm: 10 * 2 (level) * 2.0 (city) = 40
+    expect(production.food).toBeCloseTo(40);
   });
 
   it('sums production from multiple buildings', () => {
@@ -191,9 +193,9 @@ describe('calculateProduction', () => {
     });
     const production = calculateProduction(settlement, []);
 
-    expect(production.food).toBeCloseTo(3);   // farm: 3
-    expect(production.timber).toBeCloseTo(3); // lumberMill: 3
-    expect(production.iron).toBeCloseTo(2);   // mine: 2
+    expect(production.food).toBeCloseTo(10);   // farm: 10
+    expect(production.timber).toBeCloseTo(6);  // lumberMill: 6
+    expect(production.iron).toBeCloseTo(3);    // mine: 3
   });
 
   it('includes nearby hex resource yields at 50%', () => {
@@ -206,6 +208,7 @@ describe('calculateProduction', () => {
 
     expect(production.timber).toBeCloseTo(3); // 6 * 0.5
   });
+
   it('handles buildings with missing level property (regression #40)', () => {
     const settlement = makeSettlement({
       tier: 'outpost',
@@ -215,8 +218,8 @@ describe('calculateProduction', () => {
     });
     const production = calculateProduction(settlement, []);
 
-    // Should default to level 1: farm produces 3 food * 1 * 1.0 = 3
-    expect(production.food).toBeCloseTo(3);
+    // Should default to level 1: farm produces 10 food * 1 * 1.0 = 10
+    expect(production.food).toBeCloseTo(10);
     // Ensure no NaN values
     expect(Number.isNaN(production.food)).toBe(false);
     expect(Number.isNaN(production.timber)).toBe(false);
@@ -244,6 +247,14 @@ describe('calculateProduction', () => {
     // Food and timber specifically should be > starting values (production happened)
     expect(result.colonies[0].resources.food).toBeGreaterThan(0);
     expect(result.colonies[0].resources.timber).toBeGreaterThan(0);
+  });
+
+  it('does not include passive population food production', () => {
+    const settlement = makeSettlement({ population: 100 });
+    const production = calculateProduction(settlement, []);
+
+    // No buildings, no hexes, no population food production
+    expect(production.food).toBe(0);
   });
 
 });
@@ -296,10 +307,32 @@ describe('calculateUnitUpkeep', () => {
   it('sums food upkeep for all units', () => {
     const units = [
       makeUnit({ type: 'scout' }),    // 1
-      makeUnit({ type: 'soldier' }),   // 2
-      makeUnit({ type: 'siege' }),     // 3
+      makeUnit({ type: 'soldier' }),   // 3
+      makeUnit({ type: 'siege' }),     // 4
     ];
-    expect(calculateUnitUpkeep(units)).toBe(6);
+    expect(calculateUnitUpkeep(units)).toBe(8);
+  });
+});
+
+// --- calculatePopulationConsumption ---
+
+describe('calculatePopulationConsumption', () => {
+  it('returns population * POP_FOOD_CONSUMPTION', () => {
+    const settlement = makeSettlement({ population: 10 });
+    expect(calculatePopulationConsumption(settlement)).toBe(10 * POP_FOOD_CONSUMPTION);
+    expect(calculatePopulationConsumption(settlement)).toBe(5);
+  });
+
+  it('returns 0 for zero population', () => {
+    const settlement = makeSettlement({ population: 0 });
+    expect(calculatePopulationConsumption(settlement)).toBe(0);
+  });
+
+  it('scales linearly with population', () => {
+    const s20 = makeSettlement({ population: 20 });
+    const s50 = makeSettlement({ population: 50 });
+    expect(calculatePopulationConsumption(s20)).toBe(10);
+    expect(calculatePopulationConsumption(s50)).toBe(25);
   });
 });
 
@@ -329,7 +362,8 @@ describe('resolveBuilding', () => {
   it('deducts correct resources for each building type', () => {
     for (const bType of VALID_BUILDING_TYPES) {
       const cost = BUILDING_COSTS[bType];
-      const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 } });
+      const startRes = { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 };
+      const colony = makeColony({ resources: { ...startRes } });
       const settlement = makeSettlement({ id: `s-${bType}` });
       const action = makeBuildAction({
         id: `act-${bType}`,
@@ -1042,7 +1076,8 @@ describe('resolveTick', () => {
     const hexes = makeHexRing(0, 0);
     const result = resolveTick([colony], [settlement], [], hexes);
 
-    // Food: 3 (farm) + 1.0 (pop) + 10.5 (hexes) = 14.5 produced, 0 upkeep
+    // Food: 10 (farm) + 10.5 (hexes) = 20.5 produced, 5 (pop consumption) upkeep
+    // Net: 15.5. Starting 100 + 15.5 = 115.5
     expect(result.colonies[0].resources.food).toBeGreaterThan(100);
     expect(result.events.some(e => e.type === 'production')).toBe(true);
   });
@@ -1051,13 +1086,13 @@ describe('resolveTick', () => {
     const colony = makeColony({ resources: { food: 10, timber: 50, stone: 30, iron: 10, influence: 50 } });
     const settlement = makeSettlement({ population: 0 });
     const units = [
-      makeUnit({ type: 'soldier' }), // 2 food
-      makeUnit({ type: 'soldier', id: 'unit-2' }), // 2 food
+      makeUnit({ type: 'soldier' }), // 3 food
+      makeUnit({ type: 'soldier', id: 'unit-2' }), // 3 food
     ];
-    // No hexes around settlement = no hex yield
+    // No hexes around settlement = no hex yield, no pop consumption
     const result = resolveTick([colony], [settlement], units, []);
 
-    // Net food = 0 production - 4 upkeep = -4. Starting 10 + (-4) = 6
+    // Net food = 0 production - 6 upkeep = -6. Starting 10 + (-6) = 4
     expect(result.colonies[0].resources.food).toBeLessThan(10);
   });
 
@@ -1065,7 +1100,7 @@ describe('resolveTick', () => {
     const colony = makeColony({ resources: { food: 0, timber: 50, stone: 30, iron: 10, influence: 50 } });
     const settlement = makeSettlement({ population: 0 });
     const units = [
-      makeUnit({ type: 'siege' }), // 3 food upkeep
+      makeUnit({ type: 'siege' }), // 4 food upkeep
     ];
     const result = resolveTick([colony], [settlement], units, []);
 
@@ -1095,7 +1130,7 @@ describe('resolveTick', () => {
   it('recovers morale when food is positive', () => {
     const colony = makeColony({ resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 50 } });
     const settlement = makeSettlement({
-      buildings: [{ type: 'farm', level: 3 }],
+      buildings: [{ type: 'farm', level: 1 }],
       population: 10,
     });
     const units = [
@@ -1104,6 +1139,8 @@ describe('resolveTick', () => {
     const hexes = makeHexRing(0, 0);
     const result = resolveTick([colony], [settlement], units, hexes);
 
+    // Farm produces 10 food, hex yields ~10.5, pop consumes 5, scout costs 1
+    // Net food positive, so morale recovers
     expect(result.units[0].morale).toBeCloseTo(0.5 + MORALE_RECOVERY_RATE);
   });
 
@@ -1122,22 +1159,22 @@ describe('resolveTick', () => {
     const s1 = makeSettlement({ id: 's1', colonyId: 'c1', buildings: [{ type: 'farm', level: 2 }], population: 10 });
     const s2 = makeSettlement({ id: 's2', colonyId: 'c2', hexX: 5, hexY: 5, population: 0 });
 
-    const u2 = makeUnit({ id: 'u2', colonyId: 'c2', type: 'siege' }); // 3 food
+    const u2 = makeUnit({ id: 'u2', colonyId: 'c2', type: 'siege' }); // 4 food upkeep
 
     const hexes = makeHexRing(0, 0);
     const result = resolveTick([colony1, colony2], [s1, s2], [u2], hexes);
 
-    // Colony 1 should gain food (farm + hexes)
+    // Colony 1 should gain food (farm lvl2: 20 food + hexes - 5 pop consumption)
     expect(result.colonies.find(c => c.id === 'c1')!.resources.food).toBeGreaterThan(100);
 
-    // Colony 2 should lose food (no production, 3 food upkeep, started at 5)
+    // Colony 2 should lose food (no production, 4 food upkeep, started at 5)
     const c2Resources = result.colonies.find(c => c.id === 'c2')!.resources.food;
     expect(c2Resources).toBeLessThan(5);
   });
 
   it('caps morale recovery at 1.0', () => {
-    const colony = makeColony();
-    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 3 }], population: 20 });
+    const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 } });
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 3 }], population: 10 });
     const units = [makeUnit({ morale: 0.99 })];
     const hexes = makeHexRing(0, 0);
     const result = resolveTick([colony], [settlement], units, hexes);
@@ -1684,6 +1721,61 @@ describe('resolveTrainUnit', () => {
 
 // --- resolveTick with train_unit ---
 
+// --- Population consumption integration ---
+
+describe('resolveTick population consumption', () => {
+  it('population consumes food proportional to POP_FOOD_CONSUMPTION', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 50 } });
+    // No buildings, no hexes, population 10 → consumes 5 food/tick
+    const settlement = makeSettlement({ population: 10 });
+
+    const result = resolveTick([colony], [settlement], [], []);
+
+    // Net food = 0 produced - 5 consumed = -5. Starting 100 - 5 = 95
+    expect(result.colonies[0].resources.food).toBe(95);
+  });
+
+  it('famine triggers with realistic starting colony and large army', () => {
+    // Starting colony with farm, but too many units
+    const colony = makeColony({ resources: { food: 50, timber: 50, stone: 30, iron: 10, influence: 50 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+      population: 10,
+    });
+    // 3 soldiers (3 food each) + 2 siege (4 food each) = 17 food upkeep
+    // Plus pop: 5 food consumption
+    // Farm production: 10 food
+    // Net: 10 - 17 - 5 = -12 food
+    const units = [
+      makeUnit({ id: 'u1', type: 'soldier' }),
+      makeUnit({ id: 'u2', type: 'soldier' }),
+      makeUnit({ id: 'u3', type: 'soldier' }),
+      makeUnit({ id: 'u4', type: 'siege' }),
+      makeUnit({ id: 'u5', type: 'siege' }),
+    ];
+
+    const result = resolveTick([colony], [settlement], units, []);
+
+    // Food should go negative due to heavy military upkeep + pop consumption
+    // (50 + 10 - 22 = 38, but that's with hex yields. Without hexes: 50 + 10 - 22 = 38)
+    // Actually: produced=10 (farm), consumed=5 (pop) + 17 (units) = 22
+    // Net = 10 - 22 = -12. Starting 50 - 12 = 38. Not negative yet.
+    // But after a few ticks it would be.
+    // With starting food 10 instead:
+    const colony2 = makeColony({ resources: { food: 10, timber: 50, stone: 30, iron: 10, influence: 50 } });
+    const settlement2 = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+      population: 10,
+    });
+    const result2 = resolveTick([colony2], [settlement2], units, []);
+
+    // Net = -12 → food goes negative → famine
+    expect(result2.events.some(e => e.type === 'famine')).toBe(true);
+    // Food clamped to 0
+    expect(result2.colonies[0].resources.food).toBe(0);
+  });
+});
+
 describe('resolveTick with train_unit', () => {
   it('integrates train_unit action into full tick', () => {
     const colony = makeColony({
@@ -1727,7 +1819,7 @@ describe('resolveTick with train_unit', () => {
       hexes,
     );
 
-    // Run tick WITH training a soldier (food upkeep = 2)
+    // Run tick WITH training a soldier (food upkeep = 3)
     const resultWithTrain = resolveTick(
       [makeColony({ resources: { ...colony.resources } })],
       [makeSettlement({ buildings: [{ type: 'barracks', level: 1 }] })],
@@ -1738,7 +1830,7 @@ describe('resolveTick with train_unit', () => {
 
     // The colony with a trained soldier should have less food due to:
     // 1. Training cost (25 food)
-    // 2. Soldier upkeep (2 food/tick)
+    // 2. Soldier upkeep (3 food/tick)
     expect(resultWithTrain.colonies[0].resources.food).toBeLessThan(
       resultNoTrain.colonies[0].resources.food,
     );
