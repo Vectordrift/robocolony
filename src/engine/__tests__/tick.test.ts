@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveTick,
   resolveMovement,
+  resolveFoundSettlement,
   calculateProduction,
   calculateBuildingUpkeep,
   calculateUnitUpkeep,
@@ -11,6 +12,9 @@ import {
   MORALE_LOSS_RATE,
   MORALE_RECOVERY_RATE,
   DESERTION_THRESHOLD,
+  FOUNDING_COST,
+  MIN_SETTLEMENT_DISTANCE,
+  FOUNDING_REVEAL_RADIUS,
   type Colony,
   type Settlement,
   type Unit,
@@ -401,6 +405,301 @@ describe('resolveMovement', () => {
   });
 });
 
+// --- resolveFoundSettlement ---
+
+describe('resolveFoundSettlement', () => {
+  function makeFoundAction(overrides: Partial<QueuedAction> = {}): QueuedAction {
+    return {
+      id: 'action-found-1',
+      colonyId: 'colony-1',
+      type: 'found_settlement',
+      params: { unitId: 'settler-1', name: 'New Outpost' },
+      ...overrides,
+    };
+  }
+
+  function makeSettler(overrides: Partial<Unit> = {}): Unit {
+    return makeUnit({
+      id: 'settler-1',
+      type: 'settler',
+      hexX: 10,
+      hexY: 10,
+      ...overrides,
+    });
+  }
+
+  it('founds a settlement successfully', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeSettler();
+    // Existing settlement far away at (0,0)
+    const settlement = makeSettlement({ hexX: 0, hexY: 0 });
+    const hexes = makePlainGrid(15);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [settlement], hexes, [makeFoundAction()], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.newSettlements).toHaveLength(1);
+    expect(result.newSettlements[0].tier).toBe('outpost');
+    expect(result.newSettlements[0].population).toBe(10);
+    expect(result.newSettlements[0].hexX).toBe(10);
+    expect(result.newSettlements[0].hexY).toBe(10);
+    expect(result.newSettlements[0].name).toBe('New Outpost');
+    expect(result.consumedUnitIds).toContain('settler-1');
+    expect(result.units.find(u => u.id === 'settler-1')).toBeUndefined();
+  });
+
+  it('deducts founding cost from colony resources', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeSettler();
+    const settlement = makeSettlement({ hexX: 0, hexY: 0 });
+    const hexes = makePlainGrid(15);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    resolveFoundSettlement(
+      [settler], [colony], [settlement], hexes, [makeFoundAction()], allHexCoords,
+    );
+
+    expect(colony.resources.food).toBe(200 - (FOUNDING_COST.food ?? 0));
+    expect(colony.resources.timber).toBe(100 - (FOUNDING_COST.timber ?? 0));
+  });
+
+  it('generates settlement_founded event', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeSettler();
+    const settlement = makeSettlement({ hexX: 0, hexY: 0 });
+    const hexes = makePlainGrid(15);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [settlement], hexes, [makeFoundAction()], allHexCoords,
+    );
+
+    const event = result.events.find(e => e.type === 'settlement_founded');
+    expect(event).toBeDefined();
+    expect(event!.colonyId).toBe('colony-1');
+    expect(event!.data.name).toBe('New Outpost');
+    expect(event!.data.hexX).toBe(10);
+    expect(event!.data.hexY).toBe(10);
+  });
+
+  it('generates fog reveals around new settlement', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeSettler();
+    const settlement = makeSettlement({ hexX: 0, hexY: 0 });
+    const hexes = makePlainGrid(15);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [settlement], hexes, [makeFoundAction()], allHexCoords,
+    );
+
+    // Should have fog reveals within FOUNDING_REVEAL_RADIUS of (10,10)
+    expect(result.fogReveals.length).toBeGreaterThan(0);
+    expect(result.fogReveals.every(r => r.colonyId === 'colony-1')).toBe(true);
+  });
+
+  it('fails when unit is not a settler', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const scout = makeUnit({ id: 'settler-1', type: 'scout', hexX: 10, hexY: 10 });
+    const hexes = makePlainGrid(15);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [scout], [colony], [], hexes, [makeFoundAction()], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('not a settler');
+    expect(result.newSettlements).toHaveLength(0);
+  });
+
+  it('fails when unit does not belong to colony', () => {
+    const colony = makeColony();
+    const settler = makeSettler({ colonyId: 'colony-2' });
+    const hexes = makePlainGrid(15);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [], hexes, [makeFoundAction()], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('does not belong');
+  });
+
+  it('fails on ocean terrain', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeSettler({ hexX: 5, hexY: 0 });
+    const hexes = [
+      ...makePlainGrid(10),
+    ];
+    // Override hex at (5,0) to be ocean
+    const oceanIdx = hexes.findIndex(h => h.x === 5 && h.y === 0);
+    if (oceanIdx >= 0) hexes[oceanIdx] = makeHex(5, 0, { terrain: 'ocean' });
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [], hexes, [makeFoundAction({ params: { unitId: 'settler-1', name: 'Ocean Base' } })], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('ocean');
+  });
+
+  it('fails on mountains terrain', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeSettler({ hexX: 5, hexY: 0 });
+    const hexes = makePlainGrid(10);
+    const mtIdx = hexes.findIndex(h => h.x === 5 && h.y === 0);
+    if (mtIdx >= 0) hexes[mtIdx] = makeHex(5, 0, { terrain: 'mountains' });
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [], hexes, [makeFoundAction({ params: { unitId: 'settler-1', name: 'Peak' } })], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('mountains');
+  });
+
+  it('fails when hex already has a settlement', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeSettler({ hexX: 5, hexY: 0 });
+    const hexes = makePlainGrid(10);
+    // Mark hex as having a settlement
+    const idx = hexes.findIndex(h => h.x === 5 && h.y === 0);
+    if (idx >= 0) hexes[idx] = makeHex(5, 0, { settlementId: 'existing-settlement' });
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [], hexes, [makeFoundAction({ params: { unitId: 'settler-1', name: 'Duplicate' } })], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('already has a settlement');
+  });
+
+  it('fails when too close to another settlement', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    // Settler at (2,0), existing settlement at (0,0) — distance 2, under MIN_SETTLEMENT_DISTANCE=3
+    const settler = makeSettler({ hexX: 2, hexY: 0 });
+    const existingSettlement = makeSettlement({ hexX: 0, hexY: 0 });
+    const hexes = makePlainGrid(10);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [existingSettlement], hexes, [makeFoundAction({ params: { unitId: 'settler-1', name: 'Too Close' } })], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Too close');
+  });
+
+  it('succeeds when exactly at minimum distance', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    // Settler at (3,0), existing settlement at (0,0) — distance exactly 3
+    const settler = makeSettler({ hexX: 3, hexY: 0 });
+    const existingSettlement = makeSettlement({ hexX: 0, hexY: 0 });
+    const hexes = makePlainGrid(10);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [existingSettlement], hexes, [makeFoundAction({ params: { unitId: 'settler-1', name: 'Just Right' } })], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.newSettlements).toHaveLength(1);
+  });
+
+  it('fails when colony lacks food', () => {
+    const colony = makeColony({ resources: { food: 50, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeSettler();
+    const hexes = makePlainGrid(15);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [], hexes, [makeFoundAction()], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Insufficient resources');
+  });
+
+  it('fails when colony lacks timber', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 10, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeSettler();
+    const hexes = makePlainGrid(15);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [], hexes, [makeFoundAction()], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Insufficient resources');
+  });
+
+  it('fails when unit not found', () => {
+    const colony = makeColony();
+    const hexes = makePlainGrid(15);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const result = resolveFoundSettlement(
+      [], [colony], [], hexes, [makeFoundAction()], allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('not found');
+  });
+
+  it('prevents same settler from founding twice in one tick', () => {
+    const colony = makeColony({ resources: { food: 500, timber: 200, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeSettler({ hexX: 10, hexY: 10 });
+    const hexes = makePlainGrid(15);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const actions = [
+      makeFoundAction({ id: 'act-1' }),
+      makeFoundAction({ id: 'act-2', params: { unitId: 'settler-1', name: 'Second' } }),
+    ];
+
+    const result = resolveFoundSettlement(
+      [settler], [colony], [], hexes, actions, allHexCoords,
+    );
+
+    // First succeeds, second fails
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.actionResults[1].status).toBe('failed');
+    expect(result.actionResults[1].result).toContain('already consumed');
+    expect(result.newSettlements).toHaveLength(1);
+  });
+
+  it('enforces distance between two settlements founded same tick', () => {
+    const colony = makeColony({ resources: { food: 500, timber: 200, stone: 30, iron: 10, influence: 50 } });
+    // Two settlers, one at (0,0) and one at (1,0) — distance 1, too close
+    const settler1 = makeSettler({ id: 'settler-1', hexX: 0, hexY: 0 });
+    const settler2 = makeSettler({ id: 'settler-2', hexX: 1, hexY: 0 });
+    const hexes = makePlainGrid(10);
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+
+    const actions = [
+      makeFoundAction({ id: 'act-1', params: { unitId: 'settler-1', name: 'First' } }),
+      makeFoundAction({ id: 'act-2', params: { unitId: 'settler-2', name: 'Second' } }),
+    ];
+
+    const result = resolveFoundSettlement(
+      [settler1, settler2], [colony], [], hexes, actions, allHexCoords,
+    );
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.actionResults[1].status).toBe('failed');
+    expect(result.actionResults[1].result).toContain('Too close');
+  });
+});
+
 // --- resolveTick ---
 
 describe('resolveTick', () => {
@@ -605,5 +904,131 @@ describe('resolveTick', () => {
     expect(result3.units[0].hexX).toBe(6);
     expect(result3.units[0].movementQueue).toEqual([]);
     expect(result3.events.some(e => e.type === 'movement_complete')).toBe(true);
+  });
+
+  // --- Settlement founding integration in resolveTick ---
+
+  it('resolves found_settlement in tick and adds new settlement to results', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const existingSettlement = makeSettlement({ hexX: 0, hexY: 0 });
+    const settler = makeUnit({ id: 'settler-1', type: 'settler', hexX: 10, hexY: 0 });
+    const hexes = makePlainGrid(15);
+
+    const actions: QueuedAction[] = [{
+      id: 'act-found',
+      colonyId: 'colony-1',
+      type: 'found_settlement',
+      params: { unitId: 'settler-1', name: 'Outpost Beta' },
+    }];
+
+    const result = resolveTick([colony], [existingSettlement], [settler], hexes, actions);
+
+    // Settlement created
+    expect(result.settlements.length).toBe(2); // original + new
+    const newSettlement = result.settlements.find(s => s.name === 'Outpost Beta');
+    expect(newSettlement).toBeDefined();
+    expect(newSettlement!.tier).toBe('outpost');
+    expect(newSettlement!.hexX).toBe(10);
+    expect(newSettlement!.hexY).toBe(0);
+
+    // Settler consumed
+    expect(result.units.find(u => u.id === 'settler-1')).toBeUndefined();
+
+    // Resources deducted
+    expect(result.colonies[0].resources.food).toBeLessThan(200);
+    expect(result.colonies[0].resources.timber).toBeLessThan(100);
+
+    // Action resolved
+    const foundResult = result.actionResults.find(ar => ar.actionId === 'act-found');
+    expect(foundResult?.status).toBe('resolved');
+
+    // Event generated
+    expect(result.events.some(e => e.type === 'settlement_founded')).toBe(true);
+
+    // Fog reveals
+    expect(result.fogReveals.length).toBeGreaterThan(0);
+  });
+
+  it('consumed settler does not move in same tick', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const existingSettlement = makeSettlement({ hexX: 0, hexY: 0 });
+    const settler = makeUnit({
+      id: 'settler-1',
+      type: 'settler',
+      hexX: 10,
+      hexY: 0,
+      movementQueue: [{ q: 11, r: 0 }, { q: 12, r: 0 }],
+    });
+    const hexes = makePlainGrid(15);
+
+    const actions: QueuedAction[] = [{
+      id: 'act-found',
+      colonyId: 'colony-1',
+      type: 'found_settlement',
+      params: { unitId: 'settler-1', name: 'Outpost Beta' },
+    }];
+
+    const result = resolveTick([colony], [existingSettlement], [settler], hexes, actions);
+
+    // Settler was consumed — should not appear in units
+    expect(result.units.find(u => u.id === 'settler-1')).toBeUndefined();
+    // No movement events for consumed settler
+    expect(result.events.filter(e => e.type === 'unit_moved' && e.unitId === 'settler-1')).toHaveLength(0);
+  });
+
+  it('new settlement produces resources in the same tick', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const settler = makeUnit({ id: 'settler-1', type: 'settler', hexX: 10, hexY: 0 });
+    const hexes = makePlainGrid(15);
+
+    const actions: QueuedAction[] = [{
+      id: 'act-found',
+      colonyId: 'colony-1',
+      type: 'found_settlement',
+      params: { unitId: 'settler-1', name: 'Outpost Beta' },
+    }];
+
+    const result = resolveTick([colony], [], [settler], hexes, actions);
+
+    // New settlement should produce resources (population food + hex yields)
+    const productionEvent = result.events.find(e => e.type === 'production');
+    expect(productionEvent).toBeDefined();
+    const produced = productionEvent!.data.produced as Resources;
+    expect(produced.food).toBeGreaterThan(0); // at least population base production
+  });
+
+  it('handles mixed found_settlement and move_unit actions', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 30, iron: 10, influence: 50 } });
+    const existingSettlement = makeSettlement({ hexX: 0, hexY: 0 });
+    const settler = makeUnit({ id: 'settler-1', type: 'settler', hexX: 10, hexY: 0 });
+    const scout = makeUnit({ id: 'scout-1', type: 'scout', hexX: 0, hexY: 0 });
+    const hexes = makePlainGrid(15);
+
+    const actions: QueuedAction[] = [
+      {
+        id: 'act-found',
+        colonyId: 'colony-1',
+        type: 'found_settlement',
+        params: { unitId: 'settler-1', name: 'Beta' },
+      },
+      {
+        id: 'act-move',
+        colonyId: 'colony-1',
+        type: 'move_unit',
+        params: { unitId: 'scout-1', targetX: 5, targetY: 0 },
+      },
+    ];
+
+    const result = resolveTick([colony], [existingSettlement], [settler, scout], hexes, actions);
+
+    // Settlement founded
+    expect(result.settlements.length).toBe(2);
+    expect(result.actionResults.find(ar => ar.actionId === 'act-found')?.status).toBe('resolved');
+
+    // Scout moved
+    const scoutUnit = result.units.find(u => u.id === 'scout-1');
+    expect(scoutUnit).toBeDefined();
+    expect(scoutUnit!.hexX).toBeGreaterThan(0);
+    expect(result.actionResults.find(ar => ar.actionId === 'act-move')?.status).toBe('resolved');
   });
 });
