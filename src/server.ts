@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { healthRoutes } from './routes/health.js';
 import { worldRoutes } from './routes/worlds.js';
+import { stateRoutes } from './routes/state.js';
 
 export function buildApp() {
   const app = Fastify({
@@ -13,6 +14,7 @@ export function buildApp() {
   app.register(cors);
   app.register(healthRoutes);
   app.register(worldRoutes);
+  app.register(stateRoutes);
 
   return app;
 }
