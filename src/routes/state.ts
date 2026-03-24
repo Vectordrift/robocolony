@@ -53,14 +53,15 @@ export async function getVisibleHexes(worldId: string, colonyId: string): Promis
 
 // --- Routes ---
 
+interface WorldParams {
+  Params: { id: string };
+}
+
 export async function stateRoutes(app: FastifyInstance) {
   // Full colony state
-  app.get('/api/worlds/:id/state', {
+  app.get<WorldParams>('/api/worlds/:id/state', {
     preHandler: requireAuth,
-  }, async (
-    request: FastifyRequest<{ Params: { id: string } }>,
-    reply: FastifyReply,
-  ) => {
+  }, async (request, reply) => {
     const colony = request.colony!;
     const worldId = colony.worldId;
 
@@ -130,12 +131,9 @@ export async function stateRoutes(app: FastifyInstance) {
   });
 
   // Map only (fog of war)
-  app.get('/api/worlds/:id/map', {
+  app.get<WorldParams>('/api/worlds/:id/map', {
     preHandler: requireAuth,
-  }, async (
-    request: FastifyRequest<{ Params: { id: string } }>,
-    reply: FastifyReply,
-  ) => {
+  }, async (request, reply) => {
     const colony = request.colony!;
 
     const world = await db
