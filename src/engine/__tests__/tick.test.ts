@@ -193,6 +193,46 @@ describe('calculateProduction', () => {
 
     expect(production.timber).toBeCloseTo(3); // 6 * 0.5
   });
+  it('handles buildings with missing level property (regression #40)', () => {
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      // Simulate DB data where level is missing (e.g. stored as completedAtTick instead)
+      buildings: [{ type: 'farm' } as any],
+      population: 0,
+    });
+    const production = calculateProduction(settlement, []);
+
+    // Should default to level 1: farm produces 3 food * 1 * 1.0 = 3
+    expect(production.food).toBeCloseTo(3);
+    // Ensure no NaN values
+    expect(Number.isNaN(production.food)).toBe(false);
+    expect(Number.isNaN(production.timber)).toBe(false);
+  });
+
+  it('produces numeric food/timber with starting buildings in full tick', () => {
+    // Regression test for #40: starting buildings had completedAtTick instead of level
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+      ],
+    });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [], hexes);
+
+    // Colony resources should all be numeric (not null/NaN)
+    for (const [key, value] of Object.entries(result.colonies[0].resources)) {
+      expect(typeof value).toBe('number');
+      expect(Number.isNaN(value)).toBe(false);
+    }
+
+    // Food and timber specifically should be > starting values (production happened)
+    expect(result.colonies[0].resources.food).toBeGreaterThan(0);
+    expect(result.colonies[0].resources.timber).toBeGreaterThan(0);
+  });
+
 });
 
 // --- calculateBuildingUpkeep ---
