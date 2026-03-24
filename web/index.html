@@ -479,7 +479,9 @@
         case 'unit_trained':
           return `⚔️ ${d.unitType} trained at (${d.hexX}, ${d.hexY})`;
         case 'famine':
-          return `<span class="negative">⚠️ Famine! Food deficit: ${d.foodDeficit}</span>`;
+          return d.foodDeficit != null
+            ? `<span class="negative">⚠️ Famine! Food deficit: ${d.foodDeficit}</span>`
+            : `<span class="negative">⚠️ Famine!</span>`;
         case 'desertion':
           return `<span class="negative">💀 ${d.unitType} deserted (morale: ${Math.round((d.morale || 0) * 100)}%)</span>`;
         case 'combat':
@@ -493,6 +495,7 @@
 
     function renderEvents() {
       const list = document.getElementById('eventList');
+      list.classList.remove('loading');
       const filterFn = FILTER_MAP[activeFilter] || FILTER_MAP.all;
       const filtered = allEvents.filter(filterFn);
 
@@ -518,6 +521,7 @@
     // --- Leaderboard rendering ---
     function renderLeaderboard(colonies) {
       const container = document.getElementById('leaderboard');
+      container.classList.remove('loading');
       if (!colonies || colonies.length === 0) {
         container.innerHTML = '<div class="empty-feed">No colonies yet</div>';
         return;
@@ -575,6 +579,7 @@
     // --- Colony rendering ---
     function renderColonies(colonies) {
       const container = document.getElementById('colonyList');
+      container.classList.remove('loading');
       if (!colonies || colonies.length === 0) {
         container.innerHTML = '<div class="empty-feed">No colonies yet</div>';
         return;
@@ -599,6 +604,7 @@
     // --- World info rendering ---
     function renderWorld(world) {
       const container = document.getElementById('worldInfo');
+      container.classList.remove('loading');
       const tickRateMin = Math.round((world.tickRate || 300000) / 60000);
 
       container.innerHTML = `
@@ -612,11 +618,9 @@
 
     // --- Deduplicate consecutive identical ticks ---
     function tickFingerprint(events) {
-      // Create a string fingerprint from sorted event types + their data
-      return events
-        .map(e => e.type + ':' + JSON.stringify(e.data || {}))
-        .sort()
-        .join('|');
+      // Create a string fingerprint from event types (ignore data — same event types = same tick)
+      const types = events.map(e => e.type).sort();
+      return types.join('|');
     }
 
     function deduplicateTicks(events) {
