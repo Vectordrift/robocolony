@@ -1,0 +1,32 @@
+engine:
+  - changed-files:
+    - any-glob-to-any-file: 'src/engine/**'
+
+database:
+  - changed-files:
+    - any-glob-to-any-file: 'src/db/**'
+
+api:
+  - changed-files:
+    - any-glob-to-any-file: 'src/routes/**'
+
+auth:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'src/auth/**'
+      - 'src/middleware/**'
+      - 'src/lib/auth*'
+
+docs:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'docs/**'
+      - '*.md'
+
+ci:
+  - changed-files:
+    - any-glob-to-any-file: '.github/**'
+
+tests:
+  - changed-files:
+    - any-glob-to-any-file: 'src/**/__tests__/**'
