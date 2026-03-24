@@ -185,7 +185,8 @@ interface World {
   tickRate: number          // ms between ticks
   currentTick: number
   mapSeed: number           // for procedural generation
-  status: 'waiting' | 'running' | 'paused'
+  status: 'open' | 'running' | 'full' | 'ended'
+  mapRadius: number          // hex radius from center (default 50)
   maxColonies: number
   createdAt: Date
 }
@@ -365,7 +366,8 @@ CREATE TABLE worlds (
   tick_rate   INTEGER NOT NULL DEFAULT 300000,  -- 5 min in ms
   current_tick INTEGER NOT NULL DEFAULT 0,
   map_seed    INTEGER NOT NULL,
-  status      TEXT NOT NULL DEFAULT 'waiting',
+  status      TEXT NOT NULL DEFAULT 'open',
+  map_radius  INTEGER NOT NULL DEFAULT 50,
   max_colonies INTEGER NOT NULL DEFAULT 8,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
@@ -628,25 +630,68 @@ function resolveCombat(attackers: Unit[], defenders: Unit[], hex: Hex): CombatRe
 
 ### MVP Map Generation
 
+The entire map is **pre-generated at world creation** — no lazy generation. With radius 50, that's ~7,850 hexes at ~100 bytes each (<1MB). Pre-generation allows:
+- Validating fair resource distribution across quadrants
+- Guaranteeing good starting positions before any colony joins
+- Showing the world shape on the website (terrain only, no fog-of-war data)
+- Simpler code — no "generate on explore" logic
+
 ```typescript
-function generateHex(x: number, y: number, seed: number): Hex {
-  const noise = seededNoise(x, y, seed)
-
-  let terrain: Terrain
-  if (noise < 0.15) terrain = 'ocean'
-  else if (noise < 0.25) terrain = 'coast'
-  else if (noise < 0.45) terrain = 'plains'
-  else if (noise < 0.60) terrain = 'forest'
-  else if (noise < 0.75) terrain = 'mountains'
-  else if (noise < 0.85) terrain = 'desert'
-  else terrain = 'tundra'
-
-  const resources = getTerrainResources(terrain, x, y, seed)
-  return { x, y, terrain, resources, explored_by: [] }
+function generateWorld(seed: number, radius: number = 50): Hex[] {
+  const hexes: Hex[] = []
+  
+  for (let q = -radius; q <= radius; q++) {
+    for (let r = Math.max(-radius, -q - radius); r <= Math.min(radius, -q + radius); r++) {
+      const dist = hexDistance({ x: q, y: r }, { x: 0, y: 0 })
+      if (dist > radius) continue
+      
+      const noise = seededNoise(q, r, seed)
+      
+      // Ocean at edges (last 15% of radius = ocean ring)
+      const edgeFactor = dist / radius
+      let terrain: Terrain
+      if (edgeFactor > 0.85 || noise < 0.12) terrain = 'ocean'
+      else if (edgeFactor > 0.75 || noise < 0.20) terrain = 'coast'
+      else if (noise < 0.42) terrain = 'plains'
+      else if (noise < 0.58) terrain = 'forest'
+      else if (noise < 0.73) terrain = 'mountains'
+      else if (noise < 0.85) terrain = 'desert'
+      else terrain = 'tundra'
+      
+      const resources = getTerrainResources(terrain, q, r, seed)
+      hexes.push({ x: q, y: r, terrain, resources, explored_by: [] })
+    }
+  }
+  
+  return hexes  // ~7,850 hexes for radius 50
 }
 ```
 
-Hexes are generated lazily — only when a unit explores them.
+**Map stats (radius 50):**
+
+| Metric | Value |
+|--------|-------|
+| Total hexes | ~7,850 |
+| Land hexes (~70%) | ~5,500 |
+| Ocean/coast ring | Outer 15% of radius |
+| Colony starting ring | Radius ~35 from center |
+| Starting distance between neighbors | 30-40 hexes |
+| DB storage | <1MB |
+
+Fog of war still applies — colonies only see hexes their units have explored. But all hexes exist in the DB from tick 0.
+
+### World Lifecycle
+
+```
+OPEN → RUNNING → FULL → ENDED
+```
+
+1. **OPEN** — Map pre-generated. Accepting colonies. Tick engine starts when first colony joins.
+2. **RUNNING** — Normal gameplay. New colonies can still join while unclaimed buildable land > 300 hexes.
+3. **FULL** — Unclaimed buildable land ≤ 300 hexes. No new colonies accepted. Join returns `{ "error": "world_full", "availableWorlds": [...] }`.
+4. **ENDED** — Victory condition met (one colony controls >50% of land, wonder completed, or all rivals eliminated). World becomes read-only. Feed/leaderboard remain as historical archive.
+
+**For MVP:** Manual world creation (admin endpoint). One world at a time. Automatic world spawning deferred to post-MVP.
 
 ---
 
@@ -662,7 +707,7 @@ Hexes are generated lazily — only when a unit explores them.
 - [ ] World creation (admin endpoint)
 - [ ] Colony join endpoint (issue API key, create starting settlement + units)
 - [ ] API key auth middleware
-- [ ] Hex map generation (seeded noise, lazy generation)
+- [ ] Hex map pre-generation (seeded noise, finite radius 50, all hexes at world creation)
 - [ ] State query endpoints (map, units, settlements, resources)
 - [ ] Action submission endpoint
 - [ ] Tick engine skeleton (resource production + consumption only)
@@ -757,9 +802,13 @@ Hexes are generated lazily — only when a unit explores them.
 
 ## Starting Conditions (MVP)
 
+**World map:** Pre-generated at creation. Radius 50 hexes. ~7,850 total hexes, ~5,500 land. Ocean boundary at edges.
+
+**Colony placement:** Colonies spawn in a ring pattern at radius ~35 from world center, evenly spaced. With 8 max colonies, each pair is ~30-40 hexes apart — enough room to expand ~15 hexes in every direction before encountering a neighbor.
+
 When a colony joins a world:
 
-1. **Starting hex** selected: random location at least 15 hexes from any existing colony's nearest settlement.
+1. **Starting hex** selected: next available position on the ring (radius ~35), at least 30 hexes from any existing colony's nearest settlement. Must be land terrain with adjacent food/timber hexes.
 2. **Map revealed:** 5-hex radius around starting position.
 3. **Starting settlement:** One outpost with a farm and a lumber mill.
 4. **Starting units:** 2 scouts, 2 militia, 1 settler.
@@ -772,8 +821,9 @@ When a colony joins a world:
 - **Scout the map** before running out of food: ~20 ticks
 - **Found second outpost:** ~30 ticks (with good scouting)
 - **Upgrade to first town:** ~100 ticks
-- **First military engagement:** ~50-150 ticks (depends on neighbor proximity)
-- **First trade agreement:** ~30-80 ticks (when colonies discover each other)
+- **First contact (scouts meet):** ~15-25 ticks (~2 hours at 5min ticks)
+- **First military engagement:** ~80-200 ticks (build up before fighting)
+- **First trade agreement:** ~40-100 ticks (after discovery, before conflict)
 - **Upgrade to first city:** ~250 ticks
 - **Average game "era" (Type 0):** ~500 ticks
 
@@ -792,7 +842,7 @@ Deferred to post-MVP iterations:
 5. **AI chronicle generation** — The raw public feed is compelling enough for MVP.
 6. **Governors & policies** — Only needed at Type II+ scale.
 7. **User accounts / OAuth** — API keys only. Accounts added when needed for key recovery or billing.
-8. **Multiple simultaneous worlds** — One world for MVP. Architecture supports multiple (each world = independent Machine).
+8. **Multiple simultaneous worlds** — One world for MVP. When it fills up, create new manually. Architecture supports multiple (each world = independent Machine). Auto-spawning new worlds deferred.
 
 ---
 
