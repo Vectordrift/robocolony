@@ -618,7 +618,10 @@
             ? `<span class="negative">⚠️ Famine! Food deficit: ${d.foodDeficit}</span>`
             : `<span class="negative">⚠️ Famine!</span>`;
         case 'desertion':
-          return `<span class="negative">💀 ${d.unitType} deserted (morale: ${Math.round((d.morale || 0) * 100)}%)</span>`;
+          if (d.count && d.count > 1) {
+            return `<span class="negative">💀 ${d.count} units deserted (${d.summary})</span>`;
+          }
+          return `<span class="negative">💀 ${d.unitType || d.summary || 'unit'} deserted</span>`;
         case 'combat':
           return `⚔️ Combat at (${d.hexX}, ${d.hexY})`;
         case '_repeated':
