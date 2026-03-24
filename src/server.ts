@@ -32,4 +32,8 @@ async function start() {
   }
 }
 
-start();
+// Only start when run directly, not when imported by tests
+const isMainModule = process.argv[1]?.endsWith('server.js') || process.argv[1]?.endsWith('server.ts');
+if (isMainModule) {
+  start();
+}
