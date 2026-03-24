@@ -39,7 +39,7 @@
 | **State Store** | PostgreSQL | Reliable, good at structured game state, JSONB for flexible data |
 | **Tick Engine** | Pure function (TypeScript) | Stateless, testable, `tick(state, actions) → state` |
 | **Tick Scheduler** | Node.js setInterval or cron | Simple. Calls tick engine on schedule. |
-| **Auth** | API keys per faction | Simple. One key = one faction. |
+| **Auth** | API keys per colony | Simple. One key = one colony. |
 | **Deploy** | Fly.io (single machine to start) | Simple, cheap, good for stateful apps |
 
 ---
@@ -75,14 +75,14 @@ interface Hex {
     iron?: number
   }
   settlementId?: string   // if a settlement is here
-  explored_by: string[]   // faction IDs that have seen this hex
+  explored_by: string[]   // colony IDs that have seen this hex
 }
 ```
 
-### Faction
+### Colony
 
 ```typescript
-interface Faction {
+interface Colony {
   id: string
   worldId: string
   name: string
@@ -111,7 +111,7 @@ interface Faction {
 ```typescript
 interface Settlement {
   id: string
-  factionId: string
+  colonyId: string
   name: string
   hex: { x: number, y: number }
   tier: 'outpost' | 'town' | 'city'
@@ -139,7 +139,7 @@ interface BuildQueueItem {
 ```typescript
 interface Unit {
   id: string
-  factionId: string
+  colonyId: string
   type: 'scout' | 'militia' | 'soldier' | 'siege' | 'settler'
   hex: { x: number, y: number }
   health: number            // 0-100
@@ -154,7 +154,7 @@ interface Unit {
 interface Action {
   id: string
   worldId: string
-  factionId: string
+  colonyId: string
   tick: number              // which tick to resolve on
   type: ActionType
   params: Record<string, any>
@@ -184,8 +184,8 @@ interface Agreement {
   id: string
   worldId: string
   type: 'non_aggression' | 'trade' | 'alliance'
-  proposedBy: string        // faction ID
-  proposedTo: string        // faction ID
+  proposedBy: string        // colony ID
+  proposedTo: string        // colony ID
   status: 'proposed' | 'active' | 'rejected' | 'broken'
   terms: Record<string, any>  // type-specific terms
   proposedAtTick: number
@@ -201,7 +201,7 @@ interface GameEvent {
   worldId: string
   tick: number
   type: string              // 'combat' | 'settlement_founded' | 'agreement_proposed' | ...
-  visibility: string[]      // faction IDs that can see this event ([] = public)
+  visibility: string[]      // colony IDs that can see this event ([] = public)
   data: Record<string, any>
 }
 ```
@@ -233,7 +233,7 @@ CREATE TABLE worlds (
   current_tick INTEGER NOT NULL DEFAULT 0,
   map_seed    INTEGER NOT NULL,
   status      TEXT NOT NULL DEFAULT 'waiting',
-  max_factions INTEGER NOT NULL DEFAULT 8,
+  max_colonies INTEGER NOT NULL DEFAULT 8,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -248,7 +248,7 @@ CREATE TABLE hexes (
   PRIMARY KEY (world_id, x, y)
 );
 
-CREATE TABLE factions (
+CREATE TABLE colonies (
   id          TEXT PRIMARY KEY,
   world_id    TEXT REFERENCES worlds(id),
   name        TEXT NOT NULL,
@@ -260,7 +260,7 @@ CREATE TABLE factions (
 
 CREATE TABLE settlements (
   id          TEXT PRIMARY KEY,
-  faction_id  TEXT REFERENCES factions(id),
+  colony_id  TEXT REFERENCES colonies(id),
   world_id    TEXT REFERENCES worlds(id),
   name        TEXT NOT NULL,
   hex_x       INTEGER NOT NULL,
@@ -274,7 +274,7 @@ CREATE TABLE settlements (
 
 CREATE TABLE units (
   id          TEXT PRIMARY KEY,
-  faction_id  TEXT REFERENCES factions(id),
+  colony_id  TEXT REFERENCES colonies(id),
   world_id    TEXT REFERENCES worlds(id),
   type        TEXT NOT NULL,
   hex_x       INTEGER NOT NULL,
@@ -287,7 +287,7 @@ CREATE TABLE units (
 CREATE TABLE actions (
   id          TEXT PRIMARY KEY,
   world_id    TEXT REFERENCES worlds(id),
-  faction_id  TEXT REFERENCES factions(id),
+  colony_id  TEXT REFERENCES colonies(id),
   tick        INTEGER NOT NULL,
   type        TEXT NOT NULL,
   params      JSONB NOT NULL,
@@ -300,8 +300,8 @@ CREATE TABLE agreements (
   id          TEXT PRIMARY KEY,
   world_id    TEXT REFERENCES worlds(id),
   type        TEXT NOT NULL,
-  proposed_by TEXT REFERENCES factions(id),
-  proposed_to TEXT REFERENCES factions(id),
+  proposed_by TEXT REFERENCES colonies(id),
+  proposed_to TEXT REFERENCES colonies(id),
   status      TEXT NOT NULL DEFAULT 'proposed',
   terms       JSONB NOT NULL DEFAULT '{}',
   proposed_at_tick INTEGER NOT NULL,
@@ -311,8 +311,8 @@ CREATE TABLE agreements (
 CREATE TABLE messages (
   id          TEXT PRIMARY KEY,
   world_id    TEXT REFERENCES worlds(id),
-  from_faction TEXT REFERENCES factions(id),
-  to_faction  TEXT REFERENCES factions(id),
+  from_colony TEXT REFERENCES colonies(id),
+  to_colony  TEXT REFERENCES colonies(id),
   sent_at_tick INTEGER NOT NULL,
   delivered_at_tick INTEGER NOT NULL,
   content     TEXT NOT NULL,
@@ -330,7 +330,7 @@ CREATE TABLE events (
 
 CREATE INDEX idx_events_world_tick ON events(world_id, tick);
 CREATE INDEX idx_actions_world_tick ON actions(world_id, tick, status);
-CREATE INDEX idx_units_world_faction ON units(world_id, faction_id);
+CREATE INDEX idx_units_world_colony ON units(world_id, colony_id);
 CREATE INDEX idx_hexes_world ON hexes(world_id, x, y);
 ```
 
@@ -346,11 +346,11 @@ POST /api/worlds                     # Create world (admin only)
 GET  /api/worlds/:id                 # World info (public)
 ```
 
-### Faction (requires API key in header)
+### Colony (requires API key in header)
 
 ```
-POST /api/worlds/:id/join            # Join world (creates faction)
-GET  /api/worlds/:id/state           # Full faction state (map, units, settlements, resources)
+POST /api/worlds/:id/join            # Join world (creates colony)
+GET  /api/worlds/:id/state           # Full colony state (map, units, settlements, resources)
 GET  /api/worlds/:id/map             # Visible hex map (fog of war applied)
 GET  /api/worlds/:id/events?since=N  # Events since tick N
 ```
@@ -365,7 +365,7 @@ GET  /api/worlds/:id/actions         # List your queued/recent actions
 ### Diplomacy
 
 ```
-POST /api/worlds/:id/messages        # Send message to another faction
+POST /api/worlds/:id/messages        # Send message to another colony
 GET  /api/worlds/:id/messages        # Inbox
 POST /api/worlds/:id/agreements      # Propose agreement
 PUT  /api/worlds/:id/agreements/:id  # Accept/reject
@@ -374,7 +374,7 @@ DELETE /api/worlds/:id/agreements/:id # Break agreement
 
 ### Auth
 
-All faction endpoints require header: `Authorization: Bearer <api_key>`
+All colony endpoints require header: `Authorization: Bearer <api_key>`
 
 ---
 
@@ -386,7 +386,7 @@ The tick engine is a pure function:
 function resolveTick(
   world: World,
   hexes: Hex[],
-  factions: Faction[],
+  colonies: Colony[],
   settlements: Settlement[],
   units: Unit[],
   actions: Action[],
@@ -474,13 +474,13 @@ Hexes are generated lazily — only when a unit explores them.
 - [ ] Database schema + migrations
 - [ ] Hex map generation (seeded noise, lazy generation)
 - [ ] World creation endpoint
-- [ ] Faction join endpoint (creates faction + starting settlement + starting units)
+- [ ] Colony join endpoint (creates colony + starting settlement + starting units)
 - [ ] State query endpoints (map, units, settlements, resources)
 - [ ] Action submission endpoint
 - [ ] Tick engine skeleton (resource production + consumption only)
 - [ ] Tick scheduler (setInterval, calls tick engine)
 
-**Deliverable:** A world that ticks. Factions can join and see their starting position. Resources accumulate.
+**Deliverable:** A world that ticks. Colonies can join and see their starting position. Resources accumulate.
 
 ### Phase 2: Movement & Exploration (Week 2)
 
@@ -519,7 +519,7 @@ Hexes are generated lazily — only when a unit explores them.
 - [ ] Walls building (defense bonus)
 - [ ] Unit health and damage
 - [ ] Combat events in event feed
-- [ ] Settlement capture (when garrison destroyed, settlement changes faction)
+- [ ] Settlement capture (when garrison destroyed, settlement changes colony)
 
 **Deliverable:** Military conflict works. Agents can attack, defend, and conquer.
 
@@ -542,12 +542,12 @@ Hexes are generated lazily — only when a unit explores them.
 **Goal:** Everything works together. Ready for agent playtesting.
 
 - [ ] Balance pass (resource costs, unit stats, combat modifiers)
-- [ ] Starting conditions tuning (enough space between factions)
+- [ ] Starting conditions tuning (enough space between colonies)
 - [ ] Edge case handling (simultaneous attacks, resource races, settlement at same hex)
 - [ ] API documentation (OpenAPI/Swagger)
-- [ ] Rate limiting per faction per tick
+- [ ] Rate limiting per colony per tick
 - [ ] Basic admin endpoints (pause/resume world, reset)
-- [ ] Integration tests (multi-faction scenarios)
+- [ ] Integration tests (multi-colony scenarios)
 - [ ] Deploy to Fly.io
 
 **Deliverable:** A deployed, playable MVP. Send agents at it.
@@ -556,9 +556,9 @@ Hexes are generated lazily — only when a unit explores them.
 
 ## Starting Conditions (MVP)
 
-When a faction joins a world:
+When a colony joins a world:
 
-1. **Starting hex** selected: random location at least 15 hexes from any existing faction's nearest settlement.
+1. **Starting hex** selected: random location at least 15 hexes from any existing colony's nearest settlement.
 2. **Map revealed:** 5-hex radius around starting position.
 3. **Starting settlement:** One outpost with a farm and a lumber mill.
 4. **Starting units:** 2 scouts, 2 militia, 1 settler.
@@ -572,7 +572,7 @@ When a faction joins a world:
 - **Found second outpost:** ~30 ticks (with good scouting)
 - **Upgrade to first town:** ~100 ticks
 - **First military engagement:** ~50-150 ticks (depends on neighbor proximity)
-- **First trade agreement:** ~30-80 ticks (when factions discover each other)
+- **First trade agreement:** ~30-80 ticks (when colonies discover each other)
 - **Upgrade to first city:** ~250 ticks
 - **Average game "era" (Type 0):** ~500 ticks
 
