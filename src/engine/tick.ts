@@ -10,6 +10,8 @@ import { hexNeighbors, hexDistance } from './hex.js';
 import type { HexResources } from './mapgen.js';
 import { findPath, movementStepsThisTick, createHexLookup } from './pathfinding.js';
 import type { HexLookup } from './pathfinding.js';
+import { computeFogReveals } from './fog.js';
+import type { HexExploration } from './fog.js';
 
 // --- Types ---
 
@@ -69,6 +71,7 @@ export interface HexTileState {
   terrain: string;
   resources: HexResources;
   settlementId: string | null;
+  exploredBy?: string[];
 }
 
 export interface QueuedAction {
@@ -99,6 +102,7 @@ export interface TickResult {
   events: TickEvent[];
   desertedUnitIds: string[];
   actionResults: ActionResult[];
+  fogReveals: HexExploration[];
 }
 
 // --- Constants ---
@@ -394,11 +398,12 @@ export function calculateUnitUpkeep(units: Unit[]): number {
  * Resolve a single game tick.
  *
  * 1. Resolve actions (movement, etc.)
- * 2. Calculate production for each settlement
- * 3. Calculate upkeep (buildings + units)
- * 4. Apply net resources to each colony
- * 5. Handle deficits: morale loss → desertion
- * 6. Handle surplus: morale recovery
+ * 2. Compute fog of war reveals for moved units
+ * 3. Calculate production for each settlement
+ * 4. Calculate upkeep (buildings + units)
+ * 5. Apply net resources to each colony
+ * 6. Handle deficits: morale loss → desertion
+ * 7. Handle surplus: morale recovery
  */
 export function resolveTick(
   colonies: Colony[],
@@ -410,6 +415,7 @@ export function resolveTick(
   const events: TickEvent[] = [];
   const desertedUnitIds: string[] = [];
   let actionResults: ActionResult[] = [];
+  let fogReveals: HexExploration[] = [];
 
   // Build hex lookup
   const hexMap = new Map<string, HexTileState>();
@@ -423,6 +429,12 @@ export function resolveTick(
     movementQueue: u.movementQueue ? [...u.movementQueue] : [],
   }));
 
+  // Track unit positions before movement for fog-of-war
+  const unitPositionsBefore = new Map<string, { x: number; y: number }>();
+  for (const u of updatedUnits) {
+    unitPositionsBefore.set(u.id, { x: u.hexX, y: u.hexY });
+  }
+
   // --- Phase 0: Resolve actions (movement) + advance movement queues ---
   // Always run movement resolution to advance existing queues, even without new actions
   const hasMovingUnits = updatedUnits.some(u => u.movementQueue && u.movementQueue.length > 0);
@@ -431,6 +443,34 @@ export function resolveTick(
     const moveResult = resolveMovement(updatedUnits, actions, hexLookup);
     events.push(...moveResult.events);
     actionResults = moveResult.actionResults;
+  }
+
+  // --- Phase 0.5: Fog of war reveals for units that moved ---
+  const movedUnits = updatedUnits.filter(u => {
+    const before = unitPositionsBefore.get(u.id);
+    return before && (before.x !== u.hexX || before.y !== u.hexY);
+  });
+
+  if (movedUnits.length > 0) {
+    // Build set of all valid hex coordinates
+    const allHexCoords = new Set<string>();
+    for (const hex of hexes) {
+      allHexCoords.add(`${hex.x},${hex.y}`);
+    }
+
+    // Build already-explored map from hex data
+    const alreadyExplored = new Map<string, boolean>();
+    for (const hex of hexes) {
+      if (hex.exploredBy) {
+        for (const colonyId of hex.exploredBy) {
+          alreadyExplored.set(`${colonyId}:${hex.x},${hex.y}`, true);
+        }
+      }
+    }
+
+    const fogResult = computeFogReveals(movedUnits, allHexCoords, alreadyExplored);
+    fogReveals = fogResult.reveals;
+    events.push(...fogResult.events);
   }
 
   // Group settlements and units by colony
@@ -549,5 +589,6 @@ export function resolveTick(
     events,
     desertedUnitIds,
     actionResults,
+    fogReveals,
   };
 }
