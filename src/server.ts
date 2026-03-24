@@ -6,7 +6,7 @@ import { stateRoutes } from './routes/state.js';
 import { actionRoutes } from './routes/actions.js';
 import { eventRoutes } from './routes/events.js';
 import { db } from './db/index.js';
-import { worlds } from './db/schema/index.js';
+import { worlds, settlements, colonies } from './db/schema/index.js';
 import { eq } from 'drizzle-orm';
 import { TickScheduler } from './engine/scheduler.js';
 
@@ -61,6 +61,87 @@ async function startSchedulers(logger: { info: (msg: string) => void; error: (ms
   }
 }
 
+/**
+ * One-time data normalization on startup.
+ * Fixes known data issues from earlier code versions:
+ * - Buildings with completedAtTick instead of level (#40)
+ * - Colony resources with null values (#47)
+ */
+async function normalizeData(logger: { info: (msg: string) => void; error: (msg: string) => void }) {
+  try {
+    // Fix buildings: ensure every building has { type, level } format
+    const allSettlements = await db.select().from(settlements);
+    let fixedBuildings = 0;
+
+    for (const s of allSettlements) {
+      const buildings = (s.buildings ?? []) as Array<Record<string, unknown>>;
+      let needsFix = false;
+
+      const normalized = buildings.map((b) => {
+        if (typeof b.level !== 'number' || b.level < 1) {
+          needsFix = true;
+          return { type: b.type, level: 1 };
+        }
+        // Strip any extra properties (e.g. completedAtTick)
+        const keys = Object.keys(b);
+        if (keys.length !== 2 || !keys.includes('type') || !keys.includes('level')) {
+          needsFix = true;
+          return { type: b.type, level: b.level };
+        }
+        return { type: b.type, level: b.level };
+      });
+
+      if (needsFix) {
+        await db
+          .update(settlements)
+          .set({ buildings: normalized })
+          .where(eq(settlements.id, s.id));
+        fixedBuildings++;
+      }
+    }
+
+    if (fixedBuildings > 0) {
+      logger.info(`[normalize] Fixed buildings in ${fixedBuildings} settlement(s)`);
+    }
+
+    // Fix colony resources: replace null/NaN values with 0
+    const allColonies = await db.select().from(colonies);
+    let fixedResources = 0;
+
+    for (const c of allColonies) {
+      const resources = c.resources as Record<string, unknown>;
+      let needsFix = false;
+
+      for (const key of ['food', 'timber', 'stone', 'iron', 'influence']) {
+        const val = resources[key];
+        if (val == null || (typeof val === 'number' && Number.isNaN(val))) {
+          resources[key] = 0;
+          needsFix = true;
+        }
+      }
+
+      if (needsFix) {
+        await db
+          .update(colonies)
+          .set({ resources })
+          .where(eq(colonies.id, c.id));
+        fixedResources++;
+      }
+    }
+
+    if (fixedResources > 0) {
+      logger.info(`[normalize] Fixed resources in ${fixedResources} colony/colonies`);
+    }
+
+    if (fixedBuildings === 0 && fixedResources === 0) {
+      logger.info('[normalize] No data fixes needed');
+    }
+  } catch (err) {
+    logger.error(`[normalize] Data normalization failed: ${err}`);
+    // Non-fatal — server can still start
+  }
+}
+
 async function start() {
   const app = buildApp();
 
@@ -70,6 +151,9 @@ async function start() {
   try {
     await app.listen({ host, port });
     app.log.info(`RoboColony server running on ${host}:${port}`);
+
+    // Normalize data before starting schedulers
+    await normalizeData(app.log);
 
     // Start tick schedulers after server is listening
     await startSchedulers(app.log);
