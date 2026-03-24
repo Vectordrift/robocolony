@@ -1201,6 +1201,13 @@ export function resolveTick(
   for (const colony of updatedColonies) {
     if (colony.status !== 'active') continue;
 
+    // Sanitize resources: replace null/NaN with 0 (guards against corrupted DB data)
+    for (const key of ['food', 'timber', 'stone', 'iron', 'influence'] as (keyof Resources)[]) {
+      if (colony.resources[key] == null || Number.isNaN(colony.resources[key])) {
+        colony.resources[key] = 0;
+      }
+    }
+
     const mySettlements = colonySettlements.get(colony.id) ?? [];
     const myUnits = colonyUnits.get(colony.id) ?? [];
 
