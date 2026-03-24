@@ -264,10 +264,10 @@ describe('resolveBuilding', () => {
     expect(result.actionResults[0].result).toContain('farm');
     expect(result.actionResults[0].result).toContain('construction started');
 
-    // Build queue should have the farm
+    // Build queue should have the farm (queued then advanced in same call)
     expect(settlement.buildQueue).toHaveLength(1);
     expect(settlement.buildQueue[0].type).toBe('farm');
-    expect(settlement.buildQueue[0].ticksRemaining).toBe(BUILD_TIME);
+    expect(settlement.buildQueue[0].ticksRemaining).toBe(BUILD_TIME - 1);
 
     // Farm costs 20 timber
     expect(colony.resources.timber).toBe(50 - 20);
