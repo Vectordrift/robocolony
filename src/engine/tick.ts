@@ -1459,11 +1459,9 @@ export function resolveTick(
       for (const settlement of mySettlements) {
         const maxPop = MAX_POPULATION[settlement.tier] ?? 50;
         if (settlement.population < maxPop) {
-          // Calculate food surplus attributable to this settlement
-          const popFoodConsumption = calculatePopulationConsumption(settlement);
-          const settlementFoodNet = net.food; // Use colony-level net (simplified)
-          if (settlementFoodNet > 0) {
-            const growth = Math.floor(settlementFoodNet / POP_GROWTH_PER_FOOD);
+          // Use colony-level net food (simplified — shared across settlements)
+          if (net.food > 0) {
+            const growth = Math.floor(net.food / POP_GROWTH_PER_FOOD);
             if (growth > 0) {
               const oldPop = settlement.population;
               settlement.population = Math.min(maxPop, settlement.population + growth);
