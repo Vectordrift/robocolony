@@ -55,7 +55,8 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
       };
     case 'desertion':
       return {
-        unitType: event.data.unitType,
+        count: event.data.count,
+        summary: event.data.summary,
       };
     default:
       return null;
