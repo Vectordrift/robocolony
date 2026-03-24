@@ -15,7 +15,7 @@ function createHexGrid(radius: number): Set<string> {
     const r1 = Math.max(-radius, -q - radius);
     const r2 = Math.min(radius, -q + radius);
     for (let r = r1; r <= r2; r++) {
-      hexes.set(`${q},${r}`);
+      hexes.add(`${q},${r}`);
     }
   }
   return hexes;
