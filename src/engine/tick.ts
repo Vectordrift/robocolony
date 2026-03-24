@@ -185,11 +185,20 @@ export const UNIT_TRAINING_COSTS: Record<UnitType, Partial<Resources>> = {
 /** All valid unit types for training */
 export const VALID_UNIT_TYPES: UnitType[] = ['scout', 'militia', 'soldier', 'siege', 'settler'];
 
-/** Morale loss per tick when food is negative */
+/** Base morale loss per tick when food is negative (scaled by deficit severity) */
 export const MORALE_LOSS_RATE = 0.05;
 
-/** Morale threshold below which a unit deserts */
-export const DESERTION_THRESHOLD = 0.1;
+/** Morale threshold below which a unit may desert */
+export const DESERTION_THRESHOLD = 0.2;
+
+/** Probability a unit deserts each tick when at or below DESERTION_THRESHOLD */
+export const DESERTION_CHANCE = 0.3;
+
+/** Morale level at which a warning event fires (before desertion) */
+export const MORALE_WARNING_THRESHOLD = 0.4;
+
+/** Maximum morale loss multiplier from deficit severity */
+export const MAX_DEFICIT_MULTIPLIER = 3.0;
 
 /** Morale recovery per tick when food is positive */
 export const MORALE_RECOVERY_RATE = 0.10;
@@ -1500,23 +1509,59 @@ export function resolveTick(
       }
     }
 
-    // --- Food deficit: morale loss ---
+    // --- Food deficit: morale loss scaled by severity ---
     if (colony.resources.food < 0) {
+      // Calculate deficit severity: how bad is the shortfall relative to consumption?
+      const totalConsumption = totalUpkeep.food > 0 ? totalUpkeep.food : 1;
+      const deficitRatio = Math.abs(colony.resources.food) / totalConsumption;
+      const severityMultiplier = Math.min(deficitRatio * 2, MAX_DEFICIT_MULTIPLIER);
+      const effectiveMoraleLoss = MORALE_LOSS_RATE * Math.max(severityMultiplier, 1);
+
       events.push({
         type: 'famine',
         colonyId: colony.id,
-        data: { foodDeficit: colony.resources.food },
+        data: {
+          foodDeficit: colony.resources.food,
+          severity: Math.round(severityMultiplier * 100) / 100,
+          moraleLossPerTick: Math.round(effectiveMoraleLoss * 1000) / 1000,
+        },
       });
 
-      // All units of this colony lose morale
+      // All units of this colony lose morale (scaled by deficit severity)
       const tickDesertions: Array<{ type: string; id: string; morale: number }> = [];
-      for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
-        unit.morale = Math.max(0, unit.morale - MORALE_LOSS_RATE);
+      const moraleWarnings: Array<{ type: string; id: string; morale: number }> = [];
 
+      for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
+        unit.morale = Math.max(0, unit.morale - effectiveMoraleLoss);
+
+        // Probabilistic desertion: each unit at/below threshold has DESERTION_CHANCE to desert
         if (unit.morale <= DESERTION_THRESHOLD) {
-          desertedUnitIds.push(unit.id);
-          tickDesertions.push({ type: unit.type, id: unit.id, morale: unit.morale });
+          // Use deterministic-ish randomness seeded by unit id + tick for reproducibility
+          const roll = Math.random();
+          if (roll < DESERTION_CHANCE) {
+            desertedUnitIds.push(unit.id);
+            tickDesertions.push({ type: unit.type, id: unit.id, morale: unit.morale });
+          }
+        } else if (unit.morale <= MORALE_WARNING_THRESHOLD) {
+          moraleWarnings.push({ type: unit.type, id: unit.id, morale: unit.morale });
         }
+      }
+
+      // Emit morale warning before desertion happens
+      if (moraleWarnings.length > 0) {
+        events.push({
+          type: 'morale_warning',
+          colonyId: colony.id,
+          data: {
+            count: moraleWarnings.length,
+            units: moraleWarnings.map(w => ({
+              unitType: w.type,
+              unitId: w.id,
+              morale: Math.round(w.morale * 100) / 100,
+            })),
+            summary: `${moraleWarnings.length} unit(s) have low morale and may desert soon`,
+          },
+        });
       }
 
       // Emit a single aggregated desertion event (instead of one per unit)
