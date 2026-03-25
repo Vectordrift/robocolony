@@ -2172,11 +2172,12 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
                 }
             }
         }
-        // --- Food deficit: famine triggers on negative net food production ---
-        // Uses net food (production vs consumption) instead of stockpile.
-        // A colony with stockpiled food but negative net still gets a warning,
-        // but only suffers morale loss once the stockpile actually runs out.
-        if (net.food < 0) {
+        // --- // --- Food deficit: famine triggers on meaningful negative net food production ---
+    // Suppress famine warnings when:
+    // 1. Deficit is tiny (< 1.0/tick) — likely rounding noise or pop growth oscillation
+    // 2. Stockpile covers >50 ticks of the deficit — colony has plenty of reserves
+    const ticksOfReserves = net.food < 0 ? colony.resources.food / Math.abs(net.food) : Infinity;
+    if (net.food < -1.0 || (net.food < 0 && ticksOfReserves < 50)) {
             // Calculate deficit severity: how bad is the shortfall relative to consumption?
             const totalConsumption = totalUpkeep.food > 0 ? totalUpkeep.food : 1;
             const deficitRatio = Math.abs(net.food) / totalConsumption;
