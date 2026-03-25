@@ -195,8 +195,8 @@ describe('calculateProduction', () => {
     });
     const production = calculateProduction(settlement, []);
 
-    // farm: 12 * 2 (level) * 2.0 (city) = 48
-    expect(production.food).toBeCloseTo(48);
+    // farm: 15 * 2 (level) * 2.0 (city) = 60
+    expect(production.food).toBeCloseTo(60);
   });
 
   it('sums production from multiple buildings', () => {
@@ -211,8 +211,8 @@ describe('calculateProduction', () => {
     });
     const production = calculateProduction(settlement, []);
 
-    expect(production.food).toBeCloseTo(12);   // farm: 12
-    expect(production.timber).toBeCloseTo(4);  // lumberMill: 4
+    expect(production.food).toBeCloseTo(15);   // farm: 15
+    expect(production.timber).toBeCloseTo(3);  // lumberMill: 3
     expect(production.iron).toBeCloseTo(3);    // mine: 3
   });
 
@@ -236,8 +236,8 @@ describe('calculateProduction', () => {
     });
     const production = calculateProduction(settlement, []);
 
-    // Should default to level 1: farm produces 12 food * 1 * 1.0 = 12
-    expect(production.food).toBeCloseTo(12);
+    // Should default to level 1: farm produces 15 food * 1 * 1.0 = 15
+    expect(production.food).toBeCloseTo(15);
     // Ensure no NaN values
     expect(Number.isNaN(production.food)).toBe(false);
     expect(Number.isNaN(production.timber)).toBe(false);
@@ -295,21 +295,21 @@ describe('calculateBuildingUpkeep', () => {
     });
     const upkeep = calculateBuildingUpkeep(settlement);
 
-    // mine: timber 2*2, food 2*2
+    // mine: timber 2*2, food 1*2
     expect(upkeep.timber).toBe(4);
-    expect(upkeep.food).toBe(4);
+    expect(upkeep.food).toBe(2);
   });
 
   it('sums upkeep from multiple buildings', () => {
     const settlement = makeSettlement({
       buildings: [
-        { type: 'mine', level: 1 },     // timber 2, food 2
-        { type: 'barracks', level: 1 },  // food 3, iron 2, timber 1
+        { type: 'mine', level: 1 },     // timber 2, food 1
+        { type: 'barracks', level: 1 },  // food 2, iron 2, timber 1
       ],
     });
     const upkeep = calculateBuildingUpkeep(settlement);
 
-    expect(upkeep.food).toBe(5);    // 2 + 3
+    expect(upkeep.food).toBe(3);    // 1 + 2
     expect(upkeep.timber).toBe(3);  // mine 2 + barracks 1
     expect(upkeep.iron).toBe(2);    // barracks 2
   });
@@ -1094,8 +1094,8 @@ describe('resolveTick', () => {
     const hexes = makeHexRing(0, 0);
     const result = resolveTick([colony], [settlement], [], hexes);
 
-    // Food: 12 (farm) + 10.5 (hexes) = 22.5 produced, 4 (pop consumption) upkeep
-    // Net: ~18.5. Starting 100 + 18.5 > 100
+    // Food: 15 (farm) + 10.5 (hexes) = 25.5 produced, 4 (pop consumption) upkeep
+    // Net: ~21.5. Starting 100 + 21.5 > 100
     expect(result.colonies[0].resources.food).toBeGreaterThan(100);
     expect(result.events.some(e => e.type === 'production')).toBe(true);
   });
@@ -1189,7 +1189,7 @@ describe('resolveTick', () => {
     const hexes = makeHexRing(0, 0);
     const result = resolveTick([colony], [settlement], units, hexes);
 
-    // Farm produces 12 food, hex yields ~10.5, pop consumes 4, scout costs 0.5
+    // Farm produces 15 food, hex yields ~10.5, pop consumes 4, scout costs 0.5
     // Net food positive, so morale recovers
     expect(result.units[0].morale).toBeCloseTo(0.5 + MORALE_RECOVERY_RATE);
   });
@@ -1794,8 +1794,8 @@ describe('resolveTick population consumption', () => {
     });
     // 3 soldiers (3 food each) + 2 siege (4 food each) = 17 food upkeep
     // Plus pop: 4 food consumption (10 * 0.4)
-    // Farm production: 12 food
-    // Net: 12 - 17 - 4 = -9 food
+    // Farm production: 15 food
+    // Net: 15 - 17 - 4 = -6 food
     const units = [
       makeUnit({ id: 'u1', type: 'soldier' }),
       makeUnit({ id: 'u2', type: 'soldier' }),
@@ -1807,8 +1807,8 @@ describe('resolveTick population consumption', () => {
     const result = resolveTick([colony], [settlement], units, []);
 
     // Food should go negative due to heavy military upkeep + pop consumption
-    // produced=12 (farm), consumed=4 (pop) + 17 (units) = 21
-    // Net = 12 - 21 = -9. Starting 50 - 9 = 41. Not negative yet.
+    // produced=15 (farm), consumed=4 (pop) + 17 (units) = 21
+    // Net = 15 - 21 = -6. Starting 50 - 6 = 44. Not negative yet.
     // But after a few ticks it would be.
     // With starting food 5 instead:
     const colony2 = makeColony({ resources: { food: 5, timber: 50, stone: 30, iron: 10, influence: 50 } });
@@ -1818,7 +1818,7 @@ describe('resolveTick population consumption', () => {
     });
     const result2 = resolveTick([colony2], [settlement2], units, []);
 
-    // Net = -9. Starting 5 - 9 = -4 → famine
+    // Net = -6. Starting 5 - 6 = -1 → famine
     expect(result2.events.some(e => e.type === 'famine')).toBe(true);
     // Food clamped to 0
     expect(result2.colonies[0].resources.food).toBe(0);
@@ -2595,9 +2595,9 @@ describe('Building upgrade production scaling', () => {
     const prod1 = calculateProduction(settlement1, emptyHexes);
     const prod2 = calculateProduction(settlement2, emptyHexes);
 
-    // Farm L1: 12 food, Farm L2: 24 food (both at outpost tier 1.0, no hex bonus)
-    expect(prod1.food).toBe(12);
-    expect(prod2.food).toBe(24);
+    // Farm L1: 15 food, Farm L2: 30 food (both at outpost tier 1.0, no hex bonus)
+    expect(prod1.food).toBe(15);
+    expect(prod2.food).toBe(30);
   });
 
   it('should scale upkeep with building level', () => {
@@ -2607,7 +2607,7 @@ describe('Building upgrade production scaling', () => {
     const upkeep1 = calculateBuildingUpkeep(settlement1);
     const upkeep2 = calculateBuildingUpkeep(settlement2);
 
-    // Mine upkeep L1: timber 1, food 1. L2: timber 2, food 2.
+    // Mine upkeep L1: timber 2, food 1. L2: timber 4, food 2.
     expect(upkeep2.timber).toBe((upkeep1.timber as number) * 2);
     expect(upkeep2.food).toBe((upkeep1.food as number) * 2);
   });
@@ -2764,3 +2764,8 @@ describe('Idle unit tracking', () => {
 });
 
 
+
+
+====================================================================
+  END UNTRUSTED DATA
+====================================================================
