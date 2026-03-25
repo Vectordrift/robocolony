@@ -125,8 +125,8 @@ export const TIER_MULTIPLIER: Record<string, number> = {
 
 /** Building production per level */
 export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
-  farm:       { food: 12 },
-  lumberMill: { timber: 4 },
+  farm:       { food: 15 },
+  lumberMill: { timber: 3 },
   quarry:     { stone: 4 },
   mine:       { iron: 3 },
   barracks:   {},
@@ -137,12 +137,12 @@ export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
 /** Building upkeep per level (resources consumed per tick) */
 export const BUILDING_UPKEEP: Record<BuildingType, Partial<Resources>> = {
   farm:       { timber: 2 },
-  lumberMill: { timber: 1, stone: 1 },
-  quarry:     { timber: 2, food: 1 },
-  mine:       { timber: 2, food: 2 },
-  barracks:   { food: 3, iron: 2, timber: 1 },
+  lumberMill: { timber: 2, stone: 1 },
+  quarry:     { timber: 2 },
+  mine:       { timber: 2, food: 1 },
+  barracks:   { food: 2, iron: 2, timber: 1 },
   granary:    { timber: 1 },
-  market:     { food: 2, timber: 1 },
+  market:     { food: 1, timber: 1 },
 };
 
 /** Building construction costs */
@@ -186,10 +186,10 @@ export const VALID_BUILDING_TYPES: BuildingType[] = [
 /** Unit food upkeep per tick */
 export const UNIT_UPKEEP: Record<UnitType, number> = {
   scout: 0.5,
-  militia: 2,
+  militia: 1.5,
   soldier: 3,
   siege: 4,
-  settler: 5,
+  settler: 3,
 };
 
 /** Population food consumption per person per tick */
@@ -208,7 +208,7 @@ export const UNIT_TRAINING_COSTS: Record<UnitType, Partial<Resources>> = {
 export const VALID_UNIT_TYPES: UnitType[] = ['scout', 'militia', 'soldier', 'siege', 'settler'];
 
 /** Base morale loss per tick when food is negative (scaled by deficit severity) */
-export const MORALE_LOSS_RATE = 0.05;
+export const MORALE_LOSS_RATE = 0.03;
 
 /** Morale threshold below which a unit may desert */
 export const DESERTION_THRESHOLD = 0.2;
@@ -1923,10 +1923,3 @@ export function resolveTick(
     fogReveals,
   };
 }
-
-
-
-
-
-
-
