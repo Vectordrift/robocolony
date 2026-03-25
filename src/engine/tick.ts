@@ -1790,11 +1790,29 @@ export function resolveCombat(
   units: Unit[],
   actions: QueuedAction[],
   seed?: number,
+  activeAgreements?: Agreement[],
 ): CombatResult {
   const rng = createRng(seed);
   const events: TickEvent[] = [];
   const actionResults: ActionResult[] = [];
   const destroyedUnitIds: string[] = [];
+
+  // Build NAP lookup: set of "colonyA|colonyB" pairs (sorted ids) with active non_aggression or alliance
+  const napPairs = new Set<string>();
+  if (activeAgreements) {
+    for (const agr of activeAgreements) {
+      if (agr.status === 'active' && (agr.type === 'non_aggression' || agr.type === 'alliance')) {
+        const pair = [agr.proposedBy, agr.proposedTo].sort().join('|');
+        napPairs.add(pair);
+      }
+    }
+  }
+
+  // Helper to check if two colonies have an active NAP/alliance
+  const hasNap = (colonyA: string, colonyB: string): boolean => {
+    const pair = [colonyA, colonyB].sort().join('|');
+    return napPairs.has(pair);
+  };
 
   // Note: attack actions are handled as move_unit by resolveMovement() — pathfinding
   // toward the target hex. Combat resolution below handles the fighting when they arrive.
@@ -1813,8 +1831,41 @@ export function resolveCombat(
     const colonies = new Set(unitsOnHex.map(u => u.colonyId));
     if (colonies.size < 2) continue;
 
-    // Combat! All units on this hex fight.
-    // Each unit attacks a random enemy unit.
+    // --- NAP enforcement ---
+    // Check if ALL colony pairs on this hex have NAPs. If so, skip combat entirely.
+    // If only some pairs have NAPs, combat still happens but NAP-protected units don't target each other.
+    const colonyIds = [...colonies];
+    let allPairsProtected = true;
+    for (let i = 0; i < colonyIds.length; i++) {
+      for (let j = i + 1; j < colonyIds.length; j++) {
+        if (!hasNap(colonyIds[i], colonyIds[j])) {
+          allPairsProtected = false;
+          break;
+        }
+      }
+      if (!allPairsProtected) break;
+    }
+
+    if (allPairsProtected) {
+      // All colonies on this hex have mutual NAPs — no combat, emit nap_blocked_combat event
+      const [hexX, hexY] = hex.split(',').map(Number);
+      for (const colonyId of colonyIds) {
+        events.push({
+          type: 'nap_blocked_combat',
+          colonyId,
+          data: {
+            hexX,
+            hexY,
+            colonies: colonyIds.filter(c => c !== colonyId),
+            reason: 'Non-aggression pact prevents combat',
+          },
+        });
+      }
+      continue; // Skip combat on this hex entirely
+    }
+
+    // Combat! Units on this hex fight (respecting NAP protections for individual pairs).
+    // Each unit attacks a random enemy unit that is NOT NAP-protected.
     // We process all attacks simultaneously (no kill-order advantage).
 
     // Calculate damage dealt by each unit
@@ -1833,8 +1884,10 @@ export function resolveCombat(
       const attackPower = UNIT_ATTACK[attacker.type];
       if (attackPower <= 0) continue; // settlers can't attack
 
-      // Find enemy units (from different colony)
-      const enemies = unitsOnHex.filter(u => u.colonyId !== attacker.colonyId);
+      // Find enemy units (from different colony AND not NAP-protected)
+      const enemies = unitsOnHex.filter(u =>
+        u.colonyId !== attacker.colonyId && !hasNap(attacker.colonyId, u.colonyId)
+      );
       if (enemies.length === 0) continue;
 
       // Pick a random enemy target
@@ -3008,7 +3061,7 @@ export function resolveTick(
   // --- Phase 0.25: Resolve combat (after movement, before fog) ---
   // Units from different colonies sharing a hex fight automatically.
   {
-    const combatResult = resolveCombat(updatedUnits, actions, combatSeed);
+    const combatResult = resolveCombat(updatedUnits, actions, combatSeed, agreements);
     if (combatResult.destroyedUnitIds.length > 0 || combatResult.events.length > 0) {
       updatedUnits = combatResult.units.map(u => ({
         ...u,
