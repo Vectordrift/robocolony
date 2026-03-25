@@ -1,10 +1,7 @@
 #!/bin/sh
-set -e
-
+set -ex
+apk add --no-cache git
 cd /data/robocolony
 git pull origin main
-
-# npm install may fail via proxy — tolerate since deps persist on volume
-npm install --omit=dev 2>&1 || echo "[startup] npm install failed — using cached node_modules"
-
+npm install --omit=dev 2>&1
 NODE_ENV=production exec node dist/server.js

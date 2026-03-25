@@ -94,17 +94,6 @@ export interface MessageRecord {
     content: string;
     read: boolean;
 }
-export interface AgreementRecord {
-    id: string;
-    worldId: string;
-    type: 'non_aggression' | 'trade' | 'alliance';
-    proposedBy: string;
-    proposedTo: string;
-    status: 'proposed' | 'active' | 'rejected' | 'broken';
-    terms: Record<string, unknown>;
-    proposedAtTick: number;
-    acceptedAtTick: number | null;
-}
 export interface TickResult {
     colonies: Colony[];
     settlements: Settlement[];
@@ -114,8 +103,6 @@ export interface TickResult {
     actionResults: ActionResult[];
     fogReveals: HexExploration[];
     newMessages: MessageRecord[];
-    newAgreements: AgreementRecord[];
-    updatedAgreements: AgreementRecord[];
 }
 /** Settlement tier multipliers for production */
 export declare const TIER_MULTIPLIER: Record<string, number>;
@@ -163,17 +150,6 @@ export declare const SCORE_UPGRADE_CITY = 250;
 export declare const SCORE_BUILDING_BUILT = 25;
 export declare const SCORE_UNIT_TRAINED = 10;
 export declare const SCORE_COMBAT_VICTORY = 100;
-export declare const SCORE_SETTLEMENT_CAPTURED = 200;
-/** Loyalty value for a newly captured settlement */
-export declare const CAPTURED_LOYALTY = 25;
-/** Loyalty gain per tick when colony has positive net food */
-export declare const LOYALTY_GAIN_PER_TICK = 2;
-/** Loyalty loss per tick when colony has food deficit */
-export declare const LOYALTY_LOSS_PER_TICK = 5;
-/** Loyalty threshold below which production is reduced */
-export declare const LOYALTY_PRODUCTION_THRESHOLD = 50;
-/** Maximum loyalty value */
-export declare const LOYALTY_MAX = 100;
 /** Morale recovery per tick when food is positive */
 export declare const MORALE_RECOVERY_RATE = 0.1;
 /** Ticks of inactivity before emitting idle unit warning */
@@ -195,8 +171,6 @@ export declare const UPGRADE_COSTS: Record<string, {
 export declare const TIER_ORDER: string[];
 /** Maximum population per settlement tier */
 export declare const MAX_POPULATION: Record<string, number>;
-/** Maximum number of building slots per settlement tier */
-export declare const BUILDING_SLOTS: Record<string, number>;
 /** Population growth rate: +1 per this many excess food */
 export declare const POP_GROWTH_PER_FOOD = 5;
 /** Stockpile capacity per settlement tier (per resource) */
@@ -363,32 +337,11 @@ export interface CombatResult {
  * Effective damage = max(0, damage - target.defensePower).
  * Units at health ≤ 0 are destroyed. Survivors lose COMBAT_MORALE_LOSS morale.
  */
-export declare function resolveCombat(units: Unit[], actions: QueuedAction[], seed?: number, agreements?: AgreementRecord[]): CombatResult;
-export interface CaptureResult {
-    settlements: Settlement[];
-    events: TickEvent[];
-}
-/**
- * Resolve settlement capture after combat.
- *
- * For each settlement hex, check if:
- * 1. There are no defending units (owner's units) on the hex
- * 2. There ARE enemy units on the hex
- * If so, the settlement is captured by the attacking colony.
- *
- * Capture penalties:
- * - Tier drops one level (city→town, town→outpost; outpost stays outpost)
- * - Population drops by 50%
- * - Build queue is cancelled
- * - Loyalty set to CAPTURED_LOYALTY (25)
- */
-export declare function resolveSettlementCapture(settlements: Settlement[], units: Unit[], agreements?: AgreementRecord[]): CaptureResult;
+export declare function resolveCombat(units: Unit[], actions: QueuedAction[], seed?: number): CombatResult;
 /** Maximum messages a colony can send per tick */
 export declare const MAX_MESSAGES_PER_TICK = 5;
 /** Maximum message content length (characters) */
 export declare const MAX_MESSAGE_LENGTH = 500;
-/** Influence cost to break an active agreement */
-export declare const AGREEMENT_BREAK_COST = 25;
 /** Delivery delay in ticks (messages arrive 1 tick after sending) */
 export declare const MESSAGE_DELIVERY_DELAY = 1;
 export interface MessageResult {
@@ -408,27 +361,6 @@ export interface MessageResult {
  * On success: message record created, event emitted for recipient.
  */
 export declare function resolveMessages(colonies: Colony[], actions: QueuedAction[], worldId: string, currentTick: number): MessageResult;
-export interface AgreementResult {
-    newAgreements: AgreementRecord[];
-    updatedAgreements: AgreementRecord[];
-    events: TickEvent[];
-    actionResults: ActionResult[];
-}
-/**
- * Resolve agreement actions: propose, accept, reject, break diplomatic agreements.
- *
- * Action types:
- * - propose_agreement: { toColonyId, agreementType, terms? } — create a proposed agreement
- * - accept_agreement: { agreementId } — activate a proposed agreement
- * - reject_agreement: { agreementId } — reject a proposed agreement
- * - break_agreement: { agreementId } — break an active agreement (costs influence)
- */
-export declare function resolveAgreements(colonies: Colony[], existingAgreements: AgreementRecord[], actions: QueuedAction[], worldId: string, currentTick: number): AgreementResult;
-/**
- * Check if an attack is blocked by an active Non-Aggression Pact.
- * Returns the blocking agreement if found, null otherwise.
- */
-export declare function isAttackBlockedByNAP(attackerColonyId: string, defenderColonyId: string, agreements: AgreementRecord[]): AgreementRecord | null;
 /** Base conversion rate: spend this many units to get 1 unit of target resource */
 export declare const MARKET_CONVERSION_BASE_RATE = 3;
 /** Conversion rate improvement per market level: rate = base - (level - 1) * this */
@@ -489,6 +421,6 @@ export declare function autoExploreIdleScouts(units: Unit[], hexes: HexTileState
  * 7. Handle deficits: morale loss → desertion
  * 8. Handle surplus: morale recovery
  */
-export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number, existingAgreements?: AgreementRecord[]): TickResult;
+export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number): TickResult;
 export {};
 //# sourceMappingURL=tick.d.ts.map

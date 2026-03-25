@@ -146,4 +146,3 @@ export async function messageRoutes(app) {
         return { id: msgId, read: true };
     });
 }
-//# sourceMappingURL=messages.js.map

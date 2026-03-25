@@ -4,7 +4,7 @@
  * Loads world state from the database, runs resolveTick, writes results back.
  * One scheduler instance per running world.
  */
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import * as schema from '../db/schema/index.js';
 import { resolveTick } from './tick.js';
 import { hexDistance } from './hex.js';
@@ -14,7 +14,7 @@ const COMPASS_SIGNAL_INTERVAL = 25;
 /** Minimum ticks before first compass signal (let colonies establish first) */
 const COMPASS_SIGNAL_START = 25;
 /** Maximum time (ms) for a single tick to complete before being killed */
-const TICK_TIMEOUT_MS = 60_000;
+const TICK_TIMEOUT_MS = 60000;
 /** Event types visible on the public feed (spectator view) */
 const PUBLIC_EVENT_TYPES = new Set([
     'settlement_founded',
@@ -26,9 +26,6 @@ const PUBLIC_EVENT_TYPES = new Set([
     'combat_resolved',
     'unit_destroyed',
     'shortage',
-    'settlement_captured',
-    'agreement_signed',
-    'agreement_broken',
 ]);
 /**
  * Build public-safe data for spectator feed.
@@ -83,24 +80,6 @@ function buildPublicData(event) {
                 unitType: event.data.unitType,
                 cause: event.data.cause || 'combat',
             };
-        case 'settlement_captured':
-            return {
-                name: event.data.name,
-                previousTier: event.data.previousTier,
-                newTier: event.data.newTier,
-            };
-        case 'agreement_signed':
-            return {
-                agreementType: event.data.agreementType,
-                withColonyId: event.data.withColonyId,
-                withColonyName: event.data.withColonyName,
-            };
-        case 'agreement_broken':
-            return {
-                agreementType: event.data.agreementType,
-                brokenByName: event.data.brokenByName,
-                otherPartyName: event.data.otherPartyName,
-            };
         default:
             return null;
     }
@@ -110,7 +89,6 @@ export class TickScheduler {
     db;
     timer = null;
     running = false;
-    tickStartedAt = 0;
     onTick;
     onError;
     constructor(options) {
@@ -118,6 +96,7 @@ export class TickScheduler {
         this.db = options.db;
         this.onTick = options.onTick;
         this.onError = options.onError;
+        this.tickStartedAt = 0;
     }
     /**
      * Start the tick loop for a world.
@@ -151,14 +130,12 @@ export class TickScheduler {
      */
     async executeTick() {
         if (this.running) {
-            // If a tick has been running for more than TICK_TIMEOUT_MS, force-reset
             const elapsed = Date.now() - this.tickStartedAt;
             if (elapsed > TICK_TIMEOUT_MS) {
                 this.onError?.(new Error(`Tick stuck for ${elapsed}ms — force-resetting scheduler`));
                 this.running = false;
-            }
-            else {
-                return; // previous tick still processing normally
+            } else {
+                return;
             }
         }
         this.running = true;
@@ -191,11 +168,6 @@ export class TickScheduler {
                 .from(schema.hexes)
                 .where(eq(schema.hexes.worldId, this.worldId));
             // Load queued actions for this tick
-            // Load agreements for this world
-            const dbAgreements = await this.db
-                .select()
-                .from(schema.agreements)
-                .where(and(eq(schema.agreements.worldId, this.worldId), sql `status IN ('proposed', 'active')`));
             const dbActions = await this.db
                 .select()
                 .from(schema.actions)
@@ -206,7 +178,7 @@ export class TickScheduler {
                 worldId: c.worldId,
                 name: c.name,
                 resources: c.resources,
-                legacyScore: c.legacyScore ?? 0,
+        legacyScore: c.legacyScore ?? 0,
                 status: c.status,
             }));
             const settlements = dbSettlements.map(s => ({
@@ -240,6 +212,7 @@ export class TickScheduler {
                 terrain: h.terrain,
                 resources: (h.resources ?? { food: 0, timber: 0, stone: 0, iron: 0 }),
                 settlementId: h.settlementId,
+            exploredBy: h.exploredBy ?? [],
                 exploredBy: (h.exploredBy ?? []),
             }));
             const queuedActions = dbActions.map(a => ({
@@ -248,19 +221,8 @@ export class TickScheduler {
                 type: a.type,
                 params: a.params,
             }));
-            const existingAgreements = dbAgreements.map(a => ({
-                id: a.id,
-                worldId: a.worldId,
-                type: a.type,
-                proposedBy: a.proposedBy,
-                proposedTo: a.proposedTo,
-                status: a.status,
-                terms: (a.terms ?? {}),
-                proposedAtTick: a.proposedAtTick,
-                acceptedAtTick: a.acceptedAtTick ?? null,
-            }));
             // Resolve tick
-            const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick, existingAgreements);
+            const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick);
             // Persist results
             await this.db.transaction(async (tx) => {
                 // Update world tick
@@ -494,34 +456,6 @@ export class TickScheduler {
                         });
                     }
                 }
-                // Insert new agreements
-                if (result.newAgreements && result.newAgreements.length > 0) {
-                    for (const agr of result.newAgreements) {
-                        await tx.insert(schema.agreements).values({
-                            id: agr.id,
-                            worldId: agr.worldId,
-                            type: agr.type,
-                            proposedBy: agr.proposedBy,
-                            proposedTo: agr.proposedTo,
-                            status: agr.status,
-                            terms: agr.terms,
-                            proposedAtTick: agr.proposedAtTick,
-                            acceptedAtTick: agr.acceptedAtTick,
-                        });
-                    }
-                }
-                // Update existing agreements (status changes)
-                if (result.updatedAgreements && result.updatedAgreements.length > 0) {
-                    for (const agr of result.updatedAgreements) {
-                        await tx
-                            .update(schema.agreements)
-                            .set({
-                            status: agr.status,
-                            acceptedAtTick: agr.acceptedAtTick,
-                        })
-                            .where(eq(schema.agreements.id, agr.id));
-                    }
-                }
                 // Insert events
                 for (const event of result.events) {
                     const isPublic = PUBLIC_EVENT_TYPES.has(event.type);
@@ -545,4 +479,3 @@ export class TickScheduler {
         }
     }
 }
-//# sourceMappingURL=scheduler.js.map
