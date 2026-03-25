@@ -333,7 +333,7 @@ describe('calculatePopulationConsumption', () => {
   it('returns population * POP_FOOD_CONSUMPTION', () => {
     const settlement = makeSettlement({ population: 10 });
     expect(calculatePopulationConsumption(settlement)).toBe(10 * POP_FOOD_CONSUMPTION);
-    expect(calculatePopulationConsumption(settlement)).toBe(5);
+    expect(calculatePopulationConsumption(settlement)).toBe(4);
   });
 
   it('returns 0 for zero population', () => {
