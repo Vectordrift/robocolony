@@ -173,19 +173,20 @@ async function start() {
 
   try {
     await app.listen({ host, port });
-    app.log.info(`RoboColony server running on ${host}:${port}`);
+    const logger = app.log as any;
+    logger.info(`RoboColony server running on ${host}:${port}`);
 
     // Run schema migration FIRST — ensures all columns exist before any queries
-    await ensureSchema(db as any, app.log);
+    await ensureSchema(db as any, logger);
 
     // Normalize data before starting schedulers
-    await normalizeData(app.log);
+    await normalizeData(logger);
 
     // Start tick schedulers after server is listening
-    await startSchedulers(app.log);
-    app.log.info(`Tick schedulers initialized (${schedulers.size} world(s))`);
+    await startSchedulers(logger);
+    logger.info(`Tick schedulers initialized (${schedulers.size} world(s))`);
   } catch (err) {
-    app.log.error(err);
+    (app.log as any).error(err);
     process.exit(1);
   }
 }
