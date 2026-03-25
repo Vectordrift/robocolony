@@ -480,6 +480,24 @@
       opacity: 0.6;
       z-index: 100;
     }
+    .version-footer {
+      position: fixed;
+      bottom: 8px;
+      right: 12px;
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      opacity: 0.5;
+      z-index: 50;
+      font-family: inherit;
+    }
+    .version-footer a {
+      color: var(--text-dim);
+      text-decoration: none;
+    }
+    .version-footer a:hover {
+      color: var(--accent);
+      opacity: 1;
+    }
   </style>
 </head>
 <body>
@@ -937,7 +955,17 @@
 
     // --- Init ---
     fetchFeed().then(startRefreshCycle);
+    // --- Fetch version ---
+    fetch("/version").then(r=>r.json()).then(v=>{
+      const el=document.getElementById("versionFooter");
+      if(v.short && v.short!=="dev"){
+        el.innerHTML=`<a href="https://github.com/Vectordrift/robocolony/commit/${v.sha}" target="_blank" title="${v.message||""} — ${v.timestamp||""}">${v.short}</a>`;
+      } else {
+        el.textContent="dev";
+      }
+    }).catch(()=>{});
   </script>
+  <div class="version-footer" id="versionFooter"></div>
 </body>
 </html>
 
