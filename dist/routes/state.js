@@ -12,8 +12,22 @@ import { TECH_TREE } from '../engine/tick.js';
 /**
  * Get all hexes visible to a colony (fog of war applied).
  * A hex is visible if the colony ID is in its explored_by array.
+ * Alliance shared vision: if the colony has active alliance agreements,
+ * hexes explored by allied colonies are also visible.
  */
 export async function getVisibleHexes(worldId, colonyId) {
+    // Find alliance partners (active alliance agreements)
+    const activeAlliances = await db
+        .select()
+        .from(agreements)
+        .where(and(eq(agreements.worldId, worldId), sql `${agreements.type} = 'alliance'`, sql `${agreements.status} = 'active'`, or(eq(agreements.proposedBy, colonyId), eq(agreements.proposedTo, colonyId))));
+    // Collect all colony IDs whose vision we share (self + alliance partners)
+    const visibleColonyIds = [colonyId];
+    for (const alliance of activeAlliances) {
+        const partnerId = alliance.proposedBy === colonyId ? alliance.proposedTo : alliance.proposedBy;
+        visibleColonyIds.push(partnerId);
+    }
+    // Query hexes visible to any of the allied colonies
     const rows = await db
         .select({
         x: hexes.x,
@@ -23,7 +37,7 @@ export async function getVisibleHexes(worldId, colonyId) {
         settlementId: hexes.settlementId,
     })
         .from(hexes)
-        .where(and(eq(hexes.worldId, worldId), sql `${colonyId} = ANY(explored_by)`));
+        .where(and(eq(hexes.worldId, worldId), sql `explored_by && ARRAY[${sql.join(visibleColonyIds.map(id => sql `${id}`), sql `, `)}]::text[]`));
     return rows.map((h) => ({
         x: h.x,
         y: h.y,

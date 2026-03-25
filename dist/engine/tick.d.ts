@@ -355,7 +355,7 @@ export interface CombatResult {
  * Effective damage = max(0, damage - target.defensePower).
  * Units at health ≤ 0 are destroyed. Survivors lose COMBAT_MORALE_LOSS morale.
  */
-export declare function resolveCombat(units: Unit[], actions: QueuedAction[], seed?: number): CombatResult;
+export declare function resolveCombat(units: Unit[], actions: QueuedAction[], seed?: number, activeAgreements?: Agreement[]): CombatResult;
 /** Maximum messages a colony can send per tick */
 export declare const MAX_MESSAGES_PER_TICK = 5;
 /** Maximum message content length (characters) */

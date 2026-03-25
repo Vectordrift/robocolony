@@ -15,6 +15,8 @@ export interface VisibleHex {
 /**
  * Get all hexes visible to a colony (fog of war applied).
  * A hex is visible if the colony ID is in its explored_by array.
+ * Alliance shared vision: if the colony has active alliance agreements,
+ * hexes explored by allied colonies are also visible.
  */
 export declare function getVisibleHexes(worldId: string, colonyId: string): Promise<VisibleHex[]>;
 export declare function stateRoutes(app: FastifyInstance): Promise<void>;
