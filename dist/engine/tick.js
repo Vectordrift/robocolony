@@ -96,6 +96,7 @@ export const DESERTION_CHANCE = 0.3;
 export const MORALE_WARNING_THRESHOLD = 0.4;
 /** Maximum morale loss multiplier from deficit severity */
 export const MAX_DEFICIT_MULTIPLIER = 3.0;
+// --- Legacy Score Awards ---
 export const SCORE_PER_TICK = 1;
 export const SCORE_SETTLEMENT_FOUNDED = 50;
 export const SCORE_UPGRADE_TOWN = 100;
@@ -1563,6 +1564,170 @@ export function resolveMessages(colonies, actions, worldId, currentTick) {
     }
     return { messages: newMessages, events, actionResults };
 }
+// --- Market Resource Conversion ---
+/** Base conversion rate: spend this many units to get 1 unit of target resource */
+export const MARKET_CONVERSION_BASE_RATE = 3.0;
+/** Conversion rate improvement per market level: rate = base - (level - 1) * this */
+export const MARKET_CONVERSION_LEVEL_BONUS = 0.5;
+/** Minimum conversion rate (best possible) */
+export const MARKET_CONVERSION_MIN_RATE = 1.5;
+/** Maximum amount convertible per action */
+export const MARKET_CONVERSION_MAX_AMOUNT = 200;
+/** Convertible resource types */
+const CONVERTIBLE_RESOURCES = ['food', 'timber', 'stone', 'iron'];
+/**
+ * Resolve convert_resources actions: exchange surplus resources via market.
+ *
+ * Requires a market building in the specified settlement.
+ * Conversion rate improves with market level:
+ *   Level 1: 3:1
+ *   Level 2: 2.5:1
+ *   Level 3: 2:1
+ *
+ * Validates:
+ * - Settlement exists and belongs to colony
+ * - Settlement has a market building
+ * - fromResource and toResource are valid and different
+ * - Colony has enough of the source resource
+ * - Amount is positive and within limits
+ */
+export function resolveConvertResources(settlements, colonies, actions) {
+    const events = [];
+    const actionResults = [];
+    const convertActions = actions.filter(a => a.type === 'convert_resources');
+    if (convertActions.length === 0) {
+        return { events, actionResults };
+    }
+    // Build lookups
+    const settlementMap = new Map();
+    for (const s of settlements) {
+        settlementMap.set(s.id, s);
+    }
+    const colonyMap = new Map();
+    for (const c of colonies) {
+        colonyMap.set(c.id, c);
+    }
+    for (const action of convertActions) {
+        const settlementId = action.params.settlementId;
+        const fromResource = action.params.fromResource;
+        const toResource = action.params.toResource;
+        const amount = Number(action.params.amount);
+        // 1. Settlement exists
+        const settlement = settlementMap.get(settlementId);
+        if (!settlement) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `Settlement ${settlementId} not found`,
+            });
+            continue;
+        }
+        // 2. Colony ownership
+        if (settlement.colonyId !== action.colonyId) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+            });
+            continue;
+        }
+        // 3. Settlement has a market
+        const market = settlement.buildings.find(b => b.type === 'market');
+        if (!market) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `Settlement ${settlement.name} does not have a market building`,
+            });
+            continue;
+        }
+        // 4. Validate resource types
+        if (!CONVERTIBLE_RESOURCES.includes(fromResource)) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `Invalid source resource: ${fromResource}. Must be one of: ${CONVERTIBLE_RESOURCES.join(', ')}`,
+            });
+            continue;
+        }
+        if (!CONVERTIBLE_RESOURCES.includes(toResource)) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `Invalid target resource: ${toResource}. Must be one of: ${CONVERTIBLE_RESOURCES.join(', ')}`,
+            });
+            continue;
+        }
+        if (fromResource === toResource) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `Cannot convert ${fromResource} to itself`,
+            });
+            continue;
+        }
+        // 5. Validate amount
+        if (!Number.isFinite(amount) || amount <= 0) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `Amount must be a positive number`,
+            });
+            continue;
+        }
+        if (amount > MARKET_CONVERSION_MAX_AMOUNT) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `Amount exceeds maximum of ${MARKET_CONVERSION_MAX_AMOUNT} per action`,
+            });
+            continue;
+        }
+        // 6. Colony has enough resources
+        const colony = colonyMap.get(action.colonyId);
+        if (!colony) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `Colony ${action.colonyId} not found`,
+            });
+            continue;
+        }
+        if (colony.resources[fromResource] < amount) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `Insufficient ${fromResource}: have ${colony.resources[fromResource]}, need ${amount}`,
+            });
+            continue;
+        }
+        // --- All checks passed: perform conversion ---
+        const conversionRate = Math.max(MARKET_CONVERSION_MIN_RATE, MARKET_CONVERSION_BASE_RATE - (market.level - 1) * MARKET_CONVERSION_LEVEL_BONUS);
+        const received = Math.round((amount / conversionRate) * 100) / 100;
+        colony.resources[fromResource] = Math.round((colony.resources[fromResource] - amount) * 100) / 100;
+        colony.resources[toResource] = Math.round((colony.resources[toResource] + received) * 100) / 100;
+        events.push({
+            type: 'resources_converted',
+            colonyId: colony.id,
+            data: {
+                settlementId,
+                settlementName: settlement.name,
+                fromResource,
+                toResource,
+                spent: amount,
+                received,
+                conversionRate,
+                marketLevel: market.level,
+            },
+        });
+        actionResults.push({
+            actionId: action.id,
+            status: 'resolved',
+            result: `Converted ${amount} ${fromResource} → ${received} ${toResource} (rate: ${conversionRate}:1, market level ${market.level})`,
+        });
+    }
+    return { events, actionResults };
+}
 // --- Auto-Explore ---
 /**
  * Auto-explore for idle scouts.
@@ -1669,109 +1834,6 @@ export function autoExploreIdleScouts(units, hexes, hexLookup, actionedUnitIds) 
     }
     return { events };
 }
-
-/**
- * Resolve explore actions: convert to move_unit actions targeting nearest unexplored hex.
- */
-function resolveExploreActions(units, actions, hexes) {
-    const exploreActions = actions.filter(a => a.type === 'explore');
-    const remainingActions = actions.filter(a => a.type !== 'explore');
-    const events = [];
-    const actionResults = [];
-    const convertedActions = [];
-    if (exploreActions.length === 0) {
-        return { convertedActions: [], remainingActions: actions, events: [], actionResults: [] };
-    }
-    const unitMap = new Map();
-    for (const u of units)
-        unitMap.set(u.id, u);
-    const exploredByColony = new Map();
-    for (const hex of hexes) {
-        if (hex.exploredBy) {
-            for (const colonyId of hex.exploredBy) {
-                if (!exploredByColony.has(colonyId))
-                    exploredByColony.set(colonyId, new Set());
-                exploredByColony.get(colonyId).add(`${hex.x},${hex.y}`);
-            }
-        }
-    }
-    const passableHexes = new Map();
-    for (const hex of hexes) {
-        if (hex.terrain !== 'ocean') {
-            passableHexes.set(`${hex.x},${hex.y}`, hex);
-        }
-    }
-    for (const action of exploreActions) {
-        const unitId = action.params.unitId;
-        const unit = unitMap.get(unitId);
-        if (!unit) {
-            actionResults.push({ actionId: action.id, status: 'failed', result: `Unit ${unitId} not found` });
-            continue;
-        }
-        const colonyExplored = exploredByColony.get(unit.colonyId) ?? new Set();
-        const startKey = `${unit.hexX},${unit.hexY}`;
-        const visited = new Set([startKey]);
-        const queue = [{ q: unit.hexX, r: unit.hexY, dist: 0 }];
-        let targetHex = null;
-        const directions = [
-            { q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 },
-            { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 },
-        ];
-        while (queue.length > 0) {
-            const current = queue.shift();
-            if (current.dist > 30)
-                break;
-            for (const dir of directions) {
-                const nq = current.q + dir.q;
-                const nr = current.r + dir.r;
-                const nKey = `${nq},${nr}`;
-                if (visited.has(nKey))
-                    continue;
-                visited.add(nKey);
-                if (!passableHexes.has(nKey))
-                    continue;
-                if (!colonyExplored.has(nKey)) {
-                    targetHex = { q: nq, r: nr };
-                    break;
-                }
-                queue.push({ q: nq, r: nr, dist: current.dist + 1 });
-            }
-            if (targetHex)
-                break;
-        }
-        if (!targetHex) {
-            actionResults.push({
-                actionId: action.id,
-                status: 'failed',
-                result: 'No unexplored territory within range',
-            });
-            events.push({
-                type: 'explore_failed',
-                colonyId: unit.colonyId,
-                unitId: unit.id,
-                data: { reason: 'fully_explored', hexX: unit.hexX, hexY: unit.hexY },
-            });
-            continue;
-        }
-        convertedActions.push({
-            id: action.id,
-            colonyId: action.colonyId,
-            type: 'move_unit',
-            params: { unitId, targetX: targetHex.q, targetY: targetHex.r },
-        });
-        events.push({
-            type: 'explore_target_found',
-            colonyId: unit.colonyId,
-            unitId: unit.id,
-            data: {
-                from: { x: unit.hexX, y: unit.hexY },
-                target: { x: targetHex.q, y: targetHex.r },
-            },
-        });
-    }
-    return { convertedActions, remainingActions, events, actionResults };
-}
-
 // --- Tick Resolution ---
 /**
  * Resolve a single game tick.
@@ -1837,17 +1899,12 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
     for (const u of updatedUnits) {
         unitPositionsBefore.set(u.id, { x: u.hexX, y: u.hexY });
     }
-    // --- Phase -0.5: Resolve explore actions (convert to move_unit) ---
-    const nonFoundActions = actions.filter(a => a.type !== 'found_settlement');
-    const exploreResult = resolveExploreActions(updatedUnits, nonFoundActions, hexes);
-    events.push(...exploreResult.events);
-    actionResults.push(...exploreResult.actionResults);
-    const allMoveActions = [...exploreResult.remainingActions, ...exploreResult.convertedActions];
     // --- Phase 0: Resolve movement actions + advance movement queues ---
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
     const hasMovingUnits = updatedUnits.some(u => u.movementQueue && u.movementQueue.length > 0);
-    if (allMoveActions.length > 0 || hasMovingUnits) {
-        const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
-        const moveResult = resolveMovement(updatedUnits, allMoveActions, hexLookup);
+    const nonFoundActions = actions.filter(a => a.type !== 'found_settlement');
+    if (nonFoundActions.length > 0 || hasMovingUnits) {
+        const moveResult = resolveMovement(updatedUnits, nonFoundActions, hexLookup);
         events.push(...moveResult.events);
         actionResults.push(...moveResult.actionResults);
     }
@@ -1989,6 +2046,13 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         events.push(...messageResult.events);
         actionResults.push(...messageResult.actionResults);
         newMessages = messageResult.messages;
+    }
+    // --- Phase 1.95: Resolve convert_resources actions (market) ---
+    const convertActions = actions.filter(a => a.type === 'convert_resources');
+    if (convertActions.length > 0) {
+        const convertResult = resolveConvertResources(updatedSettlements, updatedColonies, actions);
+        events.push(...convertResult.events);
+        actionResults.push(...convertResult.actionResults);
     }
     // Group settlements and units by colony
     const colonySettlements = new Map();
@@ -2179,12 +2243,13 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
                 }
             }
         }
-        // --- // --- Food deficit: famine triggers on meaningful negative net food production ---
-    // Suppress famine warnings when:
-    // 1. Deficit is tiny (< 1.0/tick) — likely rounding noise or pop growth oscillation
-    // 2. Stockpile covers >50 ticks of the deficit — colony has plenty of reserves
-    const ticksOfReserves = net.food < 0 ? colony.resources.food / Math.abs(net.food) : Infinity;
-    if (net.food < -1.0 || (net.food < 0 && ticksOfReserves < 50)) {
+        // --- Food deficit: famine triggers on meaningful negative net food production ---
+        // Suppress famine warnings when:
+        // 1. Deficit is tiny (< 1.0/tick) — likely rounding noise or pop growth oscillation
+        // 2. Stockpile covers >50 ticks of the deficit — colony has plenty of reserves
+        // Only fires when deficit is significant AND reserves are running low.
+        const ticksOfReserves = net.food < 0 ? colony.resources.food / Math.abs(net.food) : Infinity;
+        if (net.food < -1.0 || (net.food < 0 && ticksOfReserves < 50)) {
             // Calculate deficit severity: how bad is the shortfall relative to consumption?
             const totalConsumption = totalUpkeep.food > 0 ? totalUpkeep.food : 1;
             const deficitRatio = Math.abs(net.food) / totalConsumption;
@@ -2331,20 +2396,26 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
             }
         }
     }
-
     // --- Legacy Score Tracking ---
+    // Award points based on events that happened this tick
     for (const colony of updatedColonies) {
-        if (colony.status !== 'active') continue;
+        if (colony.status !== 'active')
+            continue;
+        // +1 per tick alive
         colony.legacyScore = (colony.legacyScore ?? 0) + SCORE_PER_TICK;
+        // Score from events
         for (const event of events) {
-            if (!('colonyId' in event) || event.colonyId !== colony.id) continue;
+            if (!('colonyId' in event) || event.colonyId !== colony.id)
+                continue;
             switch (event.type) {
                 case 'settlement_founded':
                     colony.legacyScore += SCORE_SETTLEMENT_FOUNDED;
                     break;
                 case 'settlement_upgraded':
-                    if (event.data?.newTier === 'town') colony.legacyScore += SCORE_UPGRADE_TOWN;
-                    if (event.data?.newTier === 'city') colony.legacyScore += SCORE_UPGRADE_CITY;
+                    if (event.data?.newTier === 'town')
+                        colony.legacyScore += SCORE_UPGRADE_TOWN;
+                    if (event.data?.newTier === 'city')
+                        colony.legacyScore += SCORE_UPGRADE_CITY;
                     break;
                 case 'building_complete':
                     colony.legacyScore += SCORE_BUILDING_BUILT;
@@ -2353,12 +2424,12 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
                     colony.legacyScore += SCORE_UNIT_TRAINED;
                     break;
                 case 'combat_resolved':
-                    if (event.data?.winner === colony.id) colony.legacyScore += SCORE_COMBAT_VICTORY;
+                    if (event.data?.winner === colony.id)
+                        colony.legacyScore += SCORE_COMBAT_VICTORY;
                     break;
             }
         }
     }
-
     return {
         colonies: updatedColonies,
         settlements: updatedSettlements,
@@ -2370,3 +2441,4 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         newMessages,
     };
 }
+//# sourceMappingURL=tick.js.map

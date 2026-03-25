@@ -21,6 +21,7 @@ const VALID_ACTION_TYPES = {
     'attack': ['unitId', 'targetX', 'targetY'],
     'send_message': ['toColonyId', 'message'],
     'explore': ['unitId'],
+    'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
 };
 const MAX_ACTIONS_PER_TICK = 10;
 function validateActionType(action) {
@@ -271,3 +272,4 @@ export async function actionRoutes(app) {
         return rows[0];
     });
 }
+//# sourceMappingURL=actions.js.map

@@ -43,6 +43,7 @@ const VALID_ACTION_TYPES: Record<string, string[]> = {
   'attack': ['unitId', 'targetX', 'targetY'],
   'send_message': ['toColonyId', 'message'],
   'explore': ['unitId'],
+  'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
 };
 
 const MAX_ACTIONS_PER_TICK = 10;
@@ -381,4 +382,5 @@ export async function actionRoutes(app: FastifyInstance) {
     return rows[0];
   });
 }
+
 

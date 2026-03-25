@@ -2035,6 +2035,207 @@ export function resolveMessages(
   return { messages: newMessages, events, actionResults };
 }
 
+
+// --- Market Resource Conversion ---
+
+/** Base conversion rate: spend this many units to get 1 unit of target resource */
+export const MARKET_CONVERSION_BASE_RATE = 3.0;
+
+/** Conversion rate improvement per market level: rate = base - (level - 1) * this */
+export const MARKET_CONVERSION_LEVEL_BONUS = 0.5;
+
+/** Minimum conversion rate (best possible) */
+export const MARKET_CONVERSION_MIN_RATE = 1.5;
+
+/** Maximum amount convertible per action */
+export const MARKET_CONVERSION_MAX_AMOUNT = 200;
+
+/** Convertible resource types */
+const CONVERTIBLE_RESOURCES: (keyof Resources)[] = ['food', 'timber', 'stone', 'iron'];
+
+interface ConvertResourcesResult {
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+/**
+ * Resolve convert_resources actions: exchange surplus resources via market.
+ *
+ * Requires a market building in the specified settlement.
+ * Conversion rate improves with market level:
+ *   Level 1: 3:1
+ *   Level 2: 2.5:1
+ *   Level 3: 2:1
+ *
+ * Validates:
+ * - Settlement exists and belongs to colony
+ * - Settlement has a market building
+ * - fromResource and toResource are valid and different
+ * - Colony has enough of the source resource
+ * - Amount is positive and within limits
+ */
+export function resolveConvertResources(
+  settlements: Settlement[],
+  colonies: Colony[],
+  actions: QueuedAction[],
+): ConvertResourcesResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+
+  const convertActions = actions.filter(a => a.type === 'convert_resources');
+  if (convertActions.length === 0) {
+    return { events, actionResults };
+  }
+
+  // Build lookups
+  const settlementMap = new Map<string, Settlement>();
+  for (const s of settlements) {
+    settlementMap.set(s.id, s);
+  }
+  const colonyMap = new Map<string, Colony>();
+  for (const c of colonies) {
+    colonyMap.set(c.id, c);
+  }
+
+  for (const action of convertActions) {
+    const settlementId = action.params.settlementId as string;
+    const fromResource = action.params.fromResource as keyof Resources;
+    const toResource = action.params.toResource as keyof Resources;
+    const amount = Number(action.params.amount);
+
+    // 1. Settlement exists
+    const settlement = settlementMap.get(settlementId);
+    if (!settlement) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} not found`,
+      });
+      continue;
+    }
+
+    // 2. Colony ownership
+    if (settlement.colonyId !== action.colonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+      });
+      continue;
+    }
+
+    // 3. Settlement has a market
+    const market = settlement.buildings.find(b => b.type === 'market');
+    if (!market) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlement.name} does not have a market building`,
+      });
+      continue;
+    }
+
+    // 4. Validate resource types
+    if (!CONVERTIBLE_RESOURCES.includes(fromResource)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Invalid source resource: ${fromResource}. Must be one of: ${CONVERTIBLE_RESOURCES.join(', ')}`,
+      });
+      continue;
+    }
+
+    if (!CONVERTIBLE_RESOURCES.includes(toResource)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Invalid target resource: ${toResource}. Must be one of: ${CONVERTIBLE_RESOURCES.join(', ')}`,
+      });
+      continue;
+    }
+
+    if (fromResource === toResource) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Cannot convert ${fromResource} to itself`,
+      });
+      continue;
+    }
+
+    // 5. Validate amount
+    if (!Number.isFinite(amount) || amount <= 0) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Amount must be a positive number`,
+      });
+      continue;
+    }
+
+    if (amount > MARKET_CONVERSION_MAX_AMOUNT) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Amount exceeds maximum of ${MARKET_CONVERSION_MAX_AMOUNT} per action`,
+      });
+      continue;
+    }
+
+    // 6. Colony has enough resources
+    const colony = colonyMap.get(action.colonyId);
+    if (!colony) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Colony ${action.colonyId} not found`,
+      });
+      continue;
+    }
+
+    if (colony.resources[fromResource] < amount) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Insufficient ${fromResource}: have ${colony.resources[fromResource]}, need ${amount}`,
+      });
+      continue;
+    }
+
+    // --- All checks passed: perform conversion ---
+    const conversionRate = Math.max(
+      MARKET_CONVERSION_MIN_RATE,
+      MARKET_CONVERSION_BASE_RATE - (market.level - 1) * MARKET_CONVERSION_LEVEL_BONUS,
+    );
+    const received = Math.round((amount / conversionRate) * 100) / 100;
+
+    colony.resources[fromResource] = Math.round((colony.resources[fromResource] - amount) * 100) / 100;
+    colony.resources[toResource] = Math.round((colony.resources[toResource] + received) * 100) / 100;
+
+    events.push({
+      type: 'resources_converted',
+      colonyId: colony.id,
+      data: {
+        settlementId,
+        settlementName: settlement.name,
+        fromResource,
+        toResource,
+        spent: amount,
+        received,
+        conversionRate,
+        marketLevel: market.level,
+      },
+    });
+
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: `Converted ${amount} ${fromResource} → ${received} ${toResource} (rate: ${conversionRate}:1, market level ${market.level})`,
+    });
+  }
+
+  return { events, actionResults };
+}
 // --- Auto-Explore ---
 
 /**
@@ -2416,6 +2617,14 @@ export function resolveTick(
     events.push(...messageResult.events);
     actionResults.push(...messageResult.actionResults);
     newMessages = messageResult.messages;
+  }
+
+  // --- Phase 1.95: Resolve convert_resources actions (market) ---
+  const convertActions = actions.filter(a => a.type === 'convert_resources');
+  if (convertActions.length > 0) {
+    const convertResult = resolveConvertResources(updatedSettlements, updatedColonies, actions);
+    events.push(...convertResult.events);
+    actionResults.push(...convertResult.actionResults);
   }
 
   // Group settlements and units by colony

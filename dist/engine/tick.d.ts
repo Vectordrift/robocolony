@@ -13,6 +13,7 @@ export interface Colony {
     worldId: string;
     name: string;
     resources: Resources;
+    legacyScore: number;
     status: string;
 }
 export interface Resources {
@@ -83,6 +84,16 @@ export interface TickEvent {
     unitId?: string;
     data: Record<string, unknown>;
 }
+export interface MessageRecord {
+    id: string;
+    worldId: string;
+    fromColony: string;
+    toColony: string;
+    sentAtTick: number;
+    deliveredAtTick: number;
+    content: string;
+    read: boolean;
+}
 export interface TickResult {
     colonies: Colony[];
     settlements: Settlement[];
@@ -91,6 +102,7 @@ export interface TickResult {
     desertedUnitIds: string[];
     actionResults: ActionResult[];
     fogReveals: HexExploration[];
+    newMessages: MessageRecord[];
 }
 /** Settlement tier multipliers for production */
 export declare const TIER_MULTIPLIER: Record<string, number>;
@@ -131,6 +143,13 @@ export declare const DESERTION_CHANCE = 0.3;
 export declare const MORALE_WARNING_THRESHOLD = 0.4;
 /** Maximum morale loss multiplier from deficit severity */
 export declare const MAX_DEFICIT_MULTIPLIER = 3;
+export declare const SCORE_PER_TICK = 1;
+export declare const SCORE_SETTLEMENT_FOUNDED = 50;
+export declare const SCORE_UPGRADE_TOWN = 100;
+export declare const SCORE_UPGRADE_CITY = 250;
+export declare const SCORE_BUILDING_BUILT = 25;
+export declare const SCORE_UNIT_TRAINED = 10;
+export declare const SCORE_COMBAT_VICTORY = 100;
 /** Morale recovery per tick when food is positive */
 export declare const MORALE_RECOVERY_RATE = 0.1;
 /** Ticks of inactivity before emitting idle unit warning */
@@ -157,11 +176,11 @@ export declare const POP_GROWTH_PER_FOOD = 5;
 /** Stockpile capacity per settlement tier (per resource) */
 export declare const STOCKPILE_CAP: Record<string, number>;
 /** Additional stockpile capacity per granary level */
-export declare const GRANARY_BONUS_PER_LEVEL = 100;
-/** Fraction of excess resources that decay each tick (30%) */
-export declare const STOCKPILE_DECAY_RATE = 0.3;
+export declare const GRANARY_BONUS_PER_LEVEL = 200;
+/** Fraction of excess resources that decay each tick (5%) */
+export declare const STOCKPILE_DECAY_RATE = 0.05;
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
-export declare const STOCKPILE_HARD_CEILING = 1.2;
+export declare const STOCKPILE_HARD_CEILING = 2;
 /** Fraction of building cost refunded on demolish (25%) */
 export declare const DEMOLISH_REFUND_RATE = 0.25;
 /** Chance per tick per building to decay when colony food is at 0 */
@@ -319,6 +338,75 @@ export interface CombatResult {
  * Units at health ≤ 0 are destroyed. Survivors lose COMBAT_MORALE_LOSS morale.
  */
 export declare function resolveCombat(units: Unit[], actions: QueuedAction[], seed?: number): CombatResult;
+/** Maximum messages a colony can send per tick */
+export declare const MAX_MESSAGES_PER_TICK = 5;
+/** Maximum message content length (characters) */
+export declare const MAX_MESSAGE_LENGTH = 500;
+/** Delivery delay in ticks (messages arrive 1 tick after sending) */
+export declare const MESSAGE_DELIVERY_DELAY = 1;
+export interface MessageResult {
+    messages: MessageRecord[];
+    events: TickEvent[];
+    actionResults: ActionResult[];
+}
+/**
+ * Resolve send_message actions: validate and create message records.
+ *
+ * Validates:
+ * - Target colony exists and is in the same world
+ * - Target colony is not self
+ * - Rate limit: max 5 messages per colony per tick
+ * - Message content is not empty and within length limit
+ *
+ * On success: message record created, event emitted for recipient.
+ */
+export declare function resolveMessages(colonies: Colony[], actions: QueuedAction[], worldId: string, currentTick: number): MessageResult;
+/** Base conversion rate: spend this many units to get 1 unit of target resource */
+export declare const MARKET_CONVERSION_BASE_RATE = 3;
+/** Conversion rate improvement per market level: rate = base - (level - 1) * this */
+export declare const MARKET_CONVERSION_LEVEL_BONUS = 0.5;
+/** Minimum conversion rate (best possible) */
+export declare const MARKET_CONVERSION_MIN_RATE = 1.5;
+/** Maximum amount convertible per action */
+export declare const MARKET_CONVERSION_MAX_AMOUNT = 200;
+interface ConvertResourcesResult {
+    events: TickEvent[];
+    actionResults: ActionResult[];
+}
+/**
+ * Resolve convert_resources actions: exchange surplus resources via market.
+ *
+ * Requires a market building in the specified settlement.
+ * Conversion rate improves with market level:
+ *   Level 1: 3:1
+ *   Level 2: 2.5:1
+ *   Level 3: 2:1
+ *
+ * Validates:
+ * - Settlement exists and belongs to colony
+ * - Settlement has a market building
+ * - fromResource and toResource are valid and different
+ * - Colony has enough of the source resource
+ * - Amount is positive and within limits
+ */
+export declare function resolveConvertResources(settlements: Settlement[], colonies: Colony[], actions: QueuedAction[]): ConvertResourcesResult;
+/**
+ * Auto-explore for idle scouts.
+ *
+ * Scouts with no movement queue and no action this tick automatically
+ * pathfind toward the nearest unexplored passable hex. This ensures
+ * scouts continuously push into fog of war without manual orders.
+ *
+ * Algorithm:
+ * 1. Build an "explored" set per colony from hex exploredBy arrays
+ * 2. For each idle scout, find unexplored hexes adjacent to explored territory
+ * 3. Filter to passable terrain (not ocean)
+ * 4. Pick the nearest candidate and pathfind to it
+ * 5. Set the movement queue
+ */
+export declare function autoExploreIdleScouts(units: Unit[], hexes: HexTileState[], hexLookup: HexLookup, actionedUnitIds: Set<string>): {
+    events: TickEvent[];
+};
 /**
  * Resolve a single game tick.
  *
@@ -333,5 +421,6 @@ export declare function resolveCombat(units: Unit[], actions: QueuedAction[], se
  * 7. Handle deficits: morale loss → desertion
  * 8. Handle surplus: morale recovery
  */
-export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number): TickResult;
+export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number): TickResult;
+export {};
 //# sourceMappingURL=tick.d.ts.map
