@@ -85,10 +85,10 @@ async function validateOwnership(
 ): Promise<ValidationResult> {
   const params = action.params;
 
-  // Check unit ownership
+  // Check unit ownership + type constraints
   if (params.unitId && typeof params.unitId === 'string') {
     const unit = await db
-      .select({ colonyId: units.colonyId })
+      .select({ colonyId: units.colonyId, type: units.type })
       .from(units)
       .where(
         and(
@@ -103,6 +103,14 @@ async function validateOwnership(
     }
     if (unit[0].colonyId !== colonyId) {
       return { valid: false, error: `Unit ${params.unitId} does not belong to your colony` };
+    }
+
+    // Type-specific checks
+    if (action.type === 'found_settlement' && unit[0].type !== 'settler') {
+      return { valid: false, error: `Unit ${params.unitId} is a ${unit[0].type}, not a settler. Only settlers can found settlements.` };
+    }
+    if (action.type === 'attack' && unit[0].type === 'settler') {
+      return { valid: false, error: `Settlers cannot attack. Use military units (scout, militia, soldier, siege).` };
     }
   }
 
@@ -333,5 +341,38 @@ export async function actionRoutes(app: FastifyInstance) {
       },
       recent: recent,
     };
+  });
+
+  // Single action lookup
+  app.get<{ Params: { id: string; actionId: string } }>('/api/worlds/:id/actions/:actionId', {
+    preHandler: requireAuth,
+  }, async (request, reply) => {
+    const colony = request.colony!;
+    const { actionId } = request.params;
+
+    const rows = await db
+      .select({
+        id: actions.id,
+        type: actions.type,
+        params: actions.params,
+        tick: actions.tick,
+        status: actions.status,
+        result: actions.result,
+        createdAt: actions.createdAt,
+      })
+      .from(actions)
+      .where(
+        and(
+          eq(actions.id, actionId),
+          eq(actions.colonyId, colony.id),
+        ),
+      )
+      .limit(1);
+
+    if (rows.length === 0) {
+      return reply.code(404).send({ error: 'not_found', message: 'Action not found' });
+    }
+
+    return rows[0];
   });
 }

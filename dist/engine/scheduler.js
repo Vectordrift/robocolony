@@ -287,12 +287,25 @@ export class TickScheduler {
                         .delete(schema.units)
                         .where(eq(schema.units.id, unitId));
                 }
-                // Update action statuses
+                // Update action statuses + emit action outcome events
+                const actionColonyMap = new Map(dbActions.map(a => [a.id, a.colonyId]));
                 for (const ar of result.actionResults) {
                     await tx
                         .update(schema.actions)
                         .set({ status: ar.status, result: ar.result ?? null })
                         .where(eq(schema.actions.id, ar.actionId));
+                    // Emit action outcome event (private to colony)
+                    const colonyId = actionColonyMap.get(ar.actionId);
+                    const actionMeta = dbActions.find(a => a.id === ar.actionId);
+                    result.events.push({
+                        type: ar.status === 'failed' ? 'action_failed' : 'action_resolved',
+                        colonyId: colonyId ?? undefined,
+                        data: {
+                            actionId: ar.actionId,
+                            actionType: actionMeta?.type ?? 'unknown',
+                            result: ar.result ?? null,
+                        },
+                    });
                 }
                 // Mark any remaining queued actions as resolved (action types not yet handled)
                 // This prevents them from being re-processed next tick
@@ -303,6 +316,15 @@ export class TickScheduler {
                             .update(schema.actions)
                             .set({ status: 'resolved', result: 'Action type not yet implemented' })
                             .where(eq(schema.actions.id, action.id));
+                        result.events.push({
+                            type: 'action_failed',
+                            colonyId: action.colonyId,
+                            data: {
+                                actionId: action.id,
+                                actionType: action.type,
+                                result: 'Action type not yet implemented',
+                            },
+                        });
                     }
                 }
                 // Insert events

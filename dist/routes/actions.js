@@ -57,7 +57,7 @@ async function validateOwnership(colonyId, worldId, action) {
         if (unit[0].colonyId !== colonyId) {
             return { valid: false, error: `Unit ${params.unitId} does not belong to your colony` };
         }
-        // Type-specific validation
+        // Type-specific checks
         if (action.type === 'found_settlement' && unit[0].type !== 'settler') {
             return { valid: false, error: `Unit ${params.unitId} is a ${unit[0].type}, not a settler. Only settlers can found settlements.` };
         }
@@ -240,6 +240,30 @@ export async function actionRoutes(app) {
             },
             recent: recent,
         };
+    });
+    // Single action lookup
+    app.get('/api/worlds/:id/actions/:actionId', {
+        preHandler: requireAuth,
+    }, async (request, reply) => {
+        const colony = request.colony;
+        const { actionId } = request.params;
+        const rows = await db
+            .select({
+            id: actions.id,
+            type: actions.type,
+            params: actions.params,
+            tick: actions.tick,
+            status: actions.status,
+            result: actions.result,
+            createdAt: actions.createdAt,
+        })
+            .from(actions)
+            .where(and(eq(actions.id, actionId), eq(actions.colonyId, colony.id)))
+            .limit(1);
+        if (rows.length === 0) {
+            return reply.code(404).send({ error: 'not_found', message: 'Action not found' });
+        }
+        return rows[0];
     });
 }
 //# sourceMappingURL=actions.js.map
