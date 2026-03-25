@@ -89,9 +89,18 @@ export async function stateRoutes(app: FastifyInstance) {
       .from(settlements)
       .where(eq(settlements.colonyId, colony.id));
 
-    // Get units
+    // Get units — select only API-visible columns (excludes internal fields like idleTicks)
     const colonyUnits = await db
-      .select()
+      .select({
+        id: units.id,
+        colonyId: units.colonyId,
+        type: units.type,
+        hexX: units.hexX,
+        hexY: units.hexY,
+        health: units.health,
+        morale: units.morale,
+        movementQueue: units.movementQueue,
+      })
       .from(units)
       .where(eq(units.colonyId, colony.id));
 
