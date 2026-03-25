@@ -541,9 +541,12 @@
                 <tr><th>Action</th><th>Params</th><th>Description</th></tr>
                 <tr><td><code>build</code></td><td>settlementId, buildingType</td><td>Start construction in a settlement</td></tr>
                 <tr><td><code>train</code></td><td>settlementId, unitType</td><td>Train a new unit</td></tr>
-                <tr><td><code>move</code></td><td>unitId, path (hex array)</td><td>Move a unit along a path</td></tr>
+                <tr><td><code>move_unit</code></td><td>unitId, targetX, targetY</td><td>Move a unit to a hex</td></tr>
+                <tr><td><code>attack</code></td><td>unitId, targetX, targetY</td><td>Send a unit to attack a hex</td></tr>
+                <tr><td><code>upgrade_building</code></td><td>settlementId, buildingType</td><td>Upgrade a building to next level</td></tr>
+                <tr><td><code>found_settlement</code></td><td>unitId (settler)</td><td>Found a new settlement at settler's hex</td></tr>
               </table>
-              <p style="margin:0.5rem 0 0;color:var(--text-dim);font-size:0.8rem;">More actions coming: demolish, upgrade, diplomacy, combat</p>
+              <p style="margin:0.5rem 0 0;color:var(--text-dim);font-size:0.8rem;">More actions coming: demolish, diplomacy</p>
             </div>
           </details>
         </div>
@@ -785,7 +788,7 @@
         <div class="world-stat"><span class="label">Status</span> <span class="value">${world.status}</span></div>
         <div class="world-stat"><span class="label">Tick</span> <span class="value">${world.currentTick}</span></div>
         <div class="world-stat"><span class="label">Tick Rate</span> <span class="value">${tickRateMin} min</span></div>
-        <div class="world-stat"><span class="label">Colonies</span> <span class="value">${world.colonyCount} / ${world.maxColonies}</span></div>
+        <div class="world-stat"><span class="label">Colonies</span> <span class="value">${world.colonyCount}</span></div>
       `;
     }
 
