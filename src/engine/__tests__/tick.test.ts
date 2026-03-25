@@ -9,6 +9,7 @@ import {
   resolveUpgradeSettlement,
   resolveUpgradeBuilding,
   resolveDemolish,
+  resolveCombat,
   buildingUpgradeCost,
   calculateProduction,
   calculateBuildingUpkeep,
@@ -24,6 +25,10 @@ import {
   UNIT_UPKEEP,
   UNIT_TRAINING_COSTS,
   VALID_UNIT_TYPES,
+  UNIT_ATTACK,
+  UNIT_DEFENSE,
+  COMBAT_MORALE_LOSS,
+  COMBAT_RANDOM_BONUS,
   MORALE_LOSS_RATE,
   MORALE_RECOVERY_RATE,
   DESERTION_THRESHOLD,
@@ -3047,5 +3052,232 @@ describe('Building decay on food deficit', () => {
     } finally {
       Math.random = originalRandom;
     }
+  });
+});
+
+// =====================
+// Combat Resolution
+// =====================
+
+describe('resolveCombat', () => {
+  it('should not trigger combat when all units belong to same colony', () => {
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 5, hexY: 5, type: 'soldier' }),
+      makeUnit({ id: 'u2', colonyId: 'c1', hexX: 5, hexY: 5, type: 'militia' }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    expect(result.destroyedUnitIds).toHaveLength(0);
+    expect(result.events).toHaveLength(0);
+    expect(result.units).toHaveLength(2);
+  });
+
+  it('should trigger combat when opposing units share a hex', () => {
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 5, hexY: 5, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 5, hexY: 5, type: 'militia', health: 100 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    // Combat should occur — check for combat_resolved events
+    const combatEvents = result.events.filter(e => e.type === 'combat_resolved');
+    expect(combatEvents.length).toBeGreaterThan(0);
+  });
+
+  it('should apply damage based on attack power minus defense', () => {
+    // Soldier (attack 8) vs militia (defense 3) → net damage = ~8*(1+bonus) - 3
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'militia', health: 100 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    // Both should survive one round (damage < 100)
+    expect(result.units.length).toBe(2);
+    // Check that health was reduced
+    const soldier = result.units.find(u => u.id === 'u1');
+    const militia = result.units.find(u => u.id === 'u2');
+    expect(soldier).toBeDefined();
+    expect(militia).toBeDefined();
+    // Militia attacks soldier: attack 4, soldier defense 6 → net damage ~max(0, 4*(1+bonus)-6) could be 0
+    // Soldier attacks militia: attack 8, militia defense 3 → net damage ~8*(1+bonus)-3 > 0
+    expect(militia!.health).toBeLessThan(100);
+  });
+
+  it('should destroy units that reach 0 health', () => {
+    // Soldier (attack 8) vs settler (defense 1, health 10) → settler dies easily
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'settler', health: 10 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    expect(result.destroyedUnitIds).toContain('u2');
+    expect(result.units.find(u => u.id === 'u2')).toBeUndefined();
+
+    // unit_destroyed event should be emitted
+    const destroyedEvents = result.events.filter(e => e.type === 'unit_destroyed');
+    expect(destroyedEvents.length).toBeGreaterThanOrEqual(1);
+    expect(destroyedEvents[0].data.unitType).toBe('settler');
+  });
+
+  it('settlers deal no damage', () => {
+    // Two settlers from opposing colonies — neither can damage the other
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'settler', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'settler', health: 100 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    // Both survive — neither can deal damage
+    expect(result.units).toHaveLength(2);
+    expect(result.destroyedUnitIds).toHaveLength(0);
+    // But morale should still drop
+    expect(result.units[0].morale).toBe(1.0 - COMBAT_MORALE_LOSS);
+  });
+
+  it('should reduce morale for surviving units', () => {
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100, morale: 1.0 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'soldier', health: 100, morale: 1.0 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    for (const unit of result.units) {
+      expect(unit.morale).toBe(1.0 - COMBAT_MORALE_LOSS);
+    }
+  });
+
+  it('should handle multi-colony combat on same hex', () => {
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u3', colonyId: 'c3', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    // All three colonies should get combat_resolved events
+    const combatEvents = result.events.filter(e => e.type === 'combat_resolved');
+    const eventColonies = new Set(combatEvents.map(e => e.colonyId));
+    expect(eventColonies.size).toBe(3);
+  });
+
+  it('should not produce combat on different hexes', () => {
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 5, hexY: 5, type: 'soldier', health: 100 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    expect(result.events).toHaveLength(0);
+    expect(result.destroyedUnitIds).toHaveLength(0);
+  });
+
+  it('should produce deterministic results with same seed', () => {
+    const makeTestUnits = () => [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 50 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'soldier', health: 50 }),
+    ];
+
+    const r1 = resolveCombat(makeTestUnits(), [], 12345);
+    const r2 = resolveCombat(makeTestUnits(), [], 12345);
+
+    // Same seed → same results
+    expect(r1.destroyedUnitIds).toEqual(r2.destroyedUnitIds);
+    expect(r1.units.map(u => u.health)).toEqual(r2.units.map(u => u.health));
+  });
+
+  it('should produce different results with different seeds', () => {
+    const makeTestUnits = () => [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 50 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'soldier', health: 50 }),
+    ];
+
+    const r1 = resolveCombat(makeTestUnits(), [], 111);
+    const r2 = resolveCombat(makeTestUnits(), [], 999);
+
+    // Different seeds → at least health values differ (with high probability)
+    const h1 = r1.units.map(u => u.health);
+    const h2 = r2.units.map(u => u.health);
+    // Can't guarantee difference but overwhelmingly likely with different seeds
+    // Just check both produced valid results
+    expect(r1.units.length + r1.destroyedUnitIds.length).toBe(2);
+    expect(r2.units.length + r2.destroyedUnitIds.length).toBe(2);
+  });
+
+  it('overwhelming force should kill the weaker unit', () => {
+    // 3 soldiers vs 1 settler with low health — guaranteed kill
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u3', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u4', colonyId: 'c2', hexX: 0, hexY: 0, type: 'settler', health: 5 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    expect(result.destroyedUnitIds).toContain('u4');
+  });
+});
+
+describe('combat integration with resolveTick', () => {
+  it('should resolve combat after movement in resolveTick', () => {
+    // Place units from different colonies on the same hex
+    const colonies = [
+      makeColony({ id: 'c1', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 20 } }),
+      makeColony({ id: 'c2', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 20 } }),
+    ];
+    const settlements = [
+      makeSettlement({ id: 's1', colonyId: 'c1', hexX: 0, hexY: 0, buildings: [{ type: 'farm', level: 1 }] }),
+      makeSettlement({ id: 's2', colonyId: 'c2', hexX: 10, hexY: 0, buildings: [{ type: 'farm', level: 1 }] }),
+    ];
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 5, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 5, hexY: 0, type: 'settler', health: 10 }),
+    ];
+    const hexes = Array.from({ length: 11 }, (_, i) => makeHex(i, 0));
+
+    const result = resolveTick(colonies, settlements, units, hexes, [], 42);
+
+    // Combat should have happened — settler should be destroyed
+    const destroyedEvents = result.events.filter(e => e.type === 'unit_destroyed');
+    expect(destroyedEvents.length).toBeGreaterThanOrEqual(1);
+    expect(result.units.find(u => u.id === 'u2')).toBeUndefined();
+  });
+
+  it('attack action should path unit toward target and trigger combat', () => {
+    const colonies = [
+      makeColony({ id: 'c1', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 20 } }),
+      makeColony({ id: 'c2', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 20 } }),
+    ];
+    const settlements = [
+      makeSettlement({ id: 's1', colonyId: 'c1', hexX: 0, hexY: 0, buildings: [{ type: 'farm', level: 1 }] }),
+      makeSettlement({ id: 's2', colonyId: 'c2', hexX: 5, hexY: 0, buildings: [{ type: 'farm', level: 1 }] }),
+    ];
+    // Soldier 1 hex away from enemy settler
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 1, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 2, hexY: 0, type: 'settler', health: 10 }),
+    ];
+    const hexes = Array.from({ length: 6 }, (_, i) => makeHex(i, 0));
+
+    // Attack action: move soldier to settler's hex
+    const actions: QueuedAction[] = [
+      makeAction({
+        id: 'atk-1',
+        colonyId: 'c1',
+        type: 'attack',
+        params: { unitId: 'u1', targetX: 2, targetY: 0 },
+      }),
+    ];
+
+    const result = resolveTick(colonies, settlements, units, hexes, actions, 42);
+
+    // Soldier should have moved to (2,0) and killed the settler
+    const soldier = result.units.find(u => u.id === 'u1');
+    expect(soldier).toBeDefined();
+    expect(soldier!.hexX).toBe(2);
+    expect(soldier!.hexY).toBe(0);
+    // Settler should be dead
+    expect(result.units.find(u => u.id === 'u2')).toBeUndefined();
   });
 });

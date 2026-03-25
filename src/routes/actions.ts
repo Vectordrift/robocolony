@@ -40,6 +40,7 @@ const VALID_ACTION_TYPES: Record<string, string[]> = {
   'found_settlement': ['unitId', 'name'],
   'demolish': ['settlementId', 'buildingType'],
   'upgrade_settlement': ['settlementId'],
+  'attack': ['unitId', 'targetX', 'targetY'],
 };
 
 const MAX_ACTIONS_PER_TICK = 10;

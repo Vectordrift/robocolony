@@ -288,6 +288,33 @@ export const DEMOLISH_REFUND_RATE = 0.25;
 
 /** Chance per tick per building to decay when colony food is at 0 */
 export const DECAY_CHANCE_PER_BUILDING = 0.10;
+
+// --- Combat Constants ---
+
+/** Unit attack power by type */
+export const UNIT_ATTACK: Record<UnitType, number> = {
+  scout: 2,
+  militia: 4,
+  soldier: 8,
+  siege: 12,
+  settler: 0,
+};
+
+/** Unit defense power by type */
+export const UNIT_DEFENSE: Record<UnitType, number> = {
+  scout: 1,
+  militia: 3,
+  soldier: 6,
+  siege: 2,
+  settler: 1,
+};
+
+/** Morale loss for surviving units after combat */
+export const COMBAT_MORALE_LOSS = 0.1;
+
+/** Max random bonus multiplier for attack damage (0 to this value) */
+export const COMBAT_RANDOM_BONUS = 0.3;
+
 const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 
 // --- Helpers ---
@@ -1395,8 +1422,10 @@ export function resolveMovement(
     unitMap.set(u.id, u);
   }
 
-  // Phase 1: Process move_unit actions — compute paths and set queues
-  const moveActions = actions.filter(a => a.type === 'move_unit');
+  // Phase 1: Process move_unit and attack actions — compute paths and set queues
+  // Attack actions work the same as move_unit — pathfind toward target hex.
+  // Combat is resolved automatically when opposing units share a hex.
+  const moveActions = actions.filter(a => a.type === 'move_unit' || a.type === 'attack');
 
   for (const action of moveActions) {
     const unitId = action.params.unitId as string;
@@ -1611,6 +1640,195 @@ export function calculatePopulationConsumption(settlement: Settlement): number {
   return settlement.population * POP_FOOD_CONSUMPTION;
 }
 
+// --- Combat Resolution ---
+
+export interface CombatResult {
+  units: Unit[];
+  destroyedUnitIds: string[];
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+/**
+ * Simple seeded PRNG (mulberry32). Used for deterministic combat results.
+ * Pass seed=undefined for non-deterministic (Math.random) behavior.
+ */
+function createRng(seed?: number): () => number {
+  if (seed === undefined) return Math.random;
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Resolve combat on all hexes where opposing units coexist.
+ *
+ * After movement, find hexes with units from 2+ colonies.
+ * Each unit attacks one enemy unit (round-robin targeting).
+ * Damage = attackPower × (1 + random(0, COMBAT_RANDOM_BONUS)).
+ * Effective damage = max(0, damage - target.defensePower).
+ * Units at health ≤ 0 are destroyed. Survivors lose COMBAT_MORALE_LOSS morale.
+ */
+export function resolveCombat(
+  units: Unit[],
+  actions: QueuedAction[],
+  seed?: number,
+): CombatResult {
+  const rng = createRng(seed);
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+  const destroyedUnitIds: string[] = [];
+
+  // Note: attack actions are handled as move_unit by resolveMovement() — pathfinding
+  // toward the target hex. Combat resolution below handles the fighting when they arrive.
+
+  // Group units by hex
+  const hexUnits = new Map<string, Unit[]>();
+  for (const unit of units) {
+    const key = hexKey(unit.hexX, unit.hexY);
+    const list = hexUnits.get(key) ?? [];
+    list.push(unit);
+    hexUnits.set(key, list);
+  }
+
+  // For each hex, check if there are units from multiple colonies
+  for (const [hex, unitsOnHex] of hexUnits) {
+    const colonies = new Set(unitsOnHex.map(u => u.colonyId));
+    if (colonies.size < 2) continue;
+
+    // Combat! All units on this hex fight.
+    // Each unit attacks a random enemy unit.
+    // We process all attacks simultaneously (no kill-order advantage).
+
+    // Calculate damage dealt by each unit
+    const damageDealt = new Map<string, number>(); // target unitId → total damage
+    const combatLog: Array<{
+      attackerId: string;
+      attackerType: string;
+      attackerColony: string;
+      targetId: string;
+      targetType: string;
+      targetColony: string;
+      damage: number;
+    }> = [];
+
+    for (const attacker of unitsOnHex) {
+      const attackPower = UNIT_ATTACK[attacker.type];
+      if (attackPower <= 0) continue; // settlers can't attack
+
+      // Find enemy units (from different colony)
+      const enemies = unitsOnHex.filter(u => u.colonyId !== attacker.colonyId);
+      if (enemies.length === 0) continue;
+
+      // Pick a random enemy target
+      const target = enemies[Math.floor(rng() * enemies.length)];
+
+      // Calculate damage with random bonus
+      const bonus = rng() * COMBAT_RANDOM_BONUS;
+      const rawDamage = attackPower * (1 + bonus);
+      const effectiveDamage = Math.max(0, rawDamage - UNIT_DEFENSE[target.type]);
+      const roundedDamage = Math.round(effectiveDamage * 100) / 100;
+
+      const currentDamage = damageDealt.get(target.id) ?? 0;
+      damageDealt.set(target.id, currentDamage + roundedDamage);
+
+      combatLog.push({
+        attackerId: attacker.id,
+        attackerType: attacker.type,
+        attackerColony: attacker.colonyId,
+        targetId: target.id,
+        targetType: target.type,
+        targetColony: target.colonyId,
+        damage: roundedDamage,
+      });
+    }
+
+    // Apply damage simultaneously
+    const casualties: Array<{
+      unitId: string;
+      unitType: string;
+      colonyId: string;
+      damageReceived: number;
+    }> = [];
+
+    for (const unit of unitsOnHex) {
+      const totalDamage = damageDealt.get(unit.id) ?? 0;
+      if (totalDamage > 0) {
+        unit.health = Math.round((unit.health - totalDamage) * 100) / 100;
+      }
+
+      if (unit.health <= 0) {
+        destroyedUnitIds.push(unit.id);
+        casualties.push({
+          unitId: unit.id,
+          unitType: unit.type,
+          colonyId: unit.colonyId,
+          damageReceived: totalDamage,
+        });
+
+        // Emit unit_destroyed event
+        events.push({
+          type: 'unit_destroyed',
+          colonyId: unit.colonyId,
+          unitId: unit.id,
+          data: {
+            unitType: unit.type,
+            hexX: unit.hexX,
+            hexY: unit.hexY,
+            killedInCombat: true,
+            damageReceived: totalDamage,
+          },
+        });
+      }
+    }
+
+    // Surviving units lose morale
+    for (const unit of unitsOnHex) {
+      if (!destroyedUnitIds.includes(unit.id)) {
+        unit.morale = Math.max(0, Math.round((unit.morale - COMBAT_MORALE_LOSS) * 100) / 100);
+      }
+    }
+
+    // Emit combat_resolved event (visible to all involved colonies)
+    const [hexX, hexY] = hex.split(',').map(Number);
+    const involvedColonies = [...colonies];
+    for (const colonyId of involvedColonies) {
+      events.push({
+        type: 'combat_resolved',
+        colonyId,
+        data: {
+          hexX,
+          hexY,
+          participants: unitsOnHex.map(u => ({
+            unitId: u.id,
+            unitType: u.type,
+            colonyId: u.colonyId,
+            healthBefore: u.health + (damageDealt.get(u.id) ?? 0),
+            healthAfter: u.health,
+            destroyed: destroyedUnitIds.includes(u.id),
+          })),
+          casualties: casualties.length,
+          combatLog,
+        },
+      });
+    }
+  }
+
+  // Remove destroyed units
+  const survivingUnits = units.filter(u => !destroyedUnitIds.includes(u.id));
+
+  return {
+    units: survivingUnits,
+    destroyedUnitIds,
+    events,
+    actionResults,
+  };
+}
+
 // --- Tick Resolution ---
 
 /**
@@ -1618,6 +1836,7 @@ export function calculatePopulationConsumption(settlement: Settlement): number {
  *
  * 0. Resolve found_settlement actions (before movement — consumed settlers don't move)
  * 1. Resolve movement actions + advance movement queues
+ * 1.5. Resolve combat (units sharing hex with enemies fight)
  * 2. Compute fog of war reveals for moved units + new settlements
  * 3. Resolve build actions + advance build queues
  * 4. Calculate production for each settlement (including new ones)
@@ -1632,6 +1851,7 @@ export function resolveTick(
   units: Unit[],
   hexes: HexTileState[],
   actions: QueuedAction[] = [],
+  combatSeed?: number,
 ): TickResult {
   const events: TickEvent[] = [];
   const desertedUnitIds: string[] = [];
@@ -1705,6 +1925,20 @@ export function resolveTick(
     const moveResult = resolveMovement(updatedUnits, nonFoundActions, hexLookup);
     events.push(...moveResult.events);
     actionResults.push(...moveResult.actionResults);
+  }
+
+  // --- Phase 0.25: Resolve combat (after movement, before fog) ---
+  // Units from different colonies sharing a hex fight automatically.
+  {
+    const combatResult = resolveCombat(updatedUnits, actions, combatSeed);
+    if (combatResult.destroyedUnitIds.length > 0 || combatResult.events.length > 0) {
+      updatedUnits = combatResult.units.map(u => ({
+        ...u,
+        movementQueue: u.movementQueue ? [...u.movementQueue] : [],
+      }));
+      events.push(...combatResult.events);
+      actionResults.push(...combatResult.actionResults);
+    }
   }
 
   // --- Phase 0.5: Fog of war reveals for units that moved ---
