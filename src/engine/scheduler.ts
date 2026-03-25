@@ -200,6 +200,7 @@ export class TickScheduler {
         worldId: c.worldId,
         name: c.name,
         resources: c.resources as Resources,
+        legacyScore: (c as any).legacyScore ?? 0,
         status: c.status,
       }));
 
@@ -261,7 +262,7 @@ export class TickScheduler {
         for (const colony of result.colonies) {
           await tx
             .update(schema.colonies)
-            .set({ resources: colony.resources })
+            .set({ resources: colony.resources, legacyScore: colony.legacyScore ?? 0 })
             .where(eq(schema.colonies.id, colony.id));
         }
 
