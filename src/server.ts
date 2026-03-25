@@ -11,6 +11,7 @@ import { db } from './db/index.js';
 import { worlds, settlements, colonies } from './db/schema/index.js';
 import { eq } from 'drizzle-orm';
 import { TickScheduler } from './engine/scheduler.js';
+import { ensureSchema } from './db/migrate.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -65,6 +66,11 @@ async function startSchedulers(logger: { info: (msg: string) => void; error: (ms
       },
       onError: (err) => {
         logger.error(`[${world.id}] Tick error: ${err.message}`);
+        // Log the full stack trace for DB column errors
+        if (err.message.includes('column') || err.message.includes('relation') || err.message.includes('undefined')) {
+          logger.error(`[${world.id}] Full error stack: ${err.stack}`);
+          logger.error(`[${world.id}] HINT: This may be a missing DB column. Run ensureSchema() or check src/db/migrate.ts`);
+        }
       },
     });
 
@@ -168,6 +174,9 @@ async function start() {
   try {
     await app.listen({ host, port });
     app.log.info(`RoboColony server running on ${host}:${port}`);
+
+    // Run schema migration FIRST — ensures all columns exist before any queries
+    await ensureSchema(db as any, app.log);
 
     // Normalize data before starting schedulers
     await normalizeData(app.log);
