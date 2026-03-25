@@ -9,7 +9,7 @@ for (const id of ids) {
   await sql.unsafe("DELETE FROM units WHERE colony_id=$1", [id]);
   await sql.unsafe("DELETE FROM settlements WHERE colony_id=$1", [id]);
   await sql.unsafe("DELETE FROM agreements WHERE proposed_by=$1 OR proposed_to=$1", [id]);
-  await sql.unsafe("DELETE FROM messages WHERE sender_id=$1 OR recipient_id=$1", [id]);
+  await sql.unsafe("DELETE FROM messages WHERE from_colony=$1 OR to_colony=$1", [id]);
   await sql.unsafe("DELETE FROM colonies WHERE id=$1", [id]);
   console.log("Deleted:", id);
 }
