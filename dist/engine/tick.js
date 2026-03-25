@@ -96,6 +96,13 @@ export const DESERTION_CHANCE = 0.3;
 export const MORALE_WARNING_THRESHOLD = 0.4;
 /** Maximum morale loss multiplier from deficit severity */
 export const MAX_DEFICIT_MULTIPLIER = 3.0;
+export const SCORE_PER_TICK = 1;
+export const SCORE_SETTLEMENT_FOUNDED = 50;
+export const SCORE_UPGRADE_TOWN = 100;
+export const SCORE_UPGRADE_CITY = 250;
+export const SCORE_BUILDING_BUILT = 25;
+export const SCORE_UNIT_TRAINED = 10;
+export const SCORE_COMBAT_VICTORY = 100;
 /** Morale recovery per tick when food is positive */
 export const MORALE_RECOVERY_RATE = 0.10;
 /** Ticks of inactivity before emitting idle unit warning */
@@ -2324,6 +2331,34 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
             }
         }
     }
+
+    // --- Legacy Score Tracking ---
+    for (const colony of updatedColonies) {
+        if (colony.status !== 'active') continue;
+        colony.legacyScore = (colony.legacyScore ?? 0) + SCORE_PER_TICK;
+        for (const event of events) {
+            if (!('colonyId' in event) || event.colonyId !== colony.id) continue;
+            switch (event.type) {
+                case 'settlement_founded':
+                    colony.legacyScore += SCORE_SETTLEMENT_FOUNDED;
+                    break;
+                case 'settlement_upgraded':
+                    if (event.data?.newTier === 'town') colony.legacyScore += SCORE_UPGRADE_TOWN;
+                    if (event.data?.newTier === 'city') colony.legacyScore += SCORE_UPGRADE_CITY;
+                    break;
+                case 'building_complete':
+                    colony.legacyScore += SCORE_BUILDING_BUILT;
+                    break;
+                case 'unit_trained':
+                    colony.legacyScore += SCORE_UNIT_TRAINED;
+                    break;
+                case 'combat_resolved':
+                    if (event.data?.winner === colony.id) colony.legacyScore += SCORE_COMBAT_VICTORY;
+                    break;
+            }
+        }
+    }
+
     return {
         colonies: updatedColonies,
         settlements: updatedSettlements,
