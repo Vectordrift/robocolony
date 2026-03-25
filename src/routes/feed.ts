@@ -158,6 +158,83 @@ export async function feedRoutes(app: FastifyInstance) {
       colonies: colonySummaries,
       events: feedEvents,
     };
+  
+
+  // --- Public leaderboard endpoint (50-tick delay for strategic safety) ---
+  app.get<{ Params: { id: string } }>('/api/worlds/:id/leaderboard', async (request, reply) => {
+    const worldId = request.params.id;
+    const LEADERBOARD_DELAY_TICKS = 50;
+
+    // Get world
+    const worldRows = await db
+      .select()
+      .from(worlds)
+      .where(eq(worlds.id, worldId))
+      .limit(1);
+
+    if (worldRows.length === 0) {
+      return reply.code(404).send({ error: 'not_found', message: 'World not found' });
+    }
+
+    const world = worldRows[0];
+    const displayTick = Math.max(0, (world.currentTick ?? 0) - LEADERBOARD_DELAY_TICKS);
+
+    // Get all colonies
+    const colonyRows = await db
+      .select({
+        id: colonies.id,
+        name: colonies.name,
+        status: colonies.status,
+        legacyScore: colonies.legacyScore,
+        createdAt: colonies.createdAt,
+      })
+      .from(colonies)
+      .where(eq(colonies.worldId, worldId));
+
+    // Get settlement counts
+    const settlementRows = await db
+      .select({
+        colonyId: settlements.colonyId,
+        tier: settlements.tier,
+      })
+      .from(settlements)
+      .where(eq(settlements.worldId, worldId));
+
+    // Get unit counts
+    const unitRows = await db
+      .select({
+        colonyId: units.colonyId,
+      })
+      .from(units)
+      .where(eq(units.worldId, worldId));
+
+    // Build ranked list
+    const ranked = colonyRows.map((c) => {
+      const mySettlements = settlementRows.filter(s => s.colonyId === c.id);
+      const myUnits = unitRows.filter(u => u.colonyId === c.id);
+      const age = Math.max(0, (world.currentTick ?? 0) - 0); // Age in ticks since world start
+
+      return {
+        name: c.name,
+        status: c.status,
+        legacyScore: c.legacyScore ?? 0,
+        settlements: mySettlements.length,
+        units: myUnits.length,
+        founded: c.createdAt,
+      };
+    })
+    .sort((a, b) => b.legacyScore - a.legacyScore)
+    .map((c, i) => ({ rank: i + 1, ...c }));
+
+    return {
+      worldId: world.id,
+      worldName: world.name,
+      currentTick: world.currentTick,
+      asOfTick: displayTick,
+      delayedTicks: LEADERBOARD_DELAY_TICKS,
+      colonies: ranked,
+    };
   });
+});
 }
 
