@@ -5,11 +5,11 @@
  * One scheduler instance per running world.
  */
 
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema/index.js';
 import { resolveTick } from './tick.js';
-import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction, MessageRecord } from './tick.js';
+import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction, MessageRecord, AgreementRecord } from './tick.js';
 import { hexDistance } from './hex.js';
 import { nanoid } from 'nanoid';
 
@@ -34,6 +34,8 @@ const PUBLIC_EVENT_TYPES = new Set([
   'unit_destroyed',
   'shortage',
   'settlement_captured',
+  'agreement_signed',
+  'agreement_broken',
 ]);
 
 /**
@@ -94,6 +96,18 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
         name: event.data.name,
         previousTier: event.data.previousTier,
         newTier: event.data.newTier,
+      };
+    case 'agreement_signed':
+      return {
+        agreementType: event.data.agreementType,
+        withColonyId: event.data.withColonyId,
+        withColonyName: event.data.withColonyName,
+      };
+    case 'agreement_broken':
+      return {
+        agreementType: event.data.agreementType,
+        brokenByName: event.data.brokenByName,
+        otherPartyName: event.data.otherPartyName,
       };
     default:
       return null;
@@ -204,6 +218,15 @@ export class TickScheduler {
         .where(eq(schema.hexes.worldId, this.worldId));
 
       // Load queued actions for this tick
+      // Load agreements for this world
+      const dbAgreements = await this.db
+        .select()
+        .from(schema.agreements)
+        .where(and(
+          eq(schema.agreements.worldId, this.worldId),
+          sql`status IN ('proposed', 'active')`
+        ));
+
       const dbActions = await this.db
         .select()
         .from(schema.actions)
@@ -268,8 +291,20 @@ export class TickScheduler {
         params: a.params as Record<string, unknown>,
       }));
 
+      const existingAgreements: AgreementRecord[] = dbAgreements.map(a => ({
+        id: a.id,
+        worldId: a.worldId,
+        type: a.type as AgreementRecord['type'],
+        proposedBy: a.proposedBy,
+        proposedTo: a.proposedTo,
+        status: a.status as AgreementRecord['status'],
+        terms: (a.terms ?? {}) as Record<string, unknown>,
+        proposedAtTick: a.proposedAtTick,
+        acceptedAtTick: a.acceptedAtTick ?? null,
+      }));
+
       // Resolve tick
-      const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick);
+      const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick, existingAgreements);
 
       // Persist results
       await this.db.transaction(async (tx) => {
@@ -507,6 +542,36 @@ export class TickScheduler {
               content: msg.content,
               read: false,
             });
+          }
+        }
+
+        // Insert new agreements
+        if (result.newAgreements && result.newAgreements.length > 0) {
+          for (const agr of result.newAgreements) {
+            await tx.insert(schema.agreements).values({
+              id: agr.id,
+              worldId: agr.worldId,
+              type: agr.type,
+              proposedBy: agr.proposedBy,
+              proposedTo: agr.proposedTo,
+              status: agr.status,
+              terms: agr.terms,
+              proposedAtTick: agr.proposedAtTick,
+              acceptedAtTick: agr.acceptedAtTick,
+            });
+          }
+        }
+
+        // Update existing agreements (status changes)
+        if (result.updatedAgreements && result.updatedAgreements.length > 0) {
+          for (const agr of result.updatedAgreements) {
+            await tx
+              .update(schema.agreements)
+              .set({
+                status: agr.status,
+                acceptedAtTick: agr.acceptedAtTick,
+              })
+              .where(eq(schema.agreements.id, agr.id));
           }
         }
 
