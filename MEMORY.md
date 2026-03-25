@@ -29,33 +29,36 @@ Live playtesting active — playtesters filing bugs and balance issues.
 - ✅ #61 Balance: food economy flat at break-even (fixed in #64)
 - ✅ #62 Balance: timber massively overproduced (fixed in #64)
 - ⬜ #63 Enhancement: no feedback on queued action outcomes
+- ✅ #76 Balance: famine death spiral (fixed in #78 — food/timber rebalance)
+- ✅ #77 Balance: timber overproduction (fixed in #78 — lumberMill output + upkeep tuned)
 
-## Last Cycle (2026-03-25 02:04 UTC)
+## Last Cycle (2026-03-25 07:04 UTC)
 - **No open PRs** to review
-- **Implemented #60** — Idle unit tracking and warning events
-  - Added `idleTicks` field to Unit interface and DB schema
-  - Track idle vs active per tick (movement, queue, actions)
-  - Emit `unit_idle` event when idle for 3+ ticks (one-shot at threshold)
-  - Persisted through scheduler, visible on public event feed
-  - 7 new tests
-  - PR #65 created, reviewed, merged
-  - Issue #60 closed
-- **Deployed to production** — health check passing, world at tick 89
+- **Fixed #76 + #77** — Major food/timber economy rebalance (PR #78)
+  - Farm output 12→15 food/tick
+  - Building food upkeep reduced: quarry 1→0, mine 2→1, barracks 3→2, market 2→1
+  - Unit upkeep: militia 2→1.5, settler 5→3
+  - Morale loss rate 0.05→0.03/tick
+  - LumberMill output 4→3, self-upkeep 1→2
+  - All tests updated, CI green, merged + deployed
+- **Commented on #75** — drizzle-kit push bug already handled by Dockerfile CMD; remaining work is tick engine error handling
+- **Deployed to production** — health check passing, world at tick 99
 
-## Open Issues
+## Open Issues (5)
 - #38 Demolish action + building decay (phase-3)
 - #43 Combat resolution (phase-4)
-- #52 Balance: mid-game resource sinks (partially fixed, remaining items need design input)
 - #55 Design: enemy colony visibility (needs Teemu input)
 - #63 Enhancement: queued action outcome feedback
+- #75 Bug: tick engine silent failure on DB errors (needs error handling fix)
 
 ## Next Priorities
-1. #38 Demolish action (completes Phase 3 core)
-2. #63 Action outcome feedback (playtester QoL)
-3. #43 Combat resolution (starts Phase 4)
-4. #55/#52 remaining items pending Teemu design decisions
+1. #75 Tick engine error handling (prevent silent failures)
+2. #38 Demolish action (completes Phase 3 core)
+3. #63 Action outcome feedback (playtester QoL)
+4. #43 Combat resolution (starts Phase 4)
+5. #55 remaining items pending Teemu design decisions
 
 ## Deployed
 - ✅ Live on Fly.io (agent-testing org, ams region)
-- ✅ All fixes deployed as of 2026-03-25 02:14 UTC
-- World: Genesis World (world_AYjUBQxhR1cQ) — tick 89, running
+- ✅ All fixes deployed as of 2026-03-25 07:14 UTC
+- World: Genesis World (world_AYjUBQxhR1cQ) — tick 99, running
