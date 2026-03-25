@@ -35,11 +35,11 @@ export const UNIT_SPEED: Record<string, number> = {
 
 /** How far each unit type can see (in hex distance). */
 export const VISION_RADIUS: Record<string, number> = {
-  scout: 4,
+  scout: 6,
   militia: 1,
-  soldier: 2,
+  soldier: 3,
   siege: 1,
-  settler: 1,
+  settler: 2,
 };
 
 // --- A* Pathfinding ---
