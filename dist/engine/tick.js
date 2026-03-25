@@ -135,16 +135,16 @@ export const MAX_POPULATION = {
 export const POP_GROWTH_PER_FOOD = 5;
 /** Stockpile capacity per settlement tier (per resource) */
 export const STOCKPILE_CAP = {
-    outpost: 300,
-    town: 600,
-    city: 1200,
+    outpost: 500,
+    town: 1000,
+    city: 2000,
 };
 /** Additional stockpile capacity per granary level */
-export const GRANARY_BONUS_PER_LEVEL = 100;
-/** Fraction of excess resources that decay each tick (30%) */
-export const STOCKPILE_DECAY_RATE = 0.30;
+export const GRANARY_BONUS_PER_LEVEL = 200;
+/** Fraction of excess resources that decay each tick (5%) */
+export const STOCKPILE_DECAY_RATE = 0.05;
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
-export const STOCKPILE_HARD_CEILING = 1.2;
+export const STOCKPILE_HARD_CEILING = 2.0;
 /** Fraction of building cost refunded on demolish (25%) */
 export const DEMOLISH_REFUND_RATE = 0.25;
 /** Chance per tick per building to decay when colony food is at 0 */
@@ -1683,7 +1683,7 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
                     totalGranaryLevels += b.level;
             }
         }
-        const baseCap = STOCKPILE_CAP[highestTier] ?? 300;
+        const baseCap = STOCKPILE_CAP[highestTier] ?? 500;
         const effectiveCap = baseCap + totalGranaryLevels * GRANARY_BONUS_PER_LEVEL;
         for (const key of ['food', 'timber', 'stone', 'iron']) {
             if (colony.resources[key] > effectiveCap) {

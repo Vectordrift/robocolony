@@ -2269,33 +2269,33 @@ describe('population growth in resolveTick', () => {
 
 describe('stockpile decay', () => {
   it('decays resources above the outpost cap', () => {
-    // Outpost cap = 300. Start with 500 food, no production, no consumption.
-    // Hard ceiling = 300 × 1.2 = 360, so 500 clamped to 360.
-    // Then excess = 60, decay = 60 × 0.30 = 18, final = 342.
-    const colony = makeColony({ resources: { food: 500, timber: 100, stone: 100, iron: 100, influence: 50 } });
+    // Outpost cap = 500. Start with 800 food, no production, no consumption.
+    // Hard ceiling = 500 × 2.0 = 1000, so 800 is NOT clamped.
+    // Excess = 300, decay = 300 × 0.05 = 15, final = 785.
+    const colony = makeColony({ resources: { food: 800, timber: 100, stone: 100, iron: 100, influence: 50 } });
     const settlement = makeSettlement({ population: 0 });
 
     const result = resolveTick([colony], [settlement], [], []);
 
-    // With hard ceiling + aggressive decay, food should be much lower than 500
-    expect(result.colonies[0].resources.food).toBeLessThan(360);
-    expect(result.colonies[0].resources.food).toBeGreaterThan(330); // ~342
+    // With gentle decay, food should be slightly lower than 800
+    expect(result.colonies[0].resources.food).toBeLessThan(800);
+    expect(result.colonies[0].resources.food).toBeGreaterThan(770); // ~785
     expect(result.events.some(e => e.type === 'stockpile_decay')).toBe(true);
   });
 
   it('does not decay resources under the cap', () => {
-    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 50, iron: 10, influence: 50 } });
+    const colony = makeColony({ resources: { food: 400, timber: 100, stone: 50, iron: 10, influence: 50 } });
     const settlement = makeSettlement({ population: 0 });
 
     const result = resolveTick([colony], [settlement], [], []);
 
-    // No decay events should fire (all resources under 300 outpost cap)
+    // No decay events should fire (all resources under 500 outpost cap)
     expect(result.events.filter(e => e.type === 'stockpile_decay')).toHaveLength(0);
   });
 
   it('granary increases stockpile cap', () => {
-    // Outpost cap = 300 + granary L2 = 300 + 200 = 500
-    const colony = makeColony({ resources: { food: 450, timber: 100, stone: 100, iron: 100, influence: 50 } });
+    // Outpost cap = 500 + granary L2 = 500 + 400 = 900
+    const colony = makeColony({ resources: { food: 850, timber: 100, stone: 100, iron: 100, influence: 50 } });
     const settlement = makeSettlement({
       buildings: [{ type: 'granary', level: 2 }],
       population: 0,
@@ -2303,19 +2303,19 @@ describe('stockpile decay', () => {
 
     const result = resolveTick([colony], [settlement], [], []);
 
-    // Food 450 < effective cap 500 — no food decay
+    // Food 850 < effective cap 900 — no food decay
     const foodDecay = result.events.filter(e => e.type === 'stockpile_decay' && e.data.resource === 'food');
     expect(foodDecay).toHaveLength(0);
   });
 
   it('town tier has higher stockpile cap', () => {
-    // Town cap = 600
-    const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 50 } });
+    // Town cap = 1000
+    const colony = makeColony({ resources: { food: 900, timber: 900, stone: 900, iron: 900, influence: 50 } });
     const settlement = makeSettlement({ tier: 'town', population: 0 });
 
     const result = resolveTick([colony], [settlement], [], []);
 
-    // All resources are under town cap of 600 — no decay
+    // All resources are under town cap of 1000 — no decay
     expect(result.events.filter(e => e.type === 'stockpile_decay')).toHaveLength(0);
   });
 
