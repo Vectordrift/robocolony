@@ -8,6 +8,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { worlds, hexes, colonies, settlements, units } from '../db/schema/index.js';
 import { requireAuth } from '../middleware/index.js';
+import { TECH_TREE } from '../engine/tick.js';
 /**
  * Get all hexes visible to a colony (fog of war applied).
  * A hex is visible if the colony ID is in its explored_by array.
@@ -49,7 +50,7 @@ export async function stateRoutes(app) {
         }
         // Get colony resources
         const colonyData = await db
-            .select({ resources: colonies.resources, legacyScore: colonies.legacyScore, status: colonies.status })
+            .select()
             .from(colonies)
             .where(eq(colonies.id, colony.id))
             .limit(1);
@@ -159,6 +160,10 @@ export async function stateRoutes(app) {
                 resources: colonyData[0]?.resources ?? {},
                 legacyScore: colonyData[0]?.legacyScore ?? 0,
             },
+            research: {
+                researched: colonyData[0]?.researchedTechs ?? [],
+                queue: colonyData[0]?.researchQueue ?? [],
+            },
             settlements: colonySettlements.map((s) => ({
                 id: s.id,
                 name: s.name,
@@ -204,6 +209,41 @@ export async function stateRoutes(app) {
             colonyId: colony.id,
             hexCount: visibleMap.length,
             hexes: visibleMap,
+        };
+    });
+    // Tech tree (authenticated — shows what's available + what you've researched)
+    app.get('/api/worlds/:id/tech', {
+        preHandler: requireAuth,
+    }, async (request, reply) => {
+        const colony = request.colony;
+        const colonyData = await db
+            .select()
+            .from(colonies)
+            .where(eq(colonies.id, colony.id))
+            .limit(1);
+        const researched = colonyData[0]?.researchedTechs ?? [];
+        const queue = colonyData[0]?.researchQueue ?? [];
+        const techs = Object.values(TECH_TREE).map(tech => ({
+            id: tech.id,
+            name: tech.name,
+            description: tech.description,
+            cost: tech.cost,
+            ticks: tech.ticks,
+            requires: tech.requires ?? [],
+            status: researched.includes(tech.id)
+                ? 'researched'
+                : queue.some(q => q.techId === tech.id)
+                    ? 'in_progress'
+                    : (tech.requires ?? []).every(r => researched.includes(r))
+                        ? 'available'
+                        : 'locked',
+            ticksRemaining: queue.find(q => q.techId === tech.id)?.ticksRemaining ?? null,
+        }));
+        return {
+            colonyId: colony.id,
+            researched,
+            queue,
+            techs,
         };
     });
 }

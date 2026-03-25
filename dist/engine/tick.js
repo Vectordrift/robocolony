@@ -7,6 +7,54 @@
 import { hexNeighbors, hexDistance } from './hex.js';
 import { findPath, movementStepsThisTick, createHexLookup } from './pathfinding.js';
 import { computeFogReveals, hexesWithinRadius } from './fog.js';
+export const TECH_TREE = {
+    improved_agriculture: {
+        id: 'improved_agriculture',
+        name: 'Improved Agriculture',
+        description: 'Farm production +30%',
+        cost: { food: 200, timber: 100 },
+        ticks: 10,
+    },
+    fortifications: {
+        id: 'fortifications',
+        name: 'Fortifications',
+        description: 'Settlement defense bonus — attackers take 2 damage per combat round',
+        cost: { stone: 200, iron: 100, timber: 50 },
+        ticks: 12,
+    },
+    advanced_scouting: {
+        id: 'advanced_scouting',
+        name: 'Advanced Scouting',
+        description: 'Scout vision radius +2, scout movement speed +1',
+        cost: { food: 150, timber: 100, iron: 50 },
+        ticks: 8,
+    },
+    steel_weapons: {
+        id: 'steel_weapons',
+        name: 'Steel Weapons',
+        description: 'Militia and soldier combat power +2',
+        cost: { iron: 200, stone: 100, timber: 50 },
+        ticks: 15,
+        requires: ['fortifications'],
+    },
+    trade_routes: {
+        id: 'trade_routes',
+        name: 'Trade Routes',
+        description: '+5 influence per tick, +2 food per settlement beyond first',
+        cost: { food: 150, timber: 100, influence: 50 },
+        ticks: 10,
+        requires: ['improved_agriculture'],
+    },
+    siege_engineering: {
+        id: 'siege_engineering',
+        name: 'Siege Engineering',
+        description: 'Siege units deal double damage to settlements',
+        cost: { iron: 250, stone: 200, timber: 100 },
+        ticks: 20,
+        requires: ['steel_weapons'],
+    },
+};
+export const SCORE_RESEARCH_COMPLETE = 75;
 // --- Constants ---
 /** Settlement tier multipliers for production */
 export const TIER_MULTIPLIER = {
@@ -23,6 +71,7 @@ export const BUILDING_PRODUCTION = {
     barracks: {},
     granary: {},
     market: { influence: 2 },
+    workshop: {},
 };
 /** Building upkeep per level (resources consumed per tick) */
 export const BUILDING_UPKEEP = {
@@ -33,6 +82,7 @@ export const BUILDING_UPKEEP = {
     barracks: { food: 2, iron: 2, timber: 1 },
     granary: { timber: 1 },
     market: { food: 1, timber: 1 },
+    workshop: { food: 2, timber: 1, iron: 1 },
 };
 /** Building construction costs */
 export const BUILDING_COSTS = {
@@ -43,6 +93,7 @@ export const BUILDING_COSTS = {
     barracks: { timber: 40, stone: 20, iron: 10 },
     granary: { timber: 25, stone: 10 },
     market: { stone: 30, timber: 15, iron: 5 },
+    workshop: { stone: 40, timber: 30, iron: 20 },
 };
 /** Maximum building level */
 export const MAX_BUILDING_LEVEL = 3;
@@ -64,7 +115,7 @@ export function buildingUpgradeCost(type, currentLevel) {
 export const BUILD_TIME = 3;
 /** All valid building types */
 export const VALID_BUILDING_TYPES = [
-    'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market',
+    'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop',
 ];
 /** Unit food upkeep per tick */
 export const UNIT_UPKEEP = {
@@ -1851,21 +1902,123 @@ export function autoExploreIdleScouts(units, hexes, hexLookup, actionedUnitIds) 
     }
     return { events };
 }
-// --- Tick Resolution ---
 /**
- * Resolve a single game tick.
+ * Resolve research actions and advance research queues.
  *
- * 0. Resolve found_settlement actions (before movement — consumed settlers don't move)
- * 1. Resolve movement actions + advance movement queues
- * 1.5. Resolve combat (units sharing hex with enemies fight)
- * 2. Compute fog of war reveals for moved units + new settlements
- * 3. Resolve build actions + advance build queues
- * 4. Calculate production for each settlement (including new ones)
- * 5. Calculate upkeep (buildings + units)
- * 6. Apply net resources to each colony
- * 7. Handle deficits: morale loss → desertion
- * 8. Handle surplus: morale recovery
+ * Phase 1: Process research actions — validate and start research
+ * Phase 2: Advance all research queues (decrement ticksRemaining)
  */
+export function resolveResearch(colonies, settlements, actions) {
+    const events = [];
+    const actionResults = [];
+    const researchActions = actions.filter(a => a.type === 'research');
+    // Phase 1: Process research actions
+    for (const action of researchActions) {
+        const colony = colonies.find(c => c.id === action.colonyId);
+        if (!colony) {
+            actionResults.push({ actionId: action.id, status: 'failed', result: 'Colony not found' });
+            continue;
+        }
+        const techId = action.params.techId;
+        if (!techId || !TECH_TREE[techId]) {
+            actionResults.push({ actionId: action.id, status: 'failed', result: `Unknown tech: ${techId}. Valid techs: ${Object.keys(TECH_TREE).join(', ')}` });
+            continue;
+        }
+        const tech = TECH_TREE[techId];
+        // Check colony has a workshop
+        const colonySettlements = settlements.filter(s => s.colonyId === colony.id);
+        const hasWorkshop = colonySettlements.some(s => s.buildings.some(b => b.type === 'workshop'));
+        if (!hasWorkshop) {
+            actionResults.push({ actionId: action.id, status: 'failed', result: 'You need a workshop building to research. Build a workshop first.' });
+            continue;
+        }
+        // Check not already researched
+        const researched = colony.researchedTechs ?? [];
+        if (researched.includes(techId)) {
+            actionResults.push({ actionId: action.id, status: 'failed', result: `Tech '${tech.name}' is already researched` });
+            continue;
+        }
+        // Check prerequisites
+        if (tech.requires) {
+            const missing = tech.requires.filter(r => !researched.includes(r));
+            if (missing.length > 0) {
+                const names = missing.map(id => TECH_TREE[id]?.name ?? id).join(', ');
+                actionResults.push({ actionId: action.id, status: 'failed', result: `Missing prerequisite tech(s): ${names}` });
+                continue;
+            }
+        }
+        // Check not already in queue
+        const queue = colony.researchQueue ?? [];
+        if (queue.some(q => q.techId === techId)) {
+            actionResults.push({ actionId: action.id, status: 'failed', result: `Tech '${tech.name}' is already being researched` });
+            continue;
+        }
+        // Check max 1 research at a time
+        if (queue.length >= 1) {
+            actionResults.push({ actionId: action.id, status: 'failed', result: 'Research queue is full (max 1 at a time). Wait for current research to complete.' });
+            continue;
+        }
+        // Check resources
+        for (const [resource, amount] of Object.entries(tech.cost)) {
+            const key = resource;
+            if ((colony.resources[key] ?? 0) < amount) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: `Not enough ${resource}: need ${amount}, have ${Math.floor(colony.resources[key] ?? 0)}` });
+                continue;
+            }
+        }
+        // Deduct resources
+        for (const [resource, amount] of Object.entries(tech.cost)) {
+            colony.resources[resource] -= amount;
+        }
+        // Add to queue
+        queue.push({ techId, ticksRemaining: tech.ticks });
+        colony.researchQueue = queue;
+        actionResults.push({ actionId: action.id, status: 'resolved', result: `Started researching '${tech.name}' — ${tech.ticks} ticks remaining` });
+        events.push({
+            type: 'research_started',
+            colonyId: colony.id,
+            data: {
+                techId,
+                techName: tech.name,
+                ticksRemaining: tech.ticks,
+                cost: tech.cost,
+            },
+        });
+    }
+    // Phase 2: Advance all research queues
+    for (const colony of colonies) {
+        if (colony.status !== 'active')
+            continue;
+        const queue = colony.researchQueue ?? [];
+        if (queue.length === 0)
+            continue;
+        const researched = colony.researchedTechs ?? [];
+        const completed = [];
+        for (let i = queue.length - 1; i >= 0; i--) {
+            queue[i].ticksRemaining--;
+            if (queue[i].ticksRemaining <= 0) {
+                const techId = queue[i].techId;
+                const tech = TECH_TREE[techId];
+                researched.push(techId);
+                completed.push(techId);
+                queue.splice(i, 1);
+                events.push({
+                    type: 'research_complete',
+                    colonyId: colony.id,
+                    data: {
+                        techId,
+                        techName: tech?.name ?? techId,
+                        description: tech?.description ?? '',
+                        totalResearched: researched.length,
+                    },
+                });
+            }
+        }
+        colony.researchQueue = queue;
+        colony.researchedTechs = researched;
+    }
+    return { events, actionResults };
+}
 export function resolveTick(colonies, settlements, units, hexes, actions = [], combatSeed, worldId, currentTick) {
     const events = [];
     const desertedUnitIds = [];
@@ -1874,8 +2027,9 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
     let newMessages = [];
     // --- Deduplicate actions per unit ---
     // If multiple move/attack actions target the same unit, only keep the last one.
+    // This prevents performance issues from processing many pathfinding calls for one unit.
     {
-        const unitActions = new Map();
+        const unitActions = new Map(); // unitId -> last action index
         const deduped = [];
         for (let i = 0; i < actions.length; i++) {
             const a = actions[i];
@@ -1889,14 +2043,17 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
             const unitId = a.params?.unitId || null;
             if (unitId && (a.type === 'move_unit' || a.type === 'attack' || a.type === 'explore')) {
                 if (unitActions.get(unitId) === i) {
-                    deduped.push(a);
-                } else {
+                    deduped.push(a); // keep only the last move/attack per unit
+                }
+                else {
                     actionResults.push({ actionId: a.id, status: 'failed', result: 'Superseded by later action for same unit' });
                 }
-            } else {
-                deduped.push(a);
+            }
+            else {
+                deduped.push(a); // non-unit actions are always kept
             }
         }
+        // Replace actions with deduped list for all subsequent phases
         actions = deduped;
     }
     // Build hex lookup
@@ -2098,6 +2255,10 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         events.push(...convertResult.events);
         actionResults.push(...convertResult.actionResults);
     }
+    // --- Phase 2: Resolve research actions + advance research queues ---
+    const researchResult = resolveResearch(updatedColonies, updatedSettlements, actions);
+    events.push(...researchResult.events);
+    actionResults.push(...researchResult.actionResults);
     // Group settlements and units by colony
     const colonySettlements = new Map();
     const colonyUnits = new Map();
@@ -2143,6 +2304,19 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         }
         // Unit food upkeep
         totalUpkeep.food += calculateUnitUpkeep(myUnits);
+        // --- Apply research bonuses ---
+        const researched = colony.researchedTechs ?? [];
+        // Improved Agriculture: +30% food production
+        if (researched.includes('improved_agriculture')) {
+            totalProduction.food = Math.round(totalProduction.food * 1.3 * 100) / 100;
+        }
+        // Trade Routes: +5 influence per tick, +2 food per settlement beyond first
+        if (researched.includes('trade_routes')) {
+            totalProduction.influence += 5;
+            if (mySettlements.length > 1) {
+                totalProduction.food += (mySettlements.length - 1) * 2;
+            }
+        }
         // --- Apply net resources ---
         const net = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
         for (const key of Object.keys(net)) {
@@ -2478,6 +2652,9 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
                 case 'combat_resolved':
                     if (event.data?.winner === colony.id)
                         colony.legacyScore += SCORE_COMBAT_VICTORY;
+                    break;
+                case 'research_complete':
+                    colony.legacyScore += SCORE_RESEARCH_COMPLETE;
                     break;
             }
         }

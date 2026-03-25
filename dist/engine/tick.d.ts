@@ -44,7 +44,7 @@ export interface BuildQueueEntry {
     type: BuildingType;
     ticksRemaining: number;
 }
-export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market';
+export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market' | 'workshop';
 export interface Unit {
     id: string;
     colonyId: string;
@@ -94,6 +94,21 @@ export interface MessageRecord {
     content: string;
     read: boolean;
 }
+export interface ResearchQueueEntry {
+    techId: string;
+    ticksRemaining: number;
+}
+export type TechId = 'improved_agriculture' | 'fortifications' | 'advanced_scouting' | 'steel_weapons' | 'trade_routes' | 'siege_engineering';
+export interface TechDefinition {
+    id: TechId;
+    name: string;
+    description: string;
+    cost: Partial<Resources>;
+    ticks: number;
+    requires?: TechId[];
+}
+export declare const TECH_TREE: Record<TechId, TechDefinition>;
+export declare const SCORE_RESEARCH_COMPLETE = 75;
 export interface TickResult {
     colonies: Colony[];
     settlements: Settlement[];
@@ -171,6 +186,8 @@ export declare const UPGRADE_COSTS: Record<string, {
 export declare const TIER_ORDER: string[];
 /** Maximum population per settlement tier */
 export declare const MAX_POPULATION: Record<string, number>;
+/** Maximum number of building slots per settlement tier */
+export declare const BUILDING_SLOTS: Record<string, number>;
 /** Population growth rate: +1 per this many excess food */
 export declare const POP_GROWTH_PER_FOOD = 5;
 /** Stockpile capacity per settlement tier (per resource) */
@@ -421,6 +438,17 @@ export declare function autoExploreIdleScouts(units: Unit[], hexes: HexTileState
  * 7. Handle deficits: morale loss → desertion
  * 8. Handle surplus: morale recovery
  */
+export interface ResearchResult {
+    events: TickEvent[];
+    actionResults: ActionResult[];
+}
+/**
+ * Resolve research actions and advance research queues.
+ *
+ * Phase 1: Process research actions — validate and start research
+ * Phase 2: Advance all research queues (decrement ticksRemaining)
+ */
+export declare function resolveResearch(colonies: Colony[], settlements: Settlement[], actions: QueuedAction[]): ResearchResult;
 export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number): TickResult;
 export {};
 //# sourceMappingURL=tick.d.ts.map

@@ -22,6 +22,7 @@ const VALID_ACTION_TYPES = {
     'send_message': ['toColonyId', 'message'],
     'explore': ['unitId'],
     'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
+    'research': ['techId'],
 };
 const MAX_ACTIONS_PER_TICK = 10;
 function validateActionType(action) {

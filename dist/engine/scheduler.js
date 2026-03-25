@@ -14,7 +14,7 @@ const COMPASS_SIGNAL_INTERVAL = 25;
 /** Minimum ticks before first compass signal (let colonies establish first) */
 const COMPASS_SIGNAL_START = 25;
 /** Maximum time (ms) for a single tick to complete before being killed */
-const TICK_TIMEOUT_MS = 60000;
+const TICK_TIMEOUT_MS = 60_000;
 /** Event types visible on the public feed (spectator view) */
 const PUBLIC_EVENT_TYPES = new Set([
     'settlement_founded',
@@ -26,6 +26,7 @@ const PUBLIC_EVENT_TYPES = new Set([
     'combat_resolved',
     'unit_destroyed',
     'shortage',
+    'research_complete',
 ]);
 /**
  * Build public-safe data for spectator feed.
@@ -80,6 +81,11 @@ function buildPublicData(event) {
                 unitType: event.data.unitType,
                 cause: event.data.cause || 'combat',
             };
+        case 'research_complete':
+            return {
+                techName: event.data.techName,
+                description: event.data.description,
+            };
         default:
             return null;
     }
@@ -89,6 +95,7 @@ export class TickScheduler {
     db;
     timer = null;
     running = false;
+    tickStartedAt = 0;
     onTick;
     onError;
     constructor(options) {
@@ -96,7 +103,6 @@ export class TickScheduler {
         this.db = options.db;
         this.onTick = options.onTick;
         this.onError = options.onError;
-        this.tickStartedAt = 0;
     }
     /**
      * Start the tick loop for a world.
@@ -130,12 +136,14 @@ export class TickScheduler {
      */
     async executeTick() {
         if (this.running) {
+            // If a tick has been running for more than TICK_TIMEOUT_MS, force-reset
             const elapsed = Date.now() - this.tickStartedAt;
             if (elapsed > TICK_TIMEOUT_MS) {
                 this.onError?.(new Error(`Tick stuck for ${elapsed}ms — force-resetting scheduler`));
                 this.running = false;
-            } else {
-                return;
+            }
+            else {
+                return; // previous tick still processing normally
             }
         }
         this.running = true;
@@ -173,14 +181,19 @@ export class TickScheduler {
                 .from(schema.actions)
                 .where(and(eq(schema.actions.worldId, this.worldId), eq(schema.actions.tick, newTick), eq(schema.actions.status, 'queued')));
             // Map DB rows to tick engine types
-            const colonies = dbColonies.map(c => ({
-                id: c.id,
-                worldId: c.worldId,
-                name: c.name,
-                resources: c.resources,
-        legacyScore: c.legacyScore ?? 0,
-                status: c.status,
-            }));
+            const colonies = dbColonies.map(c => {
+                const col = {
+                    id: c.id,
+                    worldId: c.worldId,
+                    name: c.name,
+                    resources: c.resources,
+                    legacyScore: c.legacyScore ?? 0,
+                    status: c.status,
+                    researchedTechs: (c.researchedTechs ?? []),
+                    researchQueue: (c.researchQueue ?? []),
+                };
+                return col;
+            });
             const settlements = dbSettlements.map(s => ({
                 id: s.id,
                 colonyId: s.colonyId,
@@ -212,7 +225,6 @@ export class TickScheduler {
                 terrain: h.terrain,
                 resources: (h.resources ?? { food: 0, timber: 0, stone: 0, iron: 0 }),
                 settlementId: h.settlementId,
-            exploredBy: h.exploredBy ?? [],
                 exploredBy: (h.exploredBy ?? []),
             }));
             const queuedActions = dbActions.map(a => ({
@@ -234,7 +246,12 @@ export class TickScheduler {
                 for (const colony of result.colonies) {
                     await tx
                         .update(schema.colonies)
-                        .set({ resources: colony.resources, legacyScore: colony.legacyScore ?? 0 })
+                        .set({
+                        resources: colony.resources,
+                        legacyScore: colony.legacyScore ?? 0,
+                        ...(colony.researchedTechs !== undefined ? { researchedTechs: colony.researchedTechs } : {}),
+                        ...(colony.researchQueue !== undefined ? { researchQueue: colony.researchQueue } : {}),
+                    })
                         .where(eq(schema.colonies.id, colony.id));
                 }
                 // Update existing settlements and insert newly founded ones
@@ -479,3 +496,4 @@ export class TickScheduler {
         }
     }
 }
+//# sourceMappingURL=scheduler.js.map
