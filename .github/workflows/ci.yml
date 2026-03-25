@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Don't run on commits from this workflow
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
       - uses: actions/checkout@v4
 
@@ -25,31 +27,19 @@ jobs:
 
       - name: Generate version.json
         run: |
-          cat > version.json << VEOF
-          {
-            "sha": "${{ github.sha }}",
-            "short": "$(echo ${{ github.sha }} | cut -c1-7)",
-            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "message": "$(git log -1 --pretty=format:'%s' | sed 's/"/\\"/g')"
-          }
-          VEOF
-          # Clean up leading whitespace from heredoc
-          python3 -c "
-          import json, sys
-          with open('version.json') as f:
-            d = json.load(f)
-          with open('version.json', 'w') as f:
-            json.dump(d, f, indent=2)
-          "
+          SHA="${{ github.sha }}"
+          SHORT="${SHA:0:7}"
+          TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          MSG="$(git log -1 --pretty=format:'%s' | sed 's/"/\\"/g')"
+          echo "{\"sha\":\"${SHA}\",\"short\":\"${SHORT}\",\"timestamp\":\"${TS}\",\"message\":\"${MSG}\"}" > version.json
           cp version.json dist/version.json
           cp version.json web/version.json
 
       - name: Commit compiled files
-        if: github.event_name == 'push'
         run: |
           git config user.name "teempai"
           git config user.email "11815232+teempai@users.noreply.github.com"
-          git add dist/ version.json web/version.json
+          git add -f dist/ version.json web/version.json
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
