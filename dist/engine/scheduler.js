@@ -14,7 +14,7 @@ const COMPASS_SIGNAL_INTERVAL = 25;
 /** Minimum ticks before first compass signal (let colonies establish first) */
 const COMPASS_SIGNAL_START = 25;
 /** Maximum time (ms) for a single tick to complete before being killed */
-const TICK_TIMEOUT_MS = 60000;
+const TICK_TIMEOUT_MS = 60_000;
 /** Event types visible on the public feed (spectator view) */
 const PUBLIC_EVENT_TYPES = new Set([
     'settlement_founded',
@@ -26,6 +26,7 @@ const PUBLIC_EVENT_TYPES = new Set([
     'combat_resolved',
     'unit_destroyed',
     'shortage',
+    'settlement_captured',
 ]);
 /**
  * Build public-safe data for spectator feed.
@@ -80,6 +81,12 @@ function buildPublicData(event) {
                 unitType: event.data.unitType,
                 cause: event.data.cause || 'combat',
             };
+        case 'settlement_captured':
+            return {
+                name: event.data.name,
+                previousTier: event.data.previousTier,
+                newTier: event.data.newTier,
+            };
         default:
             return null;
     }
@@ -89,6 +96,7 @@ export class TickScheduler {
     db;
     timer = null;
     running = false;
+    tickStartedAt = 0;
     onTick;
     onError;
     constructor(options) {
@@ -96,7 +104,6 @@ export class TickScheduler {
         this.db = options.db;
         this.onTick = options.onTick;
         this.onError = options.onError;
-        this.tickStartedAt = 0;
     }
     /**
      * Start the tick loop for a world.
@@ -130,12 +137,14 @@ export class TickScheduler {
      */
     async executeTick() {
         if (this.running) {
+            // If a tick has been running for more than TICK_TIMEOUT_MS, force-reset
             const elapsed = Date.now() - this.tickStartedAt;
             if (elapsed > TICK_TIMEOUT_MS) {
                 this.onError?.(new Error(`Tick stuck for ${elapsed}ms — force-resetting scheduler`));
                 this.running = false;
-            } else {
-                return;
+            }
+            else {
+                return; // previous tick still processing normally
             }
         }
         this.running = true;
@@ -178,7 +187,7 @@ export class TickScheduler {
                 worldId: c.worldId,
                 name: c.name,
                 resources: c.resources,
-        legacyScore: c.legacyScore ?? 0,
+                legacyScore: c.legacyScore ?? 0,
                 status: c.status,
             }));
             const settlements = dbSettlements.map(s => ({
@@ -212,7 +221,6 @@ export class TickScheduler {
                 terrain: h.terrain,
                 resources: (h.resources ?? { food: 0, timber: 0, stone: 0, iron: 0 }),
                 settlementId: h.settlementId,
-            exploredBy: h.exploredBy ?? [],
                 exploredBy: (h.exploredBy ?? []),
             }));
             const queuedActions = dbActions.map(a => ({
@@ -479,3 +487,4 @@ export class TickScheduler {
         }
     }
 }
+//# sourceMappingURL=scheduler.js.map
