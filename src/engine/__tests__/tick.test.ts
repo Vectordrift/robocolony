@@ -2515,17 +2515,19 @@ describe('Building upgrade through build queue', () => {
 });
 
 describe('Building upgrade production scaling', () => {
-  it('should double production for a level 2 building', () => {
+  it('should double building production for a level 2 building', () => {
+    // Use empty hexes to isolate building production from hex yield bonus
     const settlement1 = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
     const settlement2 = makeSettlement({ buildings: [{ type: 'farm', level: 2 }] });
 
-    const hexes: HexTileState[] = [makeHex()]; // same hex for both
+    const emptyHexes: HexTileState[] = []; // no hex bonus
 
-    const prod1 = calculateProduction(settlement1, hexes);
-    const prod2 = calculateProduction(settlement2, hexes);
+    const prod1 = calculateProduction(settlement1, emptyHexes);
+    const prod2 = calculateProduction(settlement2, emptyHexes);
 
-    // Farm L1: 10 food, Farm L2: 20 food (both at outpost tier 1.0)
-    expect(prod2.food).toBe((prod1.food as number) * 2);
+    // Farm L1: 10 food, Farm L2: 20 food (both at outpost tier 1.0, no hex bonus)
+    expect(prod1.food).toBe(10);
+    expect(prod2.food).toBe(20);
   });
 
   it('should scale upkeep with building level', () => {
