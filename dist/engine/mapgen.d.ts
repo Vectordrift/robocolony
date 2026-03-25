@@ -27,6 +27,11 @@ export interface WorldMap {
 /**
  * Recommend a map radius based on colony count.
  * Smaller worlds = faster contact = more strategic tension.
+ *
+ * 2 colonies → radius 25 (~1,951 hexes)
+ * 4 colonies → radius 35 (~3,851 hexes)
+ * 8 colonies → radius 50 (~7,851 hexes)
+ * 16 colonies → radius 70 (~15,351 hexes)
  */
 export declare function recommendedRadius(maxColonies: number): number;
 /**
