@@ -35,6 +35,7 @@ interface ActionInput {
 const VALID_ACTION_TYPES: Record<string, string[]> = {
   'move_unit': ['unitId', 'targetX', 'targetY'],
   'build': ['settlementId', 'buildingType'],
+  'upgrade_building': ['settlementId', 'buildingType'],
   'train_unit': ['settlementId', 'unitType'],
   'found_settlement': ['unitId', 'name'],
   'demolish': ['settlementId', 'buildingType'],

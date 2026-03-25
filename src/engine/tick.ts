@@ -153,6 +153,25 @@ export const BUILDING_COSTS: Record<BuildingType, Partial<Resources>> = {
   market:     { stone: 30, timber: 15, iron: 5 },
 };
 
+/** Maximum building level */
+export const MAX_BUILDING_LEVEL = 3;
+
+/** Building upgrade time in ticks (same as construction) */
+export const UPGRADE_BUILD_TIME = 3;
+
+/**
+ * Calculate upgrade cost for a building at the given level.
+ * Upgrading from level N to N+1 costs: base_cost × N (escalating).
+ */
+export function buildingUpgradeCost(type: BuildingType, currentLevel: number): Partial<Resources> {
+  const base = BUILDING_COSTS[type];
+  const cost: Partial<Resources> = {};
+  for (const [key, amount] of Object.entries(base)) {
+    cost[key as keyof Resources] = (amount as number) * (currentLevel + 1);
+  }
+  return cost;
+}
+
 /** Ticks required to construct any building */
 export const BUILD_TIME = 3;
 
@@ -432,24 +451,208 @@ export function resolveBuilding(
       }
     }
 
-    // Move completed buildings to buildings array
+    // Move completed buildings to buildings array (or upgrade existing)
     for (const entry of completed) {
-      settlement.buildings.push({ type: entry.type, level: 1 });
-      events.push({
-        type: 'build_complete',
-        colonyId: settlement.colonyId,
-        settlementId: settlement.id,
-        data: {
-          buildingType: entry.type,
-          level: 1,
-        },
-      });
+      const existing = settlement.buildings.find(b => b.type === entry.type);
+      if (existing) {
+        // This is a building upgrade — increment level
+        existing.level += 1;
+        events.push({
+          type: 'upgrade_complete',
+          colonyId: settlement.colonyId,
+          settlementId: settlement.id,
+          data: {
+            buildingType: entry.type,
+            level: existing.level,
+          },
+        });
+      } else {
+        // New building construction
+        settlement.buildings.push({ type: entry.type, level: 1 });
+        events.push({
+          type: 'build_complete',
+          colonyId: settlement.colonyId,
+          settlementId: settlement.id,
+          data: {
+            buildingType: entry.type,
+            level: 1,
+          },
+        });
+      }
     }
 
     settlement.buildQueue = remaining;
   }
 
   return { settlements, events, actionResults };
+}
+
+// --- Building Upgrade ---
+
+export interface UpgradeBuildingResult {
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+/**
+ * Resolve upgrade_building actions: increase building level.
+ *
+ * Validates:
+ * - Settlement exists and belongs to the colony
+ * - Building exists in the settlement
+ * - Building is not already at max level
+ * - Building is not currently in the upgrade queue
+ * - Colony has enough resources (escalating cost)
+ *
+ * On success: resources deducted, building added to upgrade queue.
+ * Upgrade queue entries are processed alongside build queue.
+ */
+export function resolveUpgradeBuilding(
+  settlements: Settlement[],
+  colonies: Colony[],
+  actions: QueuedAction[],
+): UpgradeBuildingResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+
+  const upgradeActions = actions.filter(a => a.type === 'upgrade_building');
+  if (upgradeActions.length === 0) {
+    return { events, actionResults };
+  }
+
+  // Build lookups
+  const settlementMap = new Map<string, Settlement>();
+  for (const s of settlements) {
+    settlementMap.set(s.id, s);
+  }
+  const colonyMap = new Map<string, Colony>();
+  for (const c of colonies) {
+    colonyMap.set(c.id, c);
+  }
+
+  for (const action of upgradeActions) {
+    const settlementId = action.params.settlementId as string;
+    const buildingType = action.params.buildingType as string;
+
+    // 1. Settlement exists
+    const settlement = settlementMap.get(settlementId);
+    if (!settlement) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} not found`,
+      });
+      continue;
+    }
+
+    // 2. Colony ownership
+    if (settlement.colonyId !== action.colonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+      });
+      continue;
+    }
+
+    // 3. Valid building type
+    if (!VALID_BUILDING_TYPES.includes(buildingType as BuildingType)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Invalid building type: ${buildingType}`,
+      });
+      continue;
+    }
+
+    const bType = buildingType as BuildingType;
+
+    // 4. Building exists in settlement
+    const building = settlement.buildings.find(b => b.type === bType);
+    if (!building) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} does not have a ${bType}`,
+      });
+      continue;
+    }
+
+    // 5. Not already at max level
+    if (building.level >= MAX_BUILDING_LEVEL) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `${bType} is already at maximum level (${MAX_BUILDING_LEVEL})`,
+      });
+      continue;
+    }
+
+    // 6. Not already in upgrade queue (buildQueue tracks upgrades too)
+    if (settlement.buildQueue.some(bq => bq.type === bType)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `${bType} is already being upgraded in settlement ${settlementId}`,
+      });
+      continue;
+    }
+
+    // 7. Colony has enough resources
+    const colony = colonyMap.get(action.colonyId);
+    if (!colony) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Colony ${action.colonyId} not found`,
+      });
+      continue;
+    }
+
+    const cost = buildingUpgradeCost(bType, building.level);
+    if (!hasResources(colony.resources, cost)) {
+      const costStr = Object.entries(cost)
+        .filter(([, v]) => (v as number) > 0)
+        .map(([k, v]) => `${v} ${k}`)
+        .join(', ');
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Insufficient resources to upgrade ${bType} to level ${building.level + 1}: need ${costStr}`,
+      });
+      continue;
+    }
+
+    // --- All checks passed: deduct resources and queue upgrade ---
+    deductResources(colony.resources, cost);
+
+    // Add to build queue — when it completes, the building level will be incremented
+    settlement.buildQueue.push({
+      type: bType,
+      ticksRemaining: UPGRADE_BUILD_TIME,
+    });
+
+    events.push({
+      type: 'upgrade_started',
+      colonyId: action.colonyId,
+      settlementId: settlement.id,
+      data: {
+        buildingType: bType,
+        fromLevel: building.level,
+        toLevel: building.level + 1,
+        ticksRemaining: UPGRADE_BUILD_TIME,
+        cost,
+      },
+    });
+
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: `${bType} upgrade to level ${building.level + 1} started at ${settlement.name} (${UPGRADE_BUILD_TIME} ticks)`,
+    });
+  }
+
+  return { events, actionResults };
 }
 
 // --- Settlement Founding ---
@@ -1356,6 +1559,14 @@ export function resolveTick(
     const fogResult = computeFogReveals(movedUnits, allHexCoords, alreadyExplored);
     fogReveals.push(...fogResult.reveals);
     events.push(...fogResult.events);
+  }
+
+  // --- Phase 0.9: Resolve upgrade_building actions (before build queue advances) ---
+  const upgradeBuildingActions = actions.filter(a => a.type === 'upgrade_building');
+  if (upgradeBuildingActions.length > 0) {
+    const upgradeBuildingResult = resolveUpgradeBuilding(updatedSettlements, updatedColonies, actions);
+    events.push(...upgradeBuildingResult.events);
+    actionResults.push(...upgradeBuildingResult.actionResults);
   }
 
   // --- Phase 1: Resolve build actions + advance build queues ---

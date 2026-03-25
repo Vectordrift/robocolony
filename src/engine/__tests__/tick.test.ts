@@ -6,6 +6,8 @@ import {
   resolveBuilding,
   resolveTrainUnit,
   resolveUpgradeSettlement,
+  resolveUpgradeBuilding,
+  buildingUpgradeCost,
   calculateProduction,
   calculateBuildingUpkeep,
   calculateUnitUpkeep,
@@ -14,6 +16,8 @@ import {
   BUILDING_PRODUCTION,
   BUILDING_COSTS,
   BUILD_TIME,
+  MAX_BUILDING_LEVEL,
+  UPGRADE_BUILD_TIME,
   VALID_BUILDING_TYPES,
   UNIT_UPKEEP,
   UNIT_TRAINING_COSTS,
@@ -2323,5 +2327,251 @@ describe('resolveTick with upgrade_settlement', () => {
     // Town multiplier 1.5 vs outpost 1.0 — building production should be higher
     // Farm at outpost: 10, at town: 15
     expect(prod2.food).toBeGreaterThan(prod1.food);
+  });
+});
+
+// =============================================================================
+// Building Upgrade Tests
+// =============================================================================
+
+describe('buildingUpgradeCost', () => {
+  it('should return base cost × 2 for upgrading from level 1', () => {
+    const cost = buildingUpgradeCost('farm', 1);
+    // Farm base cost: timber: 20 → level 1 upgrade cost: timber: 40
+    expect(cost.timber).toBe(40);
+  });
+
+  it('should return base cost × 3 for upgrading from level 2', () => {
+    const cost = buildingUpgradeCost('farm', 2);
+    // Farm base cost: timber: 20 → level 2 upgrade cost: timber: 60
+    expect(cost.timber).toBe(60);
+  });
+
+  it('should scale all resource types', () => {
+    const cost = buildingUpgradeCost('mine', 1);
+    // Mine base: stone: 30, timber: 20 → ×2
+    expect(cost.stone).toBe(60);
+    expect(cost.timber).toBe(40);
+  });
+});
+
+describe('resolveUpgradeBuilding', () => {
+  it('should queue upgrade for an existing building', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 200, stone: 100, iron: 50, influence: 50 } });
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
+
+    const action: QueuedAction = {
+      id: 'act-1',
+      colonyId: 'colony-1',
+      type: 'upgrade_building',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveUpgradeBuilding([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.events[0].type).toBe('upgrade_started');
+    expect(result.events[0].data.fromLevel).toBe(1);
+    expect(result.events[0].data.toLevel).toBe(2);
+
+    // Build queue should have the upgrade entry
+    expect(settlement.buildQueue).toHaveLength(1);
+    expect(settlement.buildQueue[0].type).toBe('farm');
+    expect(settlement.buildQueue[0].ticksRemaining).toBe(UPGRADE_BUILD_TIME);
+
+    // Resources should be deducted (farm base: 20 timber × 2 = 40 timber)
+    expect(colony.resources.timber).toBe(160);
+  });
+
+  it('should fail when building does not exist in settlement', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ buildings: [] });
+
+    const action: QueuedAction = {
+      id: 'act-1',
+      colonyId: 'colony-1',
+      type: 'upgrade_building',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveUpgradeBuilding([settlement], [colony], [action]);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('does not have');
+  });
+
+  it('should fail when building is at max level', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 500, stone: 200, iron: 100, influence: 50 } });
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: MAX_BUILDING_LEVEL }] });
+
+    const action: QueuedAction = {
+      id: 'act-1',
+      colonyId: 'colony-1',
+      type: 'upgrade_building',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveUpgradeBuilding([settlement], [colony], [action]);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('maximum level');
+  });
+
+  it('should fail when building is already in upgrade queue', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 500, stone: 200, iron: 100, influence: 50 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+      buildQueue: [{ type: 'farm', ticksRemaining: 2 }],
+    });
+
+    const action: QueuedAction = {
+      id: 'act-1',
+      colonyId: 'colony-1',
+      type: 'upgrade_building',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveUpgradeBuilding([settlement], [colony], [action]);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('already being upgraded');
+  });
+
+  it('should fail when colony lacks resources', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 5, stone: 5, iron: 5, influence: 50 } });
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
+
+    const action: QueuedAction = {
+      id: 'act-1',
+      colonyId: 'colony-1',
+      type: 'upgrade_building',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveUpgradeBuilding([settlement], [colony], [action]);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Insufficient resources');
+  });
+
+  it('should fail when settlement does not belong to colony', () => {
+    const colony = makeColony({ id: 'colony-2' });
+    const settlement = makeSettlement({ colonyId: 'colony-1', buildings: [{ type: 'farm', level: 1 }] });
+
+    const action: QueuedAction = {
+      id: 'act-1',
+      colonyId: 'colony-2',
+      type: 'upgrade_building',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveUpgradeBuilding([settlement], [colony], [action]);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('does not belong');
+  });
+});
+
+describe('Building upgrade through build queue', () => {
+  it('should increment building level when upgrade completes in build queue', () => {
+    // Simulate a building with an upgrade already in queue (1 tick remaining)
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+      buildQueue: [{ type: 'farm', ticksRemaining: 1 }],
+    });
+
+    // Run resolveBuilding with no new build actions (just queue advancement)
+    const result = resolveBuilding([settlement], [colony], []);
+
+    // Building should now be level 2
+    const farm = settlement.buildings.find(b => b.type === 'farm');
+    expect(farm).toBeDefined();
+    expect(farm!.level).toBe(2);
+
+    // Should emit upgrade_complete, not build_complete
+    const upgradeEvent = result.events.find(e => e.type === 'upgrade_complete');
+    expect(upgradeEvent).toBeDefined();
+    expect(upgradeEvent!.data.buildingType).toBe('farm');
+    expect(upgradeEvent!.data.level).toBe(2);
+
+    // Build queue should be empty
+    expect(settlement.buildQueue).toHaveLength(0);
+  });
+
+  it('should still create new buildings normally when type not present', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildings: [],
+      buildQueue: [{ type: 'farm', ticksRemaining: 1 }],
+    });
+
+    const result = resolveBuilding([settlement], [colony], []);
+
+    // Should create new building at level 1
+    const farm = settlement.buildings.find(b => b.type === 'farm');
+    expect(farm).toBeDefined();
+    expect(farm!.level).toBe(1);
+
+    // Should emit build_complete
+    const buildEvent = result.events.find(e => e.type === 'build_complete');
+    expect(buildEvent).toBeDefined();
+  });
+});
+
+describe('Building upgrade production scaling', () => {
+  it('should double building production for a level 2 building', () => {
+    // Use empty hexes to isolate building production from hex yield bonus
+    const settlement1 = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
+    const settlement2 = makeSettlement({ buildings: [{ type: 'farm', level: 2 }] });
+
+    const emptyHexes: HexTileState[] = []; // no hex bonus
+
+    const prod1 = calculateProduction(settlement1, emptyHexes);
+    const prod2 = calculateProduction(settlement2, emptyHexes);
+
+    // Farm L1: 10 food, Farm L2: 20 food (both at outpost tier 1.0, no hex bonus)
+    expect(prod1.food).toBe(10);
+    expect(prod2.food).toBe(20);
+  });
+
+  it('should scale upkeep with building level', () => {
+    const settlement1 = makeSettlement({ buildings: [{ type: 'mine', level: 1 }] });
+    const settlement2 = makeSettlement({ buildings: [{ type: 'mine', level: 2 }] });
+
+    const upkeep1 = calculateBuildingUpkeep(settlement1);
+    const upkeep2 = calculateBuildingUpkeep(settlement2);
+
+    // Mine upkeep L1: timber 1, food 1. L2: timber 2, food 2.
+    expect(upkeep2.timber).toBe((upkeep1.timber as number) * 2);
+    expect(upkeep2.food).toBe((upkeep1.food as number) * 2);
+  });
+});
+
+describe('upgrade_building in resolveTick (integration)', () => {
+  it('should process upgrade_building action in full tick', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 200, stone: 100, iron: 50, influence: 50 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+      population: 5,
+    });
+    const hexes = [makeHex()];
+
+    const action: QueuedAction = {
+      id: 'act-1',
+      colonyId: 'colony-1',
+      type: 'upgrade_building',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveTick([colony], [settlement], [], hexes, [action]);
+
+    // Should have upgrade_started event
+    const startEvent = result.events.find(e => e.type === 'upgrade_started');
+    expect(startEvent).toBeDefined();
+    expect(startEvent!.data.buildingType).toBe('farm');
+
+    // Building should still be level 1 (upgrade takes time)
+    const farm = result.settlements[0].buildings.find(b => b.type === 'farm');
+    expect(farm!.level).toBe(1);
+
+    // Build queue should have the upgrade entry (with 1 tick decremented)
+    expect(result.settlements[0].buildQueue).toHaveLength(1);
+    expect(result.settlements[0].buildQueue[0].ticksRemaining).toBe(UPGRADE_BUILD_TIME - 1);
   });
 });
