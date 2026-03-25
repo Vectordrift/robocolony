@@ -1,4 +1,5 @@
 
+
 import { describe, it, expect } from 'vitest';
 import {
   resolveTick,
@@ -37,6 +38,9 @@ import {
   TIER_ORDER,
   MAX_POPULATION,
   POP_GROWTH_PER_FOOD,
+  STOCKPILE_CAP,
+  GRANARY_BONUS_PER_LEVEL,
+  STOCKPILE_DECAY_RATE,
   IDLE_WARNING_TICKS,
   type Colony,
   type Settlement,
@@ -282,7 +286,7 @@ describe('calculateBuildingUpkeep', () => {
     });
     const upkeep = calculateBuildingUpkeep(settlement);
     expect(upkeep.food).toBe(0);
-    expect(upkeep.timber).toBe(3);
+    expect(upkeep.timber).toBe(6); // farm: timber 2 * level 3
   });
 
   it('calculates upkeep scaled by level', () => {
@@ -291,23 +295,23 @@ describe('calculateBuildingUpkeep', () => {
     });
     const upkeep = calculateBuildingUpkeep(settlement);
 
-    // mine: timber 1*2, food 1*2
-    expect(upkeep.timber).toBe(2);
-    expect(upkeep.food).toBe(2);
+    // mine: timber 2*2, food 2*2
+    expect(upkeep.timber).toBe(4);
+    expect(upkeep.food).toBe(4);
   });
 
   it('sums upkeep from multiple buildings', () => {
     const settlement = makeSettlement({
       buildings: [
-        { type: 'mine', level: 1 },     // timber 1, food 1
-        { type: 'barracks', level: 1 },  // food 2, iron 1
+        { type: 'mine', level: 1 },     // timber 2, food 2
+        { type: 'barracks', level: 1 },  // food 3, iron 2, timber 1
       ],
     });
     const upkeep = calculateBuildingUpkeep(settlement);
 
-    expect(upkeep.food).toBe(3);    // 1 + 2
-    expect(upkeep.timber).toBe(2);  // mine 1 + barracks 1
-    expect(upkeep.iron).toBe(1);    // 1
+    expect(upkeep.food).toBe(5);    // 2 + 3
+    expect(upkeep.timber).toBe(3);  // mine 2 + barracks 1
+    expect(upkeep.iron).toBe(2);    // barracks 2
   });
 });
 
@@ -1090,8 +1094,8 @@ describe('resolveTick', () => {
     const hexes = makeHexRing(0, 0);
     const result = resolveTick([colony], [settlement], [], hexes);
 
-    // Food: 10 (farm) + 10.5 (hexes) = 20.5 produced, 5 (pop consumption) upkeep
-    // Net: 15.5. Starting 100 + 15.5 = 115.5
+    // Food: 12 (farm) + 10.5 (hexes) = 22.5 produced, 4 (pop consumption) upkeep
+    // Net: ~18.5. Starting 100 + 18.5 > 100
     expect(result.colonies[0].resources.food).toBeGreaterThan(100);
     expect(result.events.some(e => e.type === 'production')).toBe(true);
   });
@@ -1927,7 +1931,7 @@ describe('resolveUpgradeSettlement', () => {
 
   it('upgrades town to city when requirements met', () => {
     const colony = makeColony({
-      resources: { food: 600, timber: 400, stone: 300, iron: 200, influence: 50 },
+      resources: { food: 600, timber: 400, stone: 300, iron: 200, influence: 100 },
     });
     const settlement = makeSettlement({
       tier: 'town',
@@ -1947,11 +1951,12 @@ describe('resolveUpgradeSettlement', () => {
     expect(result.actionResults[0].status).toBe('resolved');
     expect(settlement.tier).toBe('city');
 
-    // City costs: 500 food, 300 timber, 200 stone, 100 iron
+    // City costs: 500 food, 300 timber, 200 stone, 100 iron, 75 influence
     expect(colony.resources.food).toBe(600 - 500);
     expect(colony.resources.timber).toBe(400 - 300);
     expect(colony.resources.stone).toBe(300 - 200);
     expect(colony.resources.iron).toBe(200 - 100);
+    expect(colony.resources.influence).toBe(100 - 75);
   });
 
   it('generates settlement_upgraded event', () => {
@@ -2249,6 +2254,70 @@ describe('population growth in resolveTick', () => {
     expect(growthEvent!.settlementId).toBe('settlement-1');
     expect(growthEvent!.data.previousPopulation).toBe(10);
     expect((growthEvent!.data.newPopulation as number)).toBeGreaterThan(10);
+  });
+});
+
+// --- Stockpile decay ---
+
+describe('stockpile decay', () => {
+  it('decays resources above the outpost cap', () => {
+    // Outpost cap = 300. Start with 500 food, no production, no consumption.
+    const colony = makeColony({ resources: { food: 500, timber: 100, stone: 100, iron: 100, influence: 50 } });
+    const settlement = makeSettlement({ population: 0 });
+
+    const result = resolveTick([colony], [settlement], [], []);
+
+    // Food should be reduced by decay: excess = 200, decay = 20, final = 480
+    expect(result.colonies[0].resources.food).toBeLessThan(500);
+    expect(result.colonies[0].resources.food).toBeGreaterThan(470); // ~480
+    expect(result.events.some(e => e.type === 'stockpile_decay')).toBe(true);
+  });
+
+  it('does not decay resources under the cap', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 50, iron: 10, influence: 50 } });
+    const settlement = makeSettlement({ population: 0 });
+
+    const result = resolveTick([colony], [settlement], [], []);
+
+    // No decay events should fire (all resources under 300 outpost cap)
+    expect(result.events.filter(e => e.type === 'stockpile_decay')).toHaveLength(0);
+  });
+
+  it('granary increases stockpile cap', () => {
+    // Outpost cap = 300 + granary L2 = 300 + 200 = 500
+    const colony = makeColony({ resources: { food: 450, timber: 100, stone: 100, iron: 100, influence: 50 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'granary', level: 2 }],
+      population: 0,
+    });
+
+    const result = resolveTick([colony], [settlement], [], []);
+
+    // Food 450 < effective cap 500 — no food decay
+    const foodDecay = result.events.filter(e => e.type === 'stockpile_decay' && e.data.resource === 'food');
+    expect(foodDecay).toHaveLength(0);
+  });
+
+  it('town tier has higher stockpile cap', () => {
+    // Town cap = 600
+    const colony = makeColony({ resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 50 } });
+    const settlement = makeSettlement({ tier: 'town', population: 0 });
+
+    const result = resolveTick([colony], [settlement], [], []);
+
+    // All resources are under town cap of 600 — no decay
+    expect(result.events.filter(e => e.type === 'stockpile_decay')).toHaveLength(0);
+  });
+
+  it('reports stockpile cap in production event', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 50 } });
+    const settlement = makeSettlement({ population: 0 });
+
+    const result = resolveTick([colony], [settlement], [], []);
+
+    const productionEvent = result.events.find(e => e.type === 'production');
+    expect(productionEvent).toBeDefined();
+    expect(productionEvent!.data.stockpileCap).toBe(STOCKPILE_CAP.outpost);
   });
 });
 
@@ -2693,3 +2762,5 @@ describe('Idle unit tracking', () => {
     expect(trainedUnit!.idleTicks).toBe(0);
   });
 });
+
+
