@@ -20,18 +20,18 @@ export const TERRAIN_COST = {
 export const UNIT_SPEED = {
     scout: 3,
     militia: 2,
-    soldier: 2,
+    soldier: 3,
     siege: 1,
-    settler: 1,
+    settler: 2,
 };
 // --- Vision Radius ---
 /** How far each unit type can see (in hex distance). */
 export const VISION_RADIUS = {
-    scout: 4,
+    scout: 6,
     militia: 1,
-    soldier: 2,
+    soldier: 3,
     siege: 1,
-    settler: 1,
+    settler: 2,
 };
 function coordKey(c) {
     return `${c.q},${c.r}`;
