@@ -44,6 +44,7 @@ import {
   MAX_POPULATION,
   POP_GROWTH_PER_FOOD,
   STOCKPILE_CAP,
+  STOCKPILE_HARD_CEILING,
   GRANARY_BONUS_PER_LEVEL,
   STOCKPILE_DECAY_RATE,
   IDLE_WARNING_TICKS,
@@ -2269,14 +2270,16 @@ describe('population growth in resolveTick', () => {
 describe('stockpile decay', () => {
   it('decays resources above the outpost cap', () => {
     // Outpost cap = 300. Start with 500 food, no production, no consumption.
+    // Hard ceiling = 300 × 1.2 = 360, so 500 clamped to 360.
+    // Then excess = 60, decay = 60 × 0.30 = 18, final = 342.
     const colony = makeColony({ resources: { food: 500, timber: 100, stone: 100, iron: 100, influence: 50 } });
     const settlement = makeSettlement({ population: 0 });
 
     const result = resolveTick([colony], [settlement], [], []);
 
-    // Food should be reduced by decay: excess = 200, decay = 20, final = 480
-    expect(result.colonies[0].resources.food).toBeLessThan(500);
-    expect(result.colonies[0].resources.food).toBeGreaterThan(470); // ~480
+    // With hard ceiling + aggressive decay, food should be much lower than 500
+    expect(result.colonies[0].resources.food).toBeLessThan(360);
+    expect(result.colonies[0].resources.food).toBeGreaterThan(330); // ~342
     expect(result.events.some(e => e.type === 'stockpile_decay')).toBe(true);
   });
 
@@ -3281,3 +3284,4 @@ describe('combat integration with resolveTick', () => {
     expect(result.units.find(u => u.id === 'u2')).toBeUndefined();
   });
 });
+

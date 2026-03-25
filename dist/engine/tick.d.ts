@@ -158,8 +158,10 @@ export declare const POP_GROWTH_PER_FOOD = 5;
 export declare const STOCKPILE_CAP: Record<string, number>;
 /** Additional stockpile capacity per granary level */
 export declare const GRANARY_BONUS_PER_LEVEL = 100;
-/** Fraction of excess resources that decay each tick (10%) */
-export declare const STOCKPILE_DECAY_RATE = 0.1;
+/** Fraction of excess resources that decay each tick (30%) */
+export declare const STOCKPILE_DECAY_RATE = 0.3;
+/** Hard ceiling multiplier: resources above cap × this are immediately clamped */
+export declare const STOCKPILE_HARD_CEILING = 1.2;
 /** Fraction of building cost refunded on demolish (25%) */
 export declare const DEMOLISH_REFUND_RATE = 0.25;
 /** Chance per tick per building to decay when colony food is at 0 */

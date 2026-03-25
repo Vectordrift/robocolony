@@ -141,8 +141,10 @@ export const STOCKPILE_CAP = {
 };
 /** Additional stockpile capacity per granary level */
 export const GRANARY_BONUS_PER_LEVEL = 100;
-/** Fraction of excess resources that decay each tick (10%) */
-export const STOCKPILE_DECAY_RATE = 0.10;
+/** Fraction of excess resources that decay each tick (30%) */
+export const STOCKPILE_DECAY_RATE = 0.30;
+/** Hard ceiling multiplier: resources above cap × this are immediately clamped */
+export const STOCKPILE_HARD_CEILING = 1.2;
 /** Fraction of building cost refunded on demolish (25%) */
 export const DEMOLISH_REFUND_RATE = 0.25;
 /** Chance per tick per building to decay when colony food is at 0 */
@@ -1685,16 +1687,27 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         const effectiveCap = baseCap + totalGranaryLevels * GRANARY_BONUS_PER_LEVEL;
         for (const key of ['food', 'timber', 'stone', 'iron']) {
             if (colony.resources[key] > effectiveCap) {
+                // Hard ceiling: immediately clamp to cap × STOCKPILE_HARD_CEILING
+                const hardCeiling = Math.round(effectiveCap * STOCKPILE_HARD_CEILING);
+                let clamped = 0;
+                if (colony.resources[key] > hardCeiling) {
+                    clamped = Math.round((colony.resources[key] - hardCeiling) * 100) / 100;
+                    colony.resources[key] = hardCeiling;
+                }
+                // Then apply percentage decay on remaining excess
                 const excess = colony.resources[key] - effectiveCap;
                 const decayed = Math.round(excess * STOCKPILE_DECAY_RATE * 100) / 100;
                 colony.resources[key] = Math.round((colony.resources[key] - decayed) * 100) / 100;
+                const totalDecayed = Math.round((clamped + decayed) * 100) / 100;
                 events.push({
                     type: 'stockpile_decay',
                     colonyId: colony.id,
                     data: {
                         resource: key,
-                        decayed,
+                        decayed: totalDecayed,
+                        clamped,
                         cap: effectiveCap,
+                        hardCeiling,
                         remaining: colony.resources[key],
                     },
                 });
