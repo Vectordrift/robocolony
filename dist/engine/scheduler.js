@@ -13,6 +13,8 @@ import { nanoid } from 'nanoid';
 const COMPASS_SIGNAL_INTERVAL = 25;
 /** Minimum ticks before first compass signal (let colonies establish first) */
 const COMPASS_SIGNAL_START = 25;
+/** Maximum time (ms) for a single tick to complete before being killed */
+const TICK_TIMEOUT_MS = 60000;
 /** Event types visible on the public feed (spectator view) */
 const PUBLIC_EVENT_TYPES = new Set([
     'settlement_founded',
@@ -94,6 +96,7 @@ export class TickScheduler {
         this.db = options.db;
         this.onTick = options.onTick;
         this.onError = options.onError;
+        this.tickStartedAt = 0;
     }
     /**
      * Start the tick loop for a world.
@@ -126,9 +129,17 @@ export class TickScheduler {
      * Execute a single tick. Can be called directly for testing.
      */
     async executeTick() {
-        if (this.running)
-            return; // skip if previous tick still processing
+        if (this.running) {
+            const elapsed = Date.now() - this.tickStartedAt;
+            if (elapsed > TICK_TIMEOUT_MS) {
+                this.onError?.(new Error(`Tick stuck for ${elapsed}ms — force-resetting scheduler`));
+                this.running = false;
+            } else {
+                return;
+            }
+        }
         this.running = true;
+        this.tickStartedAt = Date.now();
         try {
             // Load current state
             const [world] = await this.db

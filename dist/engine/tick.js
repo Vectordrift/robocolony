@@ -139,6 +139,12 @@ export const MAX_POPULATION = {
     town: 200,
     city: 1000,
 };
+/** Maximum number of building slots per settlement tier */
+export const BUILDING_SLOTS = {
+    outpost: 4,
+    town: 6,
+    city: 7,
+};
 /** Population growth rate: +1 per this many excess food */
 export const POP_GROWTH_PER_FOOD = 5;
 /** Stockpile capacity per settlement tier (per resource) */
@@ -270,6 +276,17 @@ export function resolveBuilding(settlements, colonies, actions) {
                 actionId: action.id,
                 status: 'failed',
                 result: `${bType} is already in the build queue for settlement ${settlementId}`,
+            });
+            continue;
+        }
+        // 5b. Building slot limit (per settlement tier)
+        const maxSlots = BUILDING_SLOTS[settlement.tier] ?? 4;
+        const usedSlots = settlement.buildings.length + settlement.buildQueue.length;
+        if (usedSlots >= maxSlots) {
+            actionResults.push({
+                actionId: action.id,
+                status: 'failed',
+                result: `${settlement.name} has no building slots available (${usedSlots}/${maxSlots}). Upgrade settlement tier to unlock more slots.`,
             });
             continue;
         }
@@ -1855,6 +1872,33 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
     let actionResults = [];
     let fogReveals = [];
     let newMessages = [];
+    // --- Deduplicate actions per unit ---
+    // If multiple move/attack actions target the same unit, only keep the last one.
+    {
+        const unitActions = new Map();
+        const deduped = [];
+        for (let i = 0; i < actions.length; i++) {
+            const a = actions[i];
+            const unitId = a.params?.unitId || null;
+            if (unitId && (a.type === 'move_unit' || a.type === 'attack' || a.type === 'explore')) {
+                unitActions.set(unitId, i);
+            }
+        }
+        for (let i = 0; i < actions.length; i++) {
+            const a = actions[i];
+            const unitId = a.params?.unitId || null;
+            if (unitId && (a.type === 'move_unit' || a.type === 'attack' || a.type === 'explore')) {
+                if (unitActions.get(unitId) === i) {
+                    deduped.push(a);
+                } else {
+                    actionResults.push({ actionId: a.id, status: 'failed', result: 'Superseded by later action for same unit' });
+                }
+            } else {
+                deduped.push(a);
+            }
+        }
+        actions = deduped;
+    }
     // Build hex lookup
     const hexMap = new Map();
     for (const hex of hexes) {
@@ -2213,6 +2257,14 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
                 consumed: { ...totalUpkeep },
                 net: { ...net },
                 stockpileCap: effectiveCap,
+                settlements: mySettlements.map(s => ({
+                    id: s.id,
+                    name: s.name,
+                    tier: s.tier,
+                    buildingSlots: { used: s.buildings.length + s.buildQueue.length, max: BUILDING_SLOTS[s.tier] ?? 4 },
+                    population: s.population,
+                    maxPopulation: MAX_POPULATION[s.tier] ?? 50,
+                })),
                 resources: { ...colony.resources },
             },
         });
