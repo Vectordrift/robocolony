@@ -1666,8 +1666,8 @@ export function resolveTick(
       colony.resources[key] = Math.round((colony.resources[key] + net[key]) * 100) / 100;
     }
 
-    // Clamp non-food resources to 0 (food deficit handled separately via famine/morale)
-    for (const key of ['timber', 'stone', 'iron', 'influence'] as (keyof Resources)[]) {
+    // Clamp ALL resources to 0 (stockpiles cannot go negative)
+    for (const key of ['food', 'timber', 'stone', 'iron', 'influence'] as (keyof Resources)[]) {
       if (colony.resources[key] < 0) {
         events.push({
           type: 'shortage',
@@ -1678,6 +1678,7 @@ export function resolveTick(
       }
     }
 
+    // Production event emitted AFTER clamping so players see accurate stockpile values
     events.push({
       type: 'production',
       colonyId: colony.id,
@@ -1692,106 +1693,121 @@ export function resolveTick(
 
     // --- Population growth ---
     // +1 population per POP_GROWTH_PER_FOOD excess food, capped by tier max
-    if (colony.resources.food > 0) {
+    if (net.food > 0) {
       for (const settlement of mySettlements) {
         const maxPop = MAX_POPULATION[settlement.tier] ?? 50;
         if (settlement.population < maxPop) {
-          // Use colony-level net food (simplified — shared across settlements)
-          if (net.food > 0) {
-            const growth = Math.floor(net.food / POP_GROWTH_PER_FOOD);
-            if (growth > 0) {
-              const oldPop = settlement.population;
-              settlement.population = Math.min(maxPop, settlement.population + growth);
-              if (settlement.population > oldPop) {
-                events.push({
-                  type: 'population_growth',
-                  colonyId: colony.id,
-                  settlementId: settlement.id,
-                  data: {
-                    previousPopulation: oldPop,
-                    newPopulation: settlement.population,
-                    growth: settlement.population - oldPop,
-                    maxPopulation: maxPop,
-                  },
-                });
-              }
+          const growth = Math.floor(net.food / POP_GROWTH_PER_FOOD);
+          if (growth > 0) {
+            const oldPop = settlement.population;
+            settlement.population = Math.min(maxPop, settlement.population + growth);
+            if (settlement.population > oldPop) {
+              events.push({
+                type: 'population_growth',
+                colonyId: colony.id,
+                settlementId: settlement.id,
+                data: {
+                  previousPopulation: oldPop,
+                  newPopulation: settlement.population,
+                  growth: settlement.population - oldPop,
+                  maxPopulation: maxPop,
+                },
+              });
             }
           }
         }
       }
     }
 
-    // --- Food deficit: morale loss scaled by severity ---
-    if (colony.resources.food < 0) {
+    // --- Food deficit: famine triggers on negative net food production ---
+    // Uses net food (production vs consumption) instead of stockpile.
+    // A colony with stockpiled food but negative net still gets a warning,
+    // but only suffers morale loss once the stockpile actually runs out.
+    if (net.food < 0) {
       // Calculate deficit severity: how bad is the shortfall relative to consumption?
       const totalConsumption = totalUpkeep.food > 0 ? totalUpkeep.food : 1;
-      const deficitRatio = Math.abs(colony.resources.food) / totalConsumption;
+      const deficitRatio = Math.abs(net.food) / totalConsumption;
       const severityMultiplier = Math.min(deficitRatio * 2, MAX_DEFICIT_MULTIPLIER);
-      const effectiveMoraleLoss = MORALE_LOSS_RATE * Math.max(severityMultiplier, 1);
+
+      // Only apply morale loss when the stockpile has actually hit 0
+      // (i.e., colony truly can't feed its people, not just running a small deficit
+      // that's still covered by reserves)
+      const stockpileDepleted = colony.resources.food <= 0;
+      const effectiveMoraleLoss = stockpileDepleted
+        ? MORALE_LOSS_RATE * Math.max(severityMultiplier, 1)
+        : 0;
 
       events.push({
         type: 'famine',
         colonyId: colony.id,
         data: {
-          foodDeficit: colony.resources.food,
+          netFood: Math.round(net.food * 100) / 100,
+          foodStockpile: colony.resources.food,
           severity: Math.round(severityMultiplier * 100) / 100,
           moraleLossPerTick: Math.round(effectiveMoraleLoss * 1000) / 1000,
+          foodNeeded: Math.round(totalUpkeep.food * 100) / 100,
+          foodProduced: Math.round(totalProduction.food * 100) / 100,
+          warning: stockpileDepleted
+            ? 'Colony is starving — build more farms or reduce consumption'
+            : 'Food reserves depleting — increase food production soon',
         },
       });
 
-      // All units of this colony lose morale (scaled by deficit severity)
-      const tickDesertions: Array<{ type: string; id: string; morale: number }> = [];
-      const moraleWarnings: Array<{ type: string; id: string; morale: number }> = [];
+      if (stockpileDepleted && effectiveMoraleLoss > 0) {
+        // All units of this colony lose morale (scaled by deficit severity)
+        const tickDesertions: Array<{ type: string; id: string; morale: number }> = [];
+        const moraleWarnings: Array<{ type: string; id: string; morale: number }> = [];
 
-      for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
-        unit.morale = Math.max(0, unit.morale - effectiveMoraleLoss);
+        for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
+          unit.morale = Math.max(0, unit.morale - effectiveMoraleLoss);
 
-        // Probabilistic desertion: each unit at/below threshold has DESERTION_CHANCE to desert
-        if (unit.morale <= DESERTION_THRESHOLD) {
-          const roll = Math.random();
-          if (roll < DESERTION_CHANCE) {
-            desertedUnitIds.push(unit.id);
-            tickDesertions.push({ type: unit.type, id: unit.id, morale: unit.morale });
+          // Probabilistic desertion: each unit at/below threshold has DESERTION_CHANCE to desert
+          if (unit.morale <= DESERTION_THRESHOLD) {
+            const roll = Math.random();
+            if (roll < DESERTION_CHANCE) {
+              desertedUnitIds.push(unit.id);
+              tickDesertions.push({ type: unit.type, id: unit.id, morale: unit.morale });
+            }
+          } else if (unit.morale <= MORALE_WARNING_THRESHOLD) {
+            moraleWarnings.push({ type: unit.type, id: unit.id, morale: unit.morale });
           }
-        } else if (unit.morale <= MORALE_WARNING_THRESHOLD) {
-          moraleWarnings.push({ type: unit.type, id: unit.id, morale: unit.morale });
+        }
+
+        // Emit morale warning before desertion happens
+        if (moraleWarnings.length > 0) {
+          events.push({
+            type: 'morale_warning',
+            colonyId: colony.id,
+            data: {
+              count: moraleWarnings.length,
+              units: moraleWarnings.map(w => ({
+                unitType: w.type,
+                unitId: w.id,
+                morale: Math.round(w.morale * 100) / 100,
+              })),
+              summary: `${moraleWarnings.length} unit(s) have low morale and may desert soon`,
+            },
+          });
+        }
+
+        // Emit a single aggregated desertion event (instead of one per unit)
+        if (tickDesertions.length > 0) {
+          events.push({
+            type: 'desertion',
+            colonyId: colony.id,
+            data: {
+              count: tickDesertions.length,
+              units: tickDesertions.map(d => ({ unitType: d.type, unitId: d.id })),
+              summary: tickDesertions.map(d => d.type).join(', '),
+            },
+          });
         }
       }
+    }
 
-      // Emit morale warning before desertion happens
-      if (moraleWarnings.length > 0) {
-        events.push({
-          type: 'morale_warning',
-          colonyId: colony.id,
-          data: {
-            count: moraleWarnings.length,
-            units: moraleWarnings.map(w => ({
-              unitType: w.type,
-              unitId: w.id,
-              morale: Math.round(w.morale * 100) / 100,
-            })),
-            summary: `${moraleWarnings.length} unit(s) have low morale and may desert soon`,
-          },
-        });
-      }
-
-      // Emit a single aggregated desertion event (instead of one per unit)
-      if (tickDesertions.length > 0) {
-        events.push({
-          type: 'desertion',
-          colonyId: colony.id,
-          data: {
-            count: tickDesertions.length,
-            units: tickDesertions.map(d => ({ unitType: d.type, unitId: d.id })),
-            summary: tickDesertions.map(d => d.type).join(', '),
-          },
-        });
-      }
-
-      // Clamp food to 0 (debt doesn't carry over)
-      colony.resources.food = 0;
-    } else {
-      // --- Surplus: morale recovery ---
+    // --- Morale recovery ---
+    // Units recover morale when the colony can feed them (net food >= 0 or food stockpile > 0)
+    if (net.food >= 0 || colony.resources.food > 0) {
       for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
         if (unit.morale < 1.0) {
           unit.morale = Math.min(1.0, unit.morale + MORALE_RECOVERY_RATE);
