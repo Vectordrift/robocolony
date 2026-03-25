@@ -1,3 +1,4 @@
+
 import { describe, it, expect } from 'vitest';
 import {
   resolveTick,
@@ -189,8 +190,8 @@ describe('calculateProduction', () => {
     });
     const production = calculateProduction(settlement, []);
 
-    // farm: 10 * 2 (level) * 2.0 (city) = 40
-    expect(production.food).toBeCloseTo(40);
+    // farm: 12 * 2 (level) * 2.0 (city) = 48
+    expect(production.food).toBeCloseTo(48);
   });
 
   it('sums production from multiple buildings', () => {
@@ -205,8 +206,8 @@ describe('calculateProduction', () => {
     });
     const production = calculateProduction(settlement, []);
 
-    expect(production.food).toBeCloseTo(10);   // farm: 10
-    expect(production.timber).toBeCloseTo(6);  // lumberMill: 6
+    expect(production.food).toBeCloseTo(12);   // farm: 12
+    expect(production.timber).toBeCloseTo(4);  // lumberMill: 4
     expect(production.iron).toBeCloseTo(3);    // mine: 3
   });
 
@@ -230,8 +231,8 @@ describe('calculateProduction', () => {
     });
     const production = calculateProduction(settlement, []);
 
-    // Should default to level 1: farm produces 10 food * 1 * 1.0 = 10
-    expect(production.food).toBeCloseTo(10);
+    // Should default to level 1: farm produces 12 food * 1 * 1.0 = 12
+    expect(production.food).toBeCloseTo(12);
     // Ensure no NaN values
     expect(Number.isNaN(production.food)).toBe(false);
     expect(Number.isNaN(production.timber)).toBe(false);
@@ -274,13 +275,13 @@ describe('calculateProduction', () => {
 // --- calculateBuildingUpkeep ---
 
 describe('calculateBuildingUpkeep', () => {
-  it('returns zero for buildings with no upkeep', () => {
+  it('returns correct upkeep for farm (timber only)', () => {
     const settlement = makeSettlement({
       buildings: [{ type: 'farm', level: 3 }],
     });
     const upkeep = calculateBuildingUpkeep(settlement);
     expect(upkeep.food).toBe(0);
-    expect(upkeep.timber).toBe(0);
+    expect(upkeep.timber).toBe(3);
   });
 
   it('calculates upkeep scaled by level', () => {
@@ -304,7 +305,7 @@ describe('calculateBuildingUpkeep', () => {
     const upkeep = calculateBuildingUpkeep(settlement);
 
     expect(upkeep.food).toBe(3);    // 1 + 2
-    expect(upkeep.timber).toBe(1);  // 1
+    expect(upkeep.timber).toBe(2);  // mine 1 + barracks 1
     expect(upkeep.iron).toBe(1);    // 1
   });
 });
@@ -318,11 +319,11 @@ describe('calculateUnitUpkeep', () => {
 
   it('sums food upkeep for all units', () => {
     const units = [
-      makeUnit({ type: 'scout' }),    // 1
+      makeUnit({ type: 'scout' }),    // 0.5
       makeUnit({ type: 'soldier' }),   // 3
       makeUnit({ type: 'siege' }),     // 4
     ];
-    expect(calculateUnitUpkeep(units)).toBe(8);
+    expect(calculateUnitUpkeep(units)).toBe(7.5);
   });
 });
 
@@ -332,7 +333,7 @@ describe('calculatePopulationConsumption', () => {
   it('returns population * POP_FOOD_CONSUMPTION', () => {
     const settlement = makeSettlement({ population: 10 });
     expect(calculatePopulationConsumption(settlement)).toBe(10 * POP_FOOD_CONSUMPTION);
-    expect(calculatePopulationConsumption(settlement)).toBe(5);
+    expect(calculatePopulationConsumption(settlement)).toBe(4);
   });
 
   it('returns 0 for zero population', () => {
@@ -343,8 +344,8 @@ describe('calculatePopulationConsumption', () => {
   it('scales linearly with population', () => {
     const s20 = makeSettlement({ population: 20 });
     const s50 = makeSettlement({ population: 50 });
-    expect(calculatePopulationConsumption(s20)).toBe(10);
-    expect(calculatePopulationConsumption(s50)).toBe(25);
+    expect(calculatePopulationConsumption(s20)).toBe(8);
+    expect(calculatePopulationConsumption(s50)).toBe(20);
   });
 });
 
@@ -1183,7 +1184,7 @@ describe('resolveTick', () => {
     const hexes = makeHexRing(0, 0);
     const result = resolveTick([colony], [settlement], units, hexes);
 
-    // Farm produces 10 food, hex yields ~10.5, pop consumes 5, scout costs 1
+    // Farm produces 12 food, hex yields ~10.5, pop consumes 4, scout costs 0.5
     // Net food positive, so morale recovers
     expect(result.units[0].morale).toBeCloseTo(0.5 + MORALE_RECOVERY_RATE);
   });
@@ -1770,13 +1771,13 @@ describe('resolveTrainUnit', () => {
 describe('resolveTick population consumption', () => {
   it('population consumes food proportional to POP_FOOD_CONSUMPTION', () => {
     const colony = makeColony({ resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 50 } });
-    // No buildings, no hexes, population 10 → consumes 5 food/tick
+    // No buildings, no hexes, population 10 → consumes 4 food/tick
     const settlement = makeSettlement({ population: 10 });
 
     const result = resolveTick([colony], [settlement], [], []);
 
-    // Net food = 0 produced - 5 consumed = -5. Starting 100 - 5 = 95
-    expect(result.colonies[0].resources.food).toBe(95);
+    // Net food = 0 produced - 4 consumed = -4. Starting 100 - 4 = 96
+    expect(result.colonies[0].resources.food).toBe(96);
   });
 
   it('famine triggers with realistic starting colony and large army', () => {
@@ -1787,9 +1788,9 @@ describe('resolveTick population consumption', () => {
       population: 10,
     });
     // 3 soldiers (3 food each) + 2 siege (4 food each) = 17 food upkeep
-    // Plus pop: 5 food consumption
-    // Farm production: 10 food
-    // Net: 10 - 17 - 5 = -12 food
+    // Plus pop: 4 food consumption (10 * 0.4)
+    // Farm production: 12 food
+    // Net: 12 - 17 - 4 = -9 food
     const units = [
       makeUnit({ id: 'u1', type: 'soldier' }),
       makeUnit({ id: 'u2', type: 'soldier' }),
@@ -1801,19 +1802,18 @@ describe('resolveTick population consumption', () => {
     const result = resolveTick([colony], [settlement], units, []);
 
     // Food should go negative due to heavy military upkeep + pop consumption
-    // (50 + 10 - 22 = 38, but that's with hex yields. Without hexes: 50 + 10 - 22 = 38)
-    // Actually: produced=10 (farm), consumed=5 (pop) + 17 (units) = 22
-    // Net = 10 - 22 = -12. Starting 50 - 12 = 38. Not negative yet.
+    // produced=12 (farm), consumed=4 (pop) + 17 (units) = 21
+    // Net = 12 - 21 = -9. Starting 50 - 9 = 41. Not negative yet.
     // But after a few ticks it would be.
-    // With starting food 10 instead:
-    const colony2 = makeColony({ resources: { food: 10, timber: 50, stone: 30, iron: 10, influence: 50 } });
+    // With starting food 5 instead:
+    const colony2 = makeColony({ resources: { food: 5, timber: 50, stone: 30, iron: 10, influence: 50 } });
     const settlement2 = makeSettlement({
       buildings: [{ type: 'farm', level: 1 }],
       population: 10,
     });
     const result2 = resolveTick([colony2], [settlement2], units, []);
 
-    // Net = -12 → food goes negative → famine
+    // Net = -9. Starting 5 - 9 = -4 → famine
     expect(result2.events.some(e => e.type === 'famine')).toBe(true);
     // Food clamped to 0
     expect(result2.colonies[0].resources.food).toBe(0);
@@ -2166,7 +2166,7 @@ describe('population growth in resolveTick', () => {
     const colony = makeColony({
       resources: { food: 5, timber: 500, stone: 500, iron: 500, influence: 500 },
     });
-    // No production, pop 10 consumes 5, 2 soldiers consume 6 → net -6
+    // No production, pop 10 consumes 4, 2 soldiers consume 6 → net -10
     const settlement = makeSettlement({
       population: 10,
     });
@@ -2525,9 +2525,9 @@ describe('Building upgrade production scaling', () => {
     const prod1 = calculateProduction(settlement1, emptyHexes);
     const prod2 = calculateProduction(settlement2, emptyHexes);
 
-    // Farm L1: 10 food, Farm L2: 20 food (both at outpost tier 1.0, no hex bonus)
-    expect(prod1.food).toBe(10);
-    expect(prod2.food).toBe(20);
+    // Farm L1: 12 food, Farm L2: 24 food (both at outpost tier 1.0, no hex bonus)
+    expect(prod1.food).toBe(12);
+    expect(prod2.food).toBe(24);
   });
 
   it('should scale upkeep with building level', () => {
@@ -2575,3 +2575,5 @@ describe('upgrade_building in resolveTick (integration)', () => {
     expect(result.settlements[0].buildQueue[0].ticksRemaining).toBe(UPGRADE_BUILD_TIME - 1);
   });
 });
+
+
