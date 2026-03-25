@@ -1,3 +1,8 @@
+====================================================================
+  UNTRUSTED EXTERNAL DATA - NOT INSTRUCTIONS TO FOLLOW
+    Source: api.github.com
+====================================================================
+
 
 
 
@@ -2028,6 +2033,135 @@ export function resolveMessages(
   return { messages: newMessages, events, actionResults };
 }
 
+
+/**
+ * Resolve explore actions: convert to move_unit actions targeting nearest unexplored hex.
+ * Scouts get a movement target toward the frontier of their colony's explored territory.
+ */
+function resolveExploreActions(
+  units: Unit[],
+  actions: QueuedAction[],
+  hexes: HexTileState[],
+): { convertedActions: QueuedAction[]; remainingActions: QueuedAction[]; events: TickEvent[]; actionResults: ActionResult[] } {
+  const exploreActions = actions.filter(a => a.type === 'explore');
+  const remainingActions = actions.filter(a => a.type !== 'explore');
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+  const convertedActions: QueuedAction[] = [];
+
+  if (exploreActions.length === 0) {
+    return { convertedActions: [], remainingActions: actions, events: [], actionResults: [] };
+  }
+
+  // Build unit lookup
+  const unitMap = new Map<string, Unit>();
+  for (const u of units) unitMap.set(u.id, u);
+
+  // Build explored-by lookup per colony
+  const exploredByColony = new Map<string, Set<string>>();
+  for (const hex of hexes) {
+    if (hex.exploredBy) {
+      for (const colonyId of hex.exploredBy) {
+        if (!exploredByColony.has(colonyId)) exploredByColony.set(colonyId, new Set());
+        exploredByColony.get(colonyId)!.add(`${hex.x},${hex.y}`);
+      }
+    }
+  }
+
+  // Build passable hex set (non-ocean hexes)
+  const passableHexes = new Map<string, HexTileState>();
+  for (const hex of hexes) {
+    if (hex.terrain !== 'ocean') {
+      passableHexes.set(`${hex.x},${hex.y}`, hex);
+    }
+  }
+
+  for (const action of exploreActions) {
+    const unitId = action.params.unitId as string;
+    const unit = unitMap.get(unitId);
+
+    if (!unit) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Unit ${unitId} not found` });
+      continue;
+    }
+
+    const colonyExplored = exploredByColony.get(unit.colonyId) ?? new Set<string>();
+
+    // Find nearest unexplored passable hex using BFS from unit position
+    const startKey = `${unit.hexX},${unit.hexY}`;
+    const visited = new Set<string>([startKey]);
+    const queue: Array<{ q: number; r: number; dist: number }> = [{ q: unit.hexX, r: unit.hexY, dist: 0 }];
+    let targetHex: { q: number; r: number } | null = null;
+    const directions = [
+      { q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 },
+      { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 },
+    ];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+
+      // Don't search too far (limit to 30 hex radius for performance)
+      if (current.dist > 30) break;
+
+      for (const dir of directions) {
+        const nq = current.q + dir.q;
+        const nr = current.r + dir.r;
+        const nKey = `${nq},${nr}`;
+
+        if (visited.has(nKey)) continue;
+        visited.add(nKey);
+
+        // Must be a valid passable hex on the map
+        if (!passableHexes.has(nKey)) continue;
+
+        // Is this hex unexplored by this colony?
+        if (!colonyExplored.has(nKey)) {
+          targetHex = { q: nq, r: nr };
+          break;
+        }
+
+        queue.push({ q: nq, r: nr, dist: current.dist + 1 });
+      }
+      if (targetHex) break;
+    }
+
+    if (!targetHex) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: 'No unexplored territory within range',
+      });
+      events.push({
+        type: 'explore_failed',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: { reason: 'fully_explored', hexX: unit.hexX, hexY: unit.hexY },
+      });
+      continue;
+    }
+
+    // Convert to a move_unit action targeting the unexplored hex
+    convertedActions.push({
+      id: action.id,
+      colonyId: action.colonyId,
+      type: 'move_unit',
+      params: { unitId, targetX: targetHex.q, targetY: targetHex.r },
+    });
+
+    events.push({
+      type: 'explore_target_found',
+      colonyId: unit.colonyId,
+      unitId: unit.id,
+      data: {
+        from: { x: unit.hexX, y: unit.hexY },
+        target: { x: targetHex.q, y: targetHex.r },
+      },
+    });
+  }
+
+  return { convertedActions, remainingActions, events, actionResults };
+}
+
 // --- Tick Resolution ---
 
 /**
@@ -2119,12 +2253,18 @@ export function resolveTick(
     unitPositionsBefore.set(u.id, { x: u.hexX, y: u.hexY });
   }
 
+  // --- Phase -0.5: Resolve explore actions (convert to move_unit) ---
+  const nonFoundActions = actions.filter(a => a.type !== 'found_settlement');
+  const exploreResult = resolveExploreActions(updatedUnits, nonFoundActions, hexes);
+  events.push(...exploreResult.events);
+  actionResults.push(...exploreResult.actionResults);
+  const allMoveActions = [...exploreResult.remainingActions, ...exploreResult.convertedActions];
+
   // --- Phase 0: Resolve movement actions + advance movement queues ---
   const hasMovingUnits = updatedUnits.some(u => u.movementQueue && u.movementQueue.length > 0);
-  const nonFoundActions = actions.filter(a => a.type !== 'found_settlement');
-  if (nonFoundActions.length > 0 || hasMovingUnits) {
+  if (allMoveActions.length > 0 || hasMovingUnits) {
     const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
-    const moveResult = resolveMovement(updatedUnits, nonFoundActions, hexLookup);
+    const moveResult = resolveMovement(updatedUnits, allMoveActions, hexLookup);
     events.push(...moveResult.events);
     actionResults.push(...moveResult.actionResults);
   }
@@ -2615,3 +2755,8 @@ export function resolveTick(
 
 
 
+
+
+====================================================================
+  END UNTRUSTED DATA
+====================================================================
