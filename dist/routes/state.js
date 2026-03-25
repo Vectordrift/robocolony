@@ -4,9 +4,9 @@
  * GET /api/worlds/:id/state — full colony state (resources, settlements, units, visible map)
  * GET /api/worlds/:id/map   — visible hexes only (fog of war applied)
  */
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, or } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { worlds, hexes, colonies, settlements, units } from '../db/schema/index.js';
+import { worlds, hexes, colonies, settlements, units, agreements } from '../db/schema/index.js';
 import { requireAuth } from '../middleware/index.js';
 /**
  * Get all hexes visible to a colony (fog of war applied).
@@ -148,6 +148,20 @@ export async function stateRoutes(app) {
                 .where(eq(colonies.worldId, worldId));
             knownColonies = Object.fromEntries(colRows.filter(c => enemyColonyIds.has(c.id)).map(c => [c.id, c.name]));
         }
+        // Get colony's diplomatic agreements (active + proposed)
+        const colonyAgreements = await db
+            .select({
+            id: agreements.id,
+            type: agreements.type,
+            proposedBy: agreements.proposedBy,
+            proposedTo: agreements.proposedTo,
+            status: agreements.status,
+            terms: agreements.terms,
+            proposedAtTick: agreements.proposedAtTick,
+            acceptedAtTick: agreements.acceptedAtTick,
+        })
+            .from(agreements)
+            .where(and(eq(agreements.worldId, worldId), or(eq(agreements.proposedBy, colony.id), eq(agreements.proposedTo, colony.id)), sql `status IN ('proposed', 'active')`));
         return {
             tick: world[0].currentTick,
             worldStatus: world[0].status,
@@ -176,6 +190,18 @@ export async function stateRoutes(app) {
                 health: u.health,
                 morale: u.morale,
                 movementQueue: u.movementQueue,
+            })),
+            agreements: colonyAgreements.map(a => ({
+                id: a.id,
+                type: a.type,
+                proposedBy: a.proposedBy,
+                proposedByName: knownColonies[a.proposedBy] || (a.proposedBy === colony.id ? colony.name : 'Unknown'),
+                proposedTo: a.proposedTo,
+                proposedToName: knownColonies[a.proposedTo] || (a.proposedTo === colony.id ? colony.name : 'Unknown'),
+                status: a.status,
+                terms: a.terms,
+                proposedAtTick: a.proposedAtTick,
+                acceptedAtTick: a.acceptedAtTick,
             })),
             intel: {
                 enemyUnits: enemyUnitsOnMap,

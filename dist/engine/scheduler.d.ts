@@ -17,6 +17,7 @@ export declare class TickScheduler {
     private db;
     private timer;
     private running;
+    private tickStartedAt;
     private onTick?;
     private onError?;
     constructor(options: SchedulerOptions);

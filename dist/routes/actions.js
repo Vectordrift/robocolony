@@ -22,6 +22,10 @@ const VALID_ACTION_TYPES = {
     'send_message': ['toColonyId', 'message'],
     'explore': ['unitId'],
     'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
+    'propose_agreement': ['toColonyId', 'agreementType'],
+    'accept_agreement': ['agreementId'],
+    'reject_agreement': ['agreementId'],
+    'break_agreement': ['agreementId'],
 };
 const MAX_ACTIONS_PER_TICK = 10;
 function validateActionType(action) {
