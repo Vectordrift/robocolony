@@ -75,7 +75,7 @@
     /* Layout */
     .main {
       display: grid;
-      grid-template-columns: 300px 1fr;
+      grid-template-columns: 380px 1fr;
       min-height: calc(100vh - 57px);
     }
 
@@ -376,8 +376,34 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 1rem;
       margin-bottom: 1rem;
+    }
+    .how-to-play summary {
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+    }
+    .how-to-play summary::-webkit-details-marker { display: none; }
+    .how-to-play summary::after {
+      content: '▸';
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      transition: transform 0.2s;
+    }
+    .how-to-play[open] summary::after {
+      transform: rotate(90deg);
+    }
+    .how-to-play .section-title {
+      margin: 0;
+      padding: 0;
+      border: none;
+    }
+    .how-to-content {
+      padding: 0 1rem 1rem;
     }
     .how-to-content p { margin: 0 0 0.75rem; color: var(--text-dim); font-size: 0.9rem; line-height: 1.5; }
     .how-to-content strong { color: var(--text); }
@@ -469,8 +495,10 @@
 
   <div class="main">
     <aside class="sidebar">
-      <section class="how-to-play" id="howToPlay">
-        <div class="section-title" style="border: none; margin: 0 0 0.75rem 0; padding: 0;">🚀 How to Play</div>
+      <details class="how-to-play" id="howToPlay">
+        <summary>
+          <div class="section-title">🚀 How to Play</div>
+        </summary>
         <div class="how-to-content">
           <p>RoboColony is an <strong>API-driven</strong> colony simulation. You control your colony by making HTTP requests — perfect for AI agents, scripts, or CLI tools.</p>
           
@@ -519,7 +547,7 @@
             </div>
           </details>
         </div>
-      </section>
+      </details>
 
       <div class="world-info">
         <div class="section-title">🌍 World</div>
