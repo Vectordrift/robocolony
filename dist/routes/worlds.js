@@ -10,7 +10,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db } from '../db/index.js';
 import { worlds, hexes, colonies, settlements, units } from '../db/schema/index.js';
-import { generateWorld } from '../engine/mapgen.js';
+import { generateWorld, findStartingPositions } from '../engine/mapgen.js';
 import { hexDistance } from '../engine/hex.js';
 import { generateApiKey, hashApiKey } from '../lib/auth.js';
 // --- Constants ---
@@ -213,39 +213,47 @@ export async function worldRoutes(app) {
                 message: 'Colony name is already taken in this world',
             });
         }
-        // Count existing colonies
+        // Count existing colonies (for status tracking, no hard cap — map geometry is the limit)
         const colonyCountResult = await db
             .select({ count: sql `count(*)` })
             .from(colonies)
             .where(eq(colonies.worldId, worldId));
         const colonyCount = Number(colonyCountResult[0]?.count ?? 0);
-        if (colonyCount >= w.maxColonies) {
-            return reply.code(409).send({
-                error: 'world_full',
-                message: 'This world has reached maximum colony count.',
-            });
-        }
-        // Find a starting position
-        // Get existing colony settlements to check spacing
+        // Find a starting position dynamically
+        // Get existing colony settlements to determine occupied positions
         const existingSettlements = await db
             .select({ hexX: settlements.hexX, hexY: settlements.hexY })
             .from(settlements)
             .where(eq(settlements.worldId, worldId));
-        // Regenerate map to get starting positions (deterministic from seed)
+        // Regenerate map (deterministic from seed) and find ALL valid spawn positions
         const worldMap = generateWorld(w.mapSeed, w.mapRadius, w.maxColonies);
-        // Find the first unused starting position (at least 30 hexes from any existing colony)
+        // Try pre-generated positions first, then dynamically find more
+        const occupied = existingSettlements.map(s => ({ q: s.hexX, r: s.hexY }));
+        const MIN_SPAWN_SPACING = 20; // Reduced from 30 to allow more colonies
         let startingHex = null;
+        // 1. Check pre-generated starting positions
         for (const pos of worldMap.startingPositions) {
-            const tooClose = existingSettlements.some((s) => hexDistance({ q: s.hexX, r: s.hexY }, pos) < 30);
+            const tooClose = occupied.some((s) => hexDistance(s, pos) < MIN_SPAWN_SPACING);
             if (!tooClose) {
                 startingHex = pos;
                 break;
             }
         }
+        // 2. If none available, dynamically find a spawn point on the ring
+        if (!startingHex) {
+            const spawnPositions = findStartingPositions(worldMap.hexes, w.mapRadius, w.mapSeed, 64, MIN_SPAWN_SPACING);
+            for (const pos of spawnPositions) {
+                const tooClose = occupied.some((s) => hexDistance(s, pos) < MIN_SPAWN_SPACING);
+                if (!tooClose) {
+                    startingHex = pos;
+                    break;
+                }
+            }
+        }
         if (!startingHex) {
             return reply.code(409).send({
                 error: 'no_positions',
-                message: 'No suitable starting positions available.',
+                message: 'No suitable starting positions available. The world map is full.',
             });
         }
         // Generate API key
@@ -324,20 +332,13 @@ export async function worldRoutes(app) {
             // First colony joins → RUNNING
             await db.update(worlds).set({ status: 'running' }).where(eq(worlds.id, worldId));
         }
-        // Check if world should transition to FULL
-        const newColonyCount = colonyCount + 1;
-        if (newColonyCount >= w.maxColonies) {
+        // Check if world should transition to FULL (based on available land, not colony count)
+        const unclaimedLand = await db
+            .select({ count: sql `count(*)` })
+            .from(hexes)
+            .where(and(eq(hexes.worldId, worldId), sql `terrain NOT IN ('ocean', 'coast')`, sql `settlement_id IS NULL`));
+        if (Number(unclaimedLand[0]?.count ?? 0) < MIN_BUILDABLE_LAND) {
             await db.update(worlds).set({ status: 'full' }).where(eq(worlds.id, worldId));
-        }
-        else {
-            // Also check unclaimed buildable land
-            const unclaimedLand = await db
-                .select({ count: sql `count(*)` })
-                .from(hexes)
-                .where(and(eq(hexes.worldId, worldId), sql `terrain NOT IN ('ocean', 'coast')`, sql `settlement_id IS NULL`));
-            if (Number(unclaimedLand[0]?.count ?? 0) < MIN_BUILDABLE_LAND) {
-                await db.update(worlds).set({ status: 'full' }).where(eq(worlds.id, worldId));
-            }
         }
         return reply.code(201).send({
             colonyId,

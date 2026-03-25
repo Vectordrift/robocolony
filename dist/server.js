@@ -14,6 +14,38 @@ import { TickScheduler } from './engine/scheduler.js';
 import { ensureSchema } from './db/migrate.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+// --- In-memory rate limiter ---
+const rateLimitStore = new Map();
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+const RATE_LIMIT_MAX = 60; // 60 requests per minute per IP
+const RATE_LIMIT_JOIN_MAX = 3; // 3 joins per minute per IP
+const joinRateLimitStore = new Map();
+function checkRateLimit(store, key, max) {
+    const now = Date.now();
+    let entry = store.get(key);
+    if (!entry || now >= entry.resetAt) {
+        entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    }
+    entry.count++;
+    store.set(key, entry);
+    return {
+        allowed: entry.count <= max,
+        remaining: Math.max(0, max - entry.count),
+        resetAt: entry.resetAt,
+    };
+}
+// Clean up stale entries every 5 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of rateLimitStore) {
+        if (now >= entry.resetAt)
+            rateLimitStore.delete(key);
+    }
+    for (const [key, entry] of joinRateLimitStore) {
+        if (now >= entry.resetAt)
+            joinRateLimitStore.delete(key);
+    }
+}, 300_000);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 export function buildApp() {
@@ -23,6 +55,35 @@ export function buildApp() {
         },
     });
     app.register(cors);
+    // Global rate limiting
+    app.addHook('onRequest', async (request, reply) => {
+        const ip = request.ip || request.headers['x-forwarded-for'] || 'unknown';
+        const ipKey = Array.isArray(ip) ? ip[0] : ip;
+        // Stricter limit for join endpoint
+        if (request.url.endsWith('/join') && request.method === 'POST') {
+            const result = checkRateLimit(joinRateLimitStore, ipKey, RATE_LIMIT_JOIN_MAX);
+            reply.header('X-RateLimit-Limit', RATE_LIMIT_JOIN_MAX);
+            reply.header('X-RateLimit-Remaining', result.remaining);
+            if (!result.allowed) {
+                return reply.code(429).send({
+                    error: 'rate_limit',
+                    message: `Too many join requests. Max ${RATE_LIMIT_JOIN_MAX} per minute.`,
+                });
+            }
+        }
+        // Global rate limit (skip health checks)
+        if (request.url !== '/health') {
+            const result = checkRateLimit(rateLimitStore, ipKey, RATE_LIMIT_MAX);
+            reply.header('X-RateLimit-Limit', RATE_LIMIT_MAX);
+            reply.header('X-RateLimit-Remaining', result.remaining);
+            if (!result.allowed) {
+                return reply.code(429).send({
+                    error: 'rate_limit',
+                    message: `Too many requests. Max ${RATE_LIMIT_MAX} per minute.`,
+                });
+            }
+        }
+    });
     app.register(healthRoutes);
     app.register(worldRoutes);
     app.register(stateRoutes);
