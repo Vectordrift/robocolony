@@ -9,7 +9,7 @@ import { eq, and } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema/index.js';
 import { resolveTick } from './tick.js';
-import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction } from './tick.js';
+import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction, MessageRecord } from './tick.js';
 import { hexDistance } from './hex.js';
 import { nanoid } from 'nanoid';
 
@@ -246,7 +246,7 @@ export class TickScheduler {
       }));
 
       // Resolve tick
-      const result = resolveTick(colonies, settlements, units, hexes, queuedActions);
+      const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick);
 
       // Persist results
       await this.db.transaction(async (tx) => {
@@ -468,6 +468,22 @@ export class TickScheduler {
                 },
               });
             }
+          }
+        }
+
+        // Insert messages from send_message actions
+        if (result.newMessages && result.newMessages.length > 0) {
+          for (const msg of result.newMessages) {
+            await tx.insert(schema.messages).values({
+              id: msg.id,
+              worldId: msg.worldId,
+              fromColony: msg.fromColony,
+              toColony: msg.toColony,
+              sentAtTick: msg.sentAtTick,
+              deliveredAtTick: msg.deliveredAtTick,
+              content: msg.content,
+              read: false,
+            });
           }
         }
 

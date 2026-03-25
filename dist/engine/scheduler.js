@@ -208,7 +208,7 @@ export class TickScheduler {
                 params: a.params,
             }));
             // Resolve tick
-            const result = resolveTick(colonies, settlements, units, hexes, queuedActions);
+            const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick);
             // Persist results
             await this.db.transaction(async (tx) => {
                 // Update world tick
@@ -427,6 +427,21 @@ export class TickScheduler {
                         }
                     }
                 }
+                // Insert messages from send_message actions
+                if (result.newMessages && result.newMessages.length > 0) {
+                    for (const msg of result.newMessages) {
+                        await tx.insert(schema.messages).values({
+                            id: msg.id,
+                            worldId: msg.worldId,
+                            fromColony: msg.fromColony,
+                            toColony: msg.toColony,
+                            sentAtTick: msg.sentAtTick,
+                            deliveredAtTick: msg.deliveredAtTick,
+                            content: msg.content,
+                            read: false,
+                        });
+                    }
+                }
                 // Insert events
                 for (const event of result.events) {
                     const isPublic = PUBLIC_EVENT_TYPES.has(event.type);
@@ -450,4 +465,3 @@ export class TickScheduler {
         }
     }
 }
-//# sourceMappingURL=scheduler.js.map

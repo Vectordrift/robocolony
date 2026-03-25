@@ -19,6 +19,7 @@ const VALID_ACTION_TYPES = {
     'demolish': ['settlementId', 'buildingType'],
     'upgrade_settlement': ['settlementId'],
     'attack': ['unitId', 'targetX', 'targetY'],
+    'send_message': ['toColonyId', 'message'],
 };
 const MAX_ACTIONS_PER_TICK = 10;
 function validateActionType(action) {
@@ -266,4 +267,3 @@ export async function actionRoutes(app) {
         return rows[0];
     });
 }
-//# sourceMappingURL=actions.js.map

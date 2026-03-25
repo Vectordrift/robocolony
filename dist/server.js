@@ -7,6 +7,7 @@ import { stateRoutes } from './routes/state.js';
 import { actionRoutes } from './routes/actions.js';
 import { eventRoutes } from './routes/events.js';
 import { feedRoutes } from './routes/feed.js';
+import { messageRoutes } from './routes/messages.js';
 import { db } from './db/index.js';
 import { worlds, settlements, colonies } from './db/schema/index.js';
 import { eq } from 'drizzle-orm';
@@ -90,6 +91,7 @@ export function buildApp() {
     app.register(actionRoutes);
     app.register(eventRoutes);
     app.register(feedRoutes);
+    app.register(messageRoutes);
     // Serve static website from web/ directory
     // In dist/, the web/ folder is at ../web relative to compiled JS
     const webRoot = join(__dirname, '..', 'web');
@@ -233,4 +235,3 @@ const isMainModule = process.argv[1]?.endsWith('server.js') || process.argv[1]?.
 if (isMainModule) {
     start();
 }
-//# sourceMappingURL=server.js.map

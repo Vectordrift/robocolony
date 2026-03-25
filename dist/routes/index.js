@@ -4,4 +4,4 @@ export { worldRoutes } from './worlds.js';
 export { stateRoutes } from './state.js';
 export { actionRoutes } from './actions.js';
 export { eventRoutes } from './events.js';
-//# sourceMappingURL=index.js.map
+export { messageRoutes } from './messages.js';

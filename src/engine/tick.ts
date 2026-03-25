@@ -105,6 +105,17 @@ export interface TickEvent {
   data: Record<string, unknown>;
 }
 
+export interface MessageRecord {
+  id: string;
+  worldId: string;
+  fromColony: string;
+  toColony: string;
+  sentAtTick: number;
+  deliveredAtTick: number;
+  content: string;
+  read: boolean;
+}
+
 export interface TickResult {
   colonies: Colony[];
   settlements: Settlement[];
@@ -113,6 +124,7 @@ export interface TickResult {
   desertedUnitIds: string[];
   actionResults: ActionResult[];
   fogReveals: HexExploration[];
+  newMessages: MessageRecord[];
 }
 
 // --- Constants ---
@@ -1832,6 +1844,190 @@ export function resolveCombat(
   };
 }
 
+// --- Message Resolution ---
+
+/** Maximum messages a colony can send per tick */
+export const MAX_MESSAGES_PER_TICK = 5;
+
+/** Maximum message content length (characters) */
+export const MAX_MESSAGE_LENGTH = 500;
+
+/** Delivery delay in ticks (messages arrive 1 tick after sending) */
+export const MESSAGE_DELIVERY_DELAY = 1;
+
+export interface MessageResult {
+  messages: MessageRecord[];
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+/**
+ * Resolve send_message actions: validate and create message records.
+ *
+ * Validates:
+ * - Target colony exists and is in the same world
+ * - Target colony is not self
+ * - Rate limit: max 5 messages per colony per tick
+ * - Message content is not empty and within length limit
+ *
+ * On success: message record created, event emitted for recipient.
+ */
+export function resolveMessages(
+  colonies: Colony[],
+  actions: QueuedAction[],
+  worldId: string,
+  currentTick: number,
+): MessageResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+  const newMessages: MessageRecord[] = [];
+
+  const messageActions = actions.filter(a => a.type === 'send_message');
+  if (messageActions.length === 0) {
+    return { messages: newMessages, events, actionResults };
+  }
+
+  // Build colony lookup
+  const colonyMap = new Map<string, Colony>();
+  for (const c of colonies) {
+    colonyMap.set(c.id, c);
+  }
+
+  // Track messages sent per colony this tick (for rate limiting)
+  const sentCount = new Map<string, number>();
+
+  for (const action of messageActions) {
+    const toColonyId = action.params.toColonyId as string;
+    const content = action.params.message as string;
+
+    // 1. Check rate limit
+    const currentCount = sentCount.get(action.colonyId) ?? 0;
+    if (currentCount >= MAX_MESSAGES_PER_TICK) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Rate limit: max ${MAX_MESSAGES_PER_TICK} messages per tick`,
+      });
+      continue;
+    }
+
+    // 2. Validate content
+    if (!content || typeof content !== 'string' || content.trim().length === 0) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: 'Message content is required',
+      });
+      continue;
+    }
+
+    if (content.length > MAX_MESSAGE_LENGTH) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Message too long: max ${MAX_MESSAGE_LENGTH} characters (got ${content.length})`,
+      });
+      continue;
+    }
+
+    // 3. Validate target colony
+    if (!toColonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: 'Target colony ID (toColonyId) is required',
+      });
+      continue;
+    }
+
+    // 4. Cannot message self
+    if (toColonyId === action.colonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: 'Cannot send a message to yourself',
+      });
+      continue;
+    }
+
+    // 5. Target colony exists
+    const targetColony = colonyMap.get(toColonyId);
+    if (!targetColony) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Colony ${toColonyId} not found`,
+      });
+      continue;
+    }
+
+    // 6. Target colony is active
+    if (targetColony.status !== 'active') {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Colony ${toColonyId} is ${targetColony.status} and cannot receive messages`,
+      });
+      continue;
+    }
+
+    // --- All checks passed: create message ---
+    const senderColony = colonyMap.get(action.colonyId);
+    const messageId = `msg_${currentTick}_${Math.random().toString(36).slice(2, 10)}`;
+    const deliveredAtTick = currentTick + MESSAGE_DELIVERY_DELAY;
+
+    const message: MessageRecord = {
+      id: messageId,
+      worldId,
+      fromColony: action.colonyId,
+      toColony: toColonyId,
+      sentAtTick: currentTick,
+      deliveredAtTick,
+      content: content.trim(),
+      read: false,
+    };
+    newMessages.push(message);
+
+    // Increment sent count
+    sentCount.set(action.colonyId, currentCount + 1);
+
+    // Emit private event for recipient
+    events.push({
+      type: 'message_received',
+      colonyId: toColonyId,
+      data: {
+        messageId,
+        fromColonyId: action.colonyId,
+        fromColonyName: senderColony?.name ?? 'Unknown',
+        sentAtTick: currentTick,
+        deliveredAtTick,
+        preview: content.trim().slice(0, 100),
+      },
+    });
+
+    // Emit confirmation event for sender
+    events.push({
+      type: 'message_sent',
+      colonyId: action.colonyId,
+      data: {
+        messageId,
+        toColonyId,
+        toColonyName: targetColony.name,
+        sentAtTick: currentTick,
+        deliveredAtTick,
+      },
+    });
+
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: `Message sent to ${targetColony.name}`,
+    });
+  }
+
+  return { messages: newMessages, events, actionResults };
+}
+
 // --- Tick Resolution ---
 
 /**
@@ -1855,11 +2051,14 @@ export function resolveTick(
   hexes: HexTileState[],
   actions: QueuedAction[] = [],
   combatSeed?: number,
+  worldId?: string,
+  currentTick?: number,
 ): TickResult {
   const events: TickEvent[] = [];
   const desertedUnitIds: string[] = [];
   let actionResults: ActionResult[] = [];
   let fogReveals: HexExploration[] = [];
+  let newMessages: MessageRecord[] = [];
 
   // Build hex lookup
   const hexMap = new Map<string, HexTileState>();
@@ -2022,6 +2221,15 @@ export function resolveTick(
     const demolishResult = resolveDemolish(updatedSettlements, updatedColonies, actions);
     events.push(...demolishResult.events);
     actionResults.push(...demolishResult.actionResults);
+  }
+
+  // --- Phase 1.9: Resolve send_message actions ---
+  const messageActions = actions.filter(a => a.type === 'send_message');
+  if (messageActions.length > 0 && worldId && currentTick !== undefined) {
+    const messageResult = resolveMessages(updatedColonies, actions, worldId, currentTick);
+    events.push(...messageResult.events);
+    actionResults.push(...messageResult.actionResults);
+    newMessages = messageResult.messages;
   }
 
   // Group settlements and units by colony
@@ -2401,6 +2609,7 @@ export function resolveTick(
     desertedUnitIds,
     actionResults,
     fogReveals,
+    newMessages,
   };
 }
 
