@@ -56,7 +56,7 @@ export interface BuildQueueEntry {
   ticksRemaining: number;
 }
 
-export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market';
+export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market' | 'workshop';
 
 export interface Unit {
   id: string;
@@ -114,6 +114,73 @@ export interface MessageRecord {
   read: boolean;
 }
 
+
+export interface ResearchQueueEntry {
+  techId: string;
+  ticksRemaining: number;
+}
+
+export type TechId = 'improved_agriculture' | 'fortifications' | 'advanced_scouting' | 'steel_weapons' | 'trade_routes' | 'siege_engineering';
+
+export interface TechDefinition {
+  id: TechId;
+  name: string;
+  description: string;
+  cost: Partial<Resources>;
+  ticks: number;
+  requires?: TechId[];
+}
+
+export const TECH_TREE: Record<TechId, TechDefinition> = {
+  improved_agriculture: {
+    id: 'improved_agriculture',
+    name: 'Improved Agriculture',
+    description: 'Farm production +30%',
+    cost: { food: 200, timber: 100 },
+    ticks: 10,
+  },
+  fortifications: {
+    id: 'fortifications',
+    name: 'Fortifications',
+    description: 'Settlement defense bonus — attackers take 2 damage per combat round',
+    cost: { stone: 200, iron: 100, timber: 50 },
+    ticks: 12,
+  },
+  advanced_scouting: {
+    id: 'advanced_scouting',
+    name: 'Advanced Scouting',
+    description: 'Scout vision radius +2, scout movement speed +1',
+    cost: { food: 150, timber: 100, iron: 50 },
+    ticks: 8,
+  },
+  steel_weapons: {
+    id: 'steel_weapons',
+    name: 'Steel Weapons',
+    description: 'Militia and soldier combat power +2',
+    cost: { iron: 200, stone: 100, timber: 50 },
+    ticks: 15,
+    requires: ['fortifications'],
+  },
+  trade_routes: {
+    id: 'trade_routes',
+    name: 'Trade Routes',
+    description: '+5 influence per tick, +2 food per settlement beyond first',
+    cost: { food: 150, timber: 100, influence: 50 },
+    ticks: 10,
+    requires: ['improved_agriculture'],
+  },
+  siege_engineering: {
+    id: 'siege_engineering',
+    name: 'Siege Engineering',
+    description: 'Siege units deal double damage to settlements',
+    cost: { iron: 250, stone: 200, timber: 100 },
+    ticks: 20,
+    requires: ['steel_weapons'],
+  },
+};
+
+export const SCORE_RESEARCH_COMPLETE = 75;
+
 export interface TickResult {
   colonies: Colony[];
   settlements: Settlement[];
@@ -143,6 +210,7 @@ export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
   barracks:   {},
   granary:    {},
   market:     { influence: 2 },
+  workshop:   {},
 };
 
 /** Building upkeep per level (resources consumed per tick) */
@@ -154,6 +222,7 @@ export const BUILDING_UPKEEP: Record<BuildingType, Partial<Resources>> = {
   barracks:   { food: 2, iron: 2, timber: 1 },
   granary:    { timber: 1 },
   market:     { food: 1, timber: 1 },
+  workshop:   { food: 2, timber: 1, iron: 1 },
 };
 
 /** Building construction costs */
@@ -165,6 +234,7 @@ export const BUILDING_COSTS: Record<BuildingType, Partial<Resources>> = {
   barracks:   { timber: 40, stone: 20, iron: 10 },
   granary:    { timber: 25, stone: 10 },
   market:     { stone: 30, timber: 15, iron: 5 },
+  workshop:   { stone: 40, timber: 30, iron: 20 },
 };
 
 /** Maximum building level */
@@ -191,7 +261,7 @@ export const BUILD_TIME = 3;
 
 /** All valid building types */
 export const VALID_BUILDING_TYPES: BuildingType[] = [
-  'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market',
+  'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop',
 ];
 
 /** Unit food upkeep per tick */
@@ -2400,6 +2470,154 @@ export function autoExploreIdleScouts(
  * 7. Handle deficits: morale loss → desertion
  * 8. Handle surplus: morale recovery
  */
+
+// --- Research Resolution ---
+
+export interface ResearchResult {
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+/**
+ * Resolve research actions and advance research queues.
+ * 
+ * Phase 1: Process research actions — validate and start research
+ * Phase 2: Advance all research queues (decrement ticksRemaining)
+ */
+export function resolveResearch(
+  colonies: Colony[],
+  settlements: Settlement[],
+  actions: QueuedAction[],
+): ResearchResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+
+  const researchActions = actions.filter(a => a.type === 'research');
+
+  // Phase 1: Process research actions
+  for (const action of researchActions) {
+    const colony = colonies.find(c => c.id === action.colonyId);
+    if (!colony) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Colony not found' });
+      continue;
+    }
+
+    const techId = action.params.techId as TechId;
+    if (!techId || !TECH_TREE[techId]) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Unknown tech: ${techId}. Valid techs: ${Object.keys(TECH_TREE).join(', ')}` });
+      continue;
+    }
+
+    const tech = TECH_TREE[techId];
+
+    // Check colony has a workshop
+    const colonySettlements = settlements.filter(s => s.colonyId === colony.id);
+    const hasWorkshop = colonySettlements.some(s => s.buildings.some(b => b.type === 'workshop'));
+    if (!hasWorkshop) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'You need a workshop building to research. Build a workshop first.' });
+      continue;
+    }
+
+    // Check not already researched
+    const researched: string[] = (colony as any).researchedTechs ?? [];
+    if (researched.includes(techId)) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Tech '${tech.name}' is already researched` });
+      continue;
+    }
+
+    // Check prerequisites
+    if (tech.requires) {
+      const missing = tech.requires.filter(r => !researched.includes(r));
+      if (missing.length > 0) {
+        const names = missing.map(id => TECH_TREE[id]?.name ?? id).join(', ');
+        actionResults.push({ actionId: action.id, status: 'failed', result: `Missing prerequisite tech(s): ${names}` });
+        continue;
+      }
+    }
+
+    // Check not already in queue
+    const queue: ResearchQueueEntry[] = (colony as any).researchQueue ?? [];
+    if (queue.some(q => q.techId === techId)) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Tech '${tech.name}' is already being researched` });
+      continue;
+    }
+
+    // Check max 1 research at a time
+    if (queue.length >= 1) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Research queue is full (max 1 at a time). Wait for current research to complete.' });
+      continue;
+    }
+
+    // Check resources
+    for (const [resource, amount] of Object.entries(tech.cost)) {
+      const key = resource as keyof Resources;
+      if ((colony.resources[key] ?? 0) < (amount as number)) {
+        actionResults.push({ actionId: action.id, status: 'failed', result: `Not enough ${resource}: need ${amount}, have ${Math.floor(colony.resources[key] ?? 0)}` });
+        continue;
+      }
+    }
+
+    // Deduct resources
+    for (const [resource, amount] of Object.entries(tech.cost)) {
+      colony.resources[resource as keyof Resources] -= amount as number;
+    }
+
+    // Add to queue
+    queue.push({ techId, ticksRemaining: tech.ticks });
+    (colony as any).researchQueue = queue;
+
+    actionResults.push({ actionId: action.id, status: 'resolved', result: `Started researching '${tech.name}' — ${tech.ticks} ticks remaining` });
+    events.push({
+      type: 'research_started',
+      colonyId: colony.id,
+      data: {
+        techId,
+        techName: tech.name,
+        ticksRemaining: tech.ticks,
+        cost: tech.cost,
+      },
+    });
+  }
+
+  // Phase 2: Advance all research queues
+  for (const colony of colonies) {
+    if (colony.status !== 'active') continue;
+
+    const queue: ResearchQueueEntry[] = (colony as any).researchQueue ?? [];
+    if (queue.length === 0) continue;
+
+    const researched: string[] = (colony as any).researchedTechs ?? [];
+    const completed: string[] = [];
+
+    for (let i = queue.length - 1; i >= 0; i--) {
+      queue[i].ticksRemaining--;
+      if (queue[i].ticksRemaining <= 0) {
+        const techId = queue[i].techId;
+        const tech = TECH_TREE[techId as TechId];
+        researched.push(techId);
+        completed.push(techId);
+        queue.splice(i, 1);
+
+        events.push({
+          type: 'research_complete',
+          colonyId: colony.id,
+          data: {
+            techId,
+            techName: tech?.name ?? techId,
+            description: tech?.description ?? '',
+            totalResearched: researched.length,
+          },
+        });
+      }
+    }
+
+    (colony as any).researchQueue = queue;
+    (colony as any).researchedTechs = researched;
+  }
+
+  return { events, actionResults };
+}
+
 export function resolveTick(
   colonies: Colony[],
   settlements: Settlement[],
@@ -2678,6 +2896,12 @@ export function resolveTick(
     actionResults.push(...convertResult.actionResults);
   }
 
+
+  // --- Phase 2: Resolve research actions + advance research queues ---
+  const researchResult = resolveResearch(updatedColonies, updatedSettlements, actions);
+  events.push(...researchResult.events);
+  actionResults.push(...researchResult.actionResults);
+
   // Group settlements and units by colony
   const colonySettlements = new Map<string, Settlement[]>();
   const colonyUnits = new Map<string, Unit[]>();
@@ -2732,6 +2956,22 @@ export function resolveTick(
 
     // Unit food upkeep
     totalUpkeep.food += calculateUnitUpkeep(myUnits);
+
+    // --- Apply research bonuses ---
+    const researched: string[] = (colony as any).researchedTechs ?? [];
+
+    // Improved Agriculture: +30% food production
+    if (researched.includes('improved_agriculture')) {
+      totalProduction.food = Math.round(totalProduction.food * 1.3 * 100) / 100;
+    }
+
+    // Trade Routes: +5 influence per tick, +2 food per settlement beyond first
+    if (researched.includes('trade_routes')) {
+      totalProduction.influence += 5;
+      if (mySettlements.length > 1) {
+        totalProduction.food += (mySettlements.length - 1) * 2;
+      }
+    }
 
     // --- Apply net resources ---
     const net: Resources = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
@@ -3086,6 +3326,9 @@ export function resolveTick(
           break;
         case 'combat_resolved':
           if ((event.data as any)?.winner === colony.id) colony.legacyScore += SCORE_COMBAT_VICTORY;
+          break;
+        case 'research_complete':
+          colony.legacyScore += SCORE_RESEARCH_COMPLETE;
           break;
       }
     }

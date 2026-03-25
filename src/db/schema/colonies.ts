@@ -14,6 +14,8 @@ export const colonies = pgTable('colonies', {
     influence: 50,
   }),
   legacyScore: integer('legacy_score').notNull().default(0),
+  researchedTechs: jsonb('researched_techs').default([]),
+  researchQueue: jsonb('research_queue').default([]),
   status: text('status').notNull().default('active'), // active | at_war | eliminated
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

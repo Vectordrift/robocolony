@@ -44,6 +44,7 @@ const VALID_ACTION_TYPES: Record<string, string[]> = {
   'send_message': ['toColonyId', 'message'],
   'explore': ['unitId'],
   'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
+  'research': ['techId'],
 };
 
 const MAX_ACTIONS_PER_TICK = 10;

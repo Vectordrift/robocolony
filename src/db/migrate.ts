@@ -44,6 +44,8 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   { table: 'colonies', column: 'api_key_hash', type: 'TEXT' },
   { table: 'colonies', column: 'resources', type: 'JSONB' },
   { table: 'colonies', column: 'legacy_score', type: 'INTEGER', defaultValue: '0' },
+  { table: 'colonies', column: 'researched_techs', type: 'JSONB', defaultValue: "'[]'", nullable: true },
+  { table: 'colonies', column: 'research_queue', type: 'JSONB', defaultValue: "'[]'", nullable: true },
   { table: 'colonies', column: 'status', type: 'TEXT', defaultValue: "'active'" },
   { table: 'colonies', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
 

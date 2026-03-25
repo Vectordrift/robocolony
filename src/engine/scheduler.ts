@@ -9,7 +9,7 @@ import { eq, and } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema/index.js';
 import { resolveTick } from './tick.js';
-import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction, MessageRecord } from './tick.js';
+import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction, MessageRecord, ResearchQueueEntry } from './tick.js';
 import { hexDistance } from './hex.js';
 import { nanoid } from 'nanoid';
 
@@ -33,6 +33,7 @@ const PUBLIC_EVENT_TYPES = new Set([
   'combat_resolved',
   'unit_destroyed',
   'shortage',
+  'research_complete',
 ]);
 
 /**
@@ -87,6 +88,11 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
       return {
         unitType: event.data.unitType,
         cause: event.data.cause || 'combat',
+      };
+    case 'research_complete':
+      return {
+        techName: event.data.techName,
+        description: event.data.description,
       };
     default:
       return null;
@@ -209,14 +215,19 @@ export class TickScheduler {
         );
 
       // Map DB rows to tick engine types
-      const colonies: Colony[] = dbColonies.map(c => ({
-        id: c.id,
-        worldId: c.worldId,
-        name: c.name,
-        resources: c.resources as Resources,
-        legacyScore: (c as any).legacyScore ?? 0,
-        status: c.status,
-      }));
+      const colonies: Colony[] = dbColonies.map(c => {
+        const col: any = {
+          id: c.id,
+          worldId: c.worldId,
+          name: c.name,
+          resources: c.resources as Resources,
+          legacyScore: (c as any).legacyScore ?? 0,
+          status: c.status,
+          researchedTechs: ((c as any).researchedTechs ?? []) as string[],
+          researchQueue: ((c as any).researchQueue ?? []) as ResearchQueueEntry[],
+        };
+        return col as Colony;
+      });
 
       const settlements: Settlement[] = dbSettlements.map(s => ({
         id: s.id,
@@ -276,7 +287,12 @@ export class TickScheduler {
         for (const colony of result.colonies) {
           await tx
             .update(schema.colonies)
-            .set({ resources: colony.resources, legacyScore: colony.legacyScore ?? 0 })
+            .set({
+              resources: colony.resources,
+              legacyScore: colony.legacyScore ?? 0,
+              ...((colony as any).researchedTechs !== undefined ? { researchedTechs: (colony as any).researchedTechs } : {}),
+              ...((colony as any).researchQueue !== undefined ? { researchQueue: (colony as any).researchQueue } : {}),
+            } as any)
             .where(eq(schema.colonies.id, colony.id));
         }
 
