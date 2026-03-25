@@ -68,6 +68,7 @@ export interface Unit {
   health: number;
   morale: number;
   movementQueue?: HexCoord[];
+  idleTicks?: number;
 }
 
 export type UnitType = 'scout' | 'militia' | 'soldier' | 'siege' | 'settler';
@@ -222,6 +223,9 @@ export const MAX_DEFICIT_MULTIPLIER = 3.0;
 
 /** Morale recovery per tick when food is positive */
 export const MORALE_RECOVERY_RATE = 0.10;
+
+/** Ticks of inactivity before emitting idle unit warning */
+export const IDLE_WARNING_TICKS = 3;
 
 /** Resource cost to found a new settlement */
 export const FOUNDING_COST: Partial<Resources> = {
@@ -1796,6 +1800,50 @@ export function resolveTick(
     }
   }
 
+  // --- Idle unit tracking ---
+  // A unit is "active" if it moved, has a movement queue, or received an action this tick.
+  const unitActionTargets = new Set<string>();
+  for (const action of actions) {
+    const unitId = action.params.unitId as string | undefined;
+    if (unitId) unitActionTargets.add(unitId);
+  }
+
+  // Newly trained units (not in unitPositionsBefore) start at 0
+  for (const unit of updatedUnits) {
+    if (desertedUnitIds.includes(unit.id)) continue;
+
+    const isNewUnit = !unitPositionsBefore.has(unit.id);
+    if (isNewUnit) {
+      unit.idleTicks = 0;
+      continue;
+    }
+
+    const before = unitPositionsBefore.get(unit.id)!;
+    const moved = before.x !== unit.hexX || before.y !== unit.hexY;
+    const hasQueue = unit.movementQueue && unit.movementQueue.length > 0;
+    const hadAction = unitActionTargets.has(unit.id);
+
+    if (moved || hasQueue || hadAction) {
+      unit.idleTicks = 0;
+    } else {
+      unit.idleTicks = (unit.idleTicks ?? 0) + 1;
+
+      if (unit.idleTicks === IDLE_WARNING_TICKS) {
+        events.push({
+          type: 'unit_idle',
+          colonyId: unit.colonyId,
+          unitId: unit.id,
+          data: {
+            unitType: unit.type,
+            hexX: unit.hexX,
+            hexY: unit.hexY,
+            idleTicks: unit.idleTicks,
+          },
+        });
+      }
+    }
+  }
+
   // Remove deserted units
   const survivingUnits = updatedUnits.filter(u => !desertedUnitIds.includes(u.id));
 
@@ -1809,6 +1857,7 @@ export function resolveTick(
     fogReveals,
   };
 }
+
 
 
 

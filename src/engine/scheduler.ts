@@ -22,6 +22,7 @@ const PUBLIC_EVENT_TYPES = new Set([
   'settlement_upgraded',
   'combat',
   'shortage',
+  'unit_idle',
 ]);
 
 /**
@@ -63,6 +64,11 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
       return {
         resource: event.data.resource,
         deficit: event.data.deficit,
+      };
+    case 'unit_idle':
+      return {
+        unitType: event.data.unitType,
+        idleTicks: event.data.idleTicks,
       };
     default:
       return null;
@@ -206,6 +212,7 @@ export class TickScheduler {
         health: u.health,
         morale: u.morale,
         movementQueue: (u.movementQueue ?? []) as Unit['movementQueue'],
+        idleTicks: u.idleTicks ?? 0,
       }));
 
       const hexes: HexTileState[] = dbHexes.map(h => ({
@@ -285,6 +292,7 @@ export class TickScheduler {
                 hexX: unit.hexX,
                 hexY: unit.hexY,
                 movementQueue: unit.movementQueue ?? [],
+                idleTicks: unit.idleTicks ?? 0,
               })
               .where(eq(schema.units.id, unit.id));
           } else {
@@ -299,6 +307,7 @@ export class TickScheduler {
               health: unit.health,
               morale: unit.morale,
               movementQueue: unit.movementQueue ?? [],
+              idleTicks: unit.idleTicks ?? 0,
             });
           }
         }
@@ -354,6 +363,7 @@ export class TickScheduler {
     }
   }
 }
+
 
 
 

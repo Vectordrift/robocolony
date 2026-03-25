@@ -12,6 +12,7 @@ export const units = pgTable('units', {
   health: integer('health').notNull().default(100),
   morale: real('morale').notNull().default(1.0),
   movementQueue: jsonb('movement_queue').notNull().default([]),
+  idleTicks: integer('idle_ticks').notNull().default(0),
 }, (table) => [
   index('idx_units_world_colony').on(table.worldId, table.colonyId),
 ]);
