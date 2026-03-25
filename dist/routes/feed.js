@@ -129,7 +129,7 @@ export async function feedRoutes(app) {
             colonies: colonySummaries,
             events: feedEvents,
         };
-    
+    });
     // --- Public leaderboard endpoint (50-tick delay for strategic safety) ---
     app.get('/api/worlds/:id/leaderboard', async (request, reply) => {
         const worldId = request.params.id;
@@ -146,25 +146,25 @@ export async function feedRoutes(app) {
         const displayTick = Math.max(0, (world.currentTick ?? 0) - LEADERBOARD_DELAY_TICKS);
         const colonyRows = await db
             .select({
-            id: colonies.id,
-            name: colonies.name,
-            status: colonies.status,
-            legacyScore: colonies.legacyScore,
-            createdAt: colonies.createdAt,
-        })
+                id: colonies.id,
+                name: colonies.name,
+                status: colonies.status,
+                legacyScore: colonies.legacyScore,
+                createdAt: colonies.createdAt,
+            })
             .from(colonies)
             .where(eq(colonies.worldId, worldId));
         const settlementRows = await db
             .select({
-            colonyId: settlements.colonyId,
-            tier: settlements.tier,
-        })
+                colonyId: settlements.colonyId,
+                tier: settlements.tier,
+            })
             .from(settlements)
             .where(eq(settlements.worldId, worldId));
         const unitRows = await db
             .select({
-            colonyId: units.colonyId,
-        })
+                colonyId: units.colonyId,
+            })
             .from(units)
             .where(eq(units.worldId, worldId));
         const ranked = colonyRows.map((c) => {
@@ -190,6 +190,5 @@ export async function feedRoutes(app) {
             colonies: ranked,
         };
     });
-});
 }
 //# sourceMappingURL=feed.js.map
