@@ -114,6 +114,18 @@ export interface MessageRecord {
   read: boolean;
 }
 
+
+export interface AgreementRecord {
+  id: string;
+  worldId: string;
+  type: 'non_aggression' | 'trade' | 'alliance';
+  proposedBy: string;
+  proposedTo: string;
+  status: 'proposed' | 'active' | 'rejected' | 'broken';
+  terms: Record<string, unknown>;
+  proposedAtTick: number;
+  acceptedAtTick: number | null;
+}
 export interface TickResult {
   colonies: Colony[];
   settlements: Settlement[];
@@ -123,6 +135,8 @@ export interface TickResult {
   actionResults: ActionResult[];
   fogReveals: HexExploration[];
   newMessages: MessageRecord[];
+  newAgreements: AgreementRecord[];
+  updatedAgreements: AgreementRecord[];
 }
 
 // --- Constants ---
@@ -1737,6 +1751,7 @@ export function resolveCombat(
   units: Unit[],
   actions: QueuedAction[],
   seed?: number,
+  agreements: AgreementRecord[] = [],
 ): CombatResult {
   const rng = createRng(seed);
   const events: TickEvent[] = [];
@@ -1780,8 +1795,17 @@ export function resolveCombat(
       const attackPower = UNIT_ATTACK[attacker.type];
       if (attackPower <= 0) continue; // settlers can't attack
 
-      // Find enemy units (from different colony)
-      const enemies = unitsOnHex.filter(u => u.colonyId !== attacker.colonyId);
+      // Find enemy units (from different colony, not protected by NAP)
+      const enemies = unitsOnHex.filter(u => {
+        if (u.colonyId === attacker.colonyId) return false;
+        // Check NAP: don't attack units belonging to NAP partners
+        const napBlocked = agreements.some(a =>
+          a.type === 'non_aggression' && a.status === 'active' &&
+          ((a.proposedBy === attacker.colonyId && a.proposedTo === u.colonyId) ||
+           (a.proposedBy === u.colonyId && a.proposedTo === attacker.colonyId))
+        );
+        return !napBlocked;
+      });
       if (enemies.length === 0) continue;
 
       // Pick a random enemy target
@@ -1913,6 +1937,7 @@ export interface CaptureResult {
 export function resolveSettlementCapture(
   settlements: Settlement[],
   units: Unit[],
+  agreements: AgreementRecord[] = [],
 ): CaptureResult {
   const events: TickEvent[] = [];
 
@@ -1948,6 +1973,14 @@ export function resolveSettlementCapture(
     }
 
     if (!capturingColonyId) continue; // no enemy units present
+
+    // Check NAP: cannot capture settlements of NAP partners
+    const napBlocked = agreements.some(a =>
+      a.type === 'non_aggression' && a.status === 'active' &&
+      ((a.proposedBy === capturingColonyId && a.proposedTo === settlement.colonyId) ||
+       (a.proposedBy === settlement.colonyId && a.proposedTo === capturingColonyId))
+    );
+    if (napBlocked) continue;
 
     // --- Capture the settlement ---
     const previousOwner = settlement.colonyId;
@@ -2014,6 +2047,9 @@ export const MAX_MESSAGES_PER_TICK = 5;
 
 /** Maximum message content length (characters) */
 export const MAX_MESSAGE_LENGTH = 500;
+
+/** Influence cost to break an active agreement */
+export const AGREEMENT_BREAK_COST = 25;
 
 /** Delivery delay in ticks (messages arrive 1 tick after sending) */
 export const MESSAGE_DELIVERY_DELAY = 1;
@@ -2191,6 +2227,182 @@ export function resolveMessages(
   return { messages: newMessages, events, actionResults };
 }
 
+
+
+// --- Agreement Resolution ---
+
+export interface AgreementResult {
+  newAgreements: AgreementRecord[];
+  updatedAgreements: AgreementRecord[];
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+/**
+ * Resolve agreement actions: propose, accept, reject, break diplomatic agreements.
+ *
+ * Action types:
+ * - propose_agreement: { toColonyId, agreementType, terms? } — create a proposed agreement
+ * - accept_agreement: { agreementId } — activate a proposed agreement
+ * - reject_agreement: { agreementId } — reject a proposed agreement
+ * - break_agreement: { agreementId } — break an active agreement (costs influence)
+ */
+export function resolveAgreements(
+  colonies: Colony[],
+  existingAgreements: AgreementRecord[],
+  actions: QueuedAction[],
+  worldId: string,
+  currentTick: number,
+): AgreementResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+  const newAgreements: AgreementRecord[] = [];
+  const updatedAgreements: AgreementRecord[] = [];
+
+  // Build lookups
+  const colonyMap = new Map<string, Colony>();
+  for (const c of colonies) {
+    colonyMap.set(c.id, c);
+  }
+  const agreementMap = new Map<string, AgreementRecord>();
+  for (const a of existingAgreements) {
+    agreementMap.set(a.id, { ...a });
+  }
+
+  // --- Propose Agreement ---
+  const proposeActions = actions.filter(a => a.type === 'propose_agreement');
+  for (const action of proposeActions) {
+    const toColonyId = action.params.toColonyId as string;
+    const agreementType = action.params.agreementType as string;
+    const terms = (action.params.terms as Record<string, unknown>) ?? {};
+
+    if (!['non_aggression', 'trade', 'alliance'].includes(agreementType)) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Invalid agreement type: ${agreementType}. Must be: non_aggression, trade, or alliance` });
+      continue;
+    }
+    if (toColonyId === action.colonyId) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Cannot propose an agreement with yourself' });
+      continue;
+    }
+    const targetColony = colonyMap.get(toColonyId);
+    if (!targetColony) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Colony ${toColonyId} not found` });
+      continue;
+    }
+    if (targetColony.status !== 'active') {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Colony ${toColonyId} is ${targetColony.status}` });
+      continue;
+    }
+
+    // Check for existing active or proposed agreement of same type
+    const existing = [...existingAgreements, ...newAgreements].find(a =>
+      a.type === agreementType &&
+      (a.status === 'active' || a.status === 'proposed') &&
+      ((a.proposedBy === action.colonyId && a.proposedTo === toColonyId) ||
+       (a.proposedBy === toColonyId && a.proposedTo === action.colonyId))
+    );
+    if (existing) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `A ${agreementType} agreement already exists between these colonies (status: ${existing.status})` });
+      continue;
+    }
+
+    const agreementId = `agr_${currentTick}_${Math.random().toString(36).slice(2, 10)}`;
+    const newAgreement: AgreementRecord = {
+      id: agreementId, worldId, type: agreementType as AgreementRecord['type'],
+      proposedBy: action.colonyId, proposedTo: toColonyId,
+      status: 'proposed', terms, proposedAtTick: currentTick, acceptedAtTick: null,
+    };
+    newAgreements.push(newAgreement);
+
+    const senderColony = colonyMap.get(action.colonyId);
+    events.push({ type: 'agreement_proposed', colonyId: toColonyId, data: { agreementId, agreementType, proposedBy: action.colonyId, proposedByName: senderColony?.name ?? 'Unknown', terms } });
+    events.push({ type: 'agreement_proposed', colonyId: action.colonyId, data: { agreementId, agreementType, proposedTo: toColonyId, proposedToName: targetColony.name, terms, direction: 'outgoing' } });
+    actionResults.push({ actionId: action.id, status: 'resolved', result: `${agreementType} agreement proposed to ${targetColony.name}` });
+  }
+
+  // --- Accept Agreement ---
+  const acceptActions = actions.filter(a => a.type === 'accept_agreement');
+  for (const action of acceptActions) {
+    const agreementId = action.params.agreementId as string;
+    const agreement = agreementMap.get(agreementId) ?? newAgreements.find(a => a.id === agreementId);
+    if (!agreement) { actionResults.push({ actionId: action.id, status: 'failed', result: `Agreement ${agreementId} not found` }); continue; }
+    if (agreement.proposedTo !== action.colonyId) { actionResults.push({ actionId: action.id, status: 'failed', result: 'Only the recipient of a proposal can accept it' }); continue; }
+    if (agreement.status !== 'proposed') { actionResults.push({ actionId: action.id, status: 'failed', result: `Agreement is ${agreement.status}, not proposed` }); continue; }
+
+    agreement.status = 'active';
+    agreement.acceptedAtTick = currentTick;
+    updatedAgreements.push(agreement);
+
+    const proposerName = colonyMap.get(agreement.proposedBy)?.name ?? 'Unknown';
+    const accepterName = colonyMap.get(agreement.proposedTo)?.name ?? 'Unknown';
+    events.push({ type: 'agreement_signed', colonyId: agreement.proposedBy, data: { agreementId: agreement.id, agreementType: agreement.type, withColonyId: agreement.proposedTo, withColonyName: accepterName, public: true } });
+    events.push({ type: 'agreement_signed', colonyId: agreement.proposedTo, data: { agreementId: agreement.id, agreementType: agreement.type, withColonyId: agreement.proposedBy, withColonyName: proposerName, public: true } });
+    actionResults.push({ actionId: action.id, status: 'resolved', result: `${agreement.type} agreement with ${proposerName} is now active` });
+  }
+
+  // --- Reject Agreement ---
+  const rejectActions = actions.filter(a => a.type === 'reject_agreement');
+  for (const action of rejectActions) {
+    const agreementId = action.params.agreementId as string;
+    const agreement = agreementMap.get(agreementId) ?? newAgreements.find(a => a.id === agreementId);
+    if (!agreement) { actionResults.push({ actionId: action.id, status: 'failed', result: `Agreement ${agreementId} not found` }); continue; }
+    if (agreement.proposedTo !== action.colonyId) { actionResults.push({ actionId: action.id, status: 'failed', result: 'Only the recipient of a proposal can reject it' }); continue; }
+    if (agreement.status !== 'proposed') { actionResults.push({ actionId: action.id, status: 'failed', result: `Agreement is ${agreement.status}, not proposed` }); continue; }
+
+    agreement.status = 'rejected';
+    updatedAgreements.push(agreement);
+    const proposerName = colonyMap.get(agreement.proposedBy)?.name ?? 'Unknown';
+    events.push({ type: 'agreement_rejected', colonyId: agreement.proposedBy, data: { agreementId: agreement.id, agreementType: agreement.type, rejectedBy: agreement.proposedTo, rejectedByName: colonyMap.get(agreement.proposedTo)?.name ?? 'Unknown' } });
+    actionResults.push({ actionId: action.id, status: 'resolved', result: `${agreement.type} proposal from ${proposerName} rejected` });
+  }
+
+  // --- Break Agreement ---
+  const breakActions = actions.filter(a => a.type === 'break_agreement');
+  for (const action of breakActions) {
+    const agreementId = action.params.agreementId as string;
+    const agreement = agreementMap.get(agreementId);
+    if (!agreement) { actionResults.push({ actionId: action.id, status: 'failed', result: `Agreement ${agreementId} not found` }); continue; }
+    if (agreement.proposedBy !== action.colonyId && agreement.proposedTo !== action.colonyId) { actionResults.push({ actionId: action.id, status: 'failed', result: 'You are not a party to this agreement' }); continue; }
+    if (agreement.status !== 'active') { actionResults.push({ actionId: action.id, status: 'failed', result: `Agreement is ${agreement.status}, not active` }); continue; }
+
+    const colony = colonyMap.get(action.colonyId);
+    if (!colony) { actionResults.push({ actionId: action.id, status: 'failed', result: `Colony ${action.colonyId} not found` }); continue; }
+    if (colony.resources.influence < AGREEMENT_BREAK_COST) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Breaking an agreement costs ${AGREEMENT_BREAK_COST} influence (have ${colony.resources.influence})` });
+      continue;
+    }
+
+    colony.resources.influence -= AGREEMENT_BREAK_COST;
+    agreement.status = 'broken';
+    updatedAgreements.push(agreement);
+
+    const otherColonyId = agreement.proposedBy === action.colonyId ? agreement.proposedTo : agreement.proposedBy;
+    const breakerName = colony.name;
+    const otherName = colonyMap.get(otherColonyId)?.name ?? 'Unknown';
+    events.push({ type: 'agreement_broken', colonyId: action.colonyId, data: { agreementId: agreement.id, agreementType: agreement.type, brokenBy: action.colonyId, brokenByName: breakerName, otherParty: otherColonyId, otherPartyName: otherName, influenceCost: AGREEMENT_BREAK_COST, public: true } });
+    events.push({ type: 'agreement_broken', colonyId: otherColonyId, data: { agreementId: agreement.id, agreementType: agreement.type, brokenBy: action.colonyId, brokenByName: breakerName, otherParty: otherColonyId, otherPartyName: otherName, influenceCost: AGREEMENT_BREAK_COST, public: true } });
+    actionResults.push({ actionId: action.id, status: 'resolved', result: `${agreement.type} agreement with ${otherName} broken (cost: ${AGREEMENT_BREAK_COST} influence)` });
+  }
+
+  return { newAgreements, updatedAgreements, events, actionResults };
+}
+
+/**
+ * Check if an attack is blocked by an active Non-Aggression Pact.
+ * Returns the blocking agreement if found, null otherwise.
+ */
+export function isAttackBlockedByNAP(
+  attackerColonyId: string,
+  defenderColonyId: string,
+  agreements: AgreementRecord[],
+): AgreementRecord | null {
+  return agreements.find(a =>
+    a.type === 'non_aggression' &&
+    a.status === 'active' &&
+    ((a.proposedBy === attackerColonyId && a.proposedTo === defenderColonyId) ||
+     (a.proposedBy === defenderColonyId && a.proposedTo === attackerColonyId))
+  ) ?? null;
+}
 
 // --- Market Resource Conversion ---
 
@@ -2545,12 +2757,15 @@ export function resolveTick(
   combatSeed?: number,
   worldId?: string,
   currentTick?: number,
+  existingAgreements: AgreementRecord[] = [],
 ): TickResult {
   const events: TickEvent[] = [];
   const desertedUnitIds: string[] = [];
   let actionResults: ActionResult[] = [];
   let fogReveals: HexExploration[] = [];
   let newMessages: MessageRecord[] = [];
+  let newAgreements: AgreementRecord[] = [];
+  let updatedAgreements: AgreementRecord[] = [];
 
 
   // --- Deduplicate actions per unit ---
@@ -2706,7 +2921,7 @@ export function resolveTick(
   // --- Phase 0.25: Resolve combat (after movement, before fog) ---
   // Units from different colonies sharing a hex fight automatically.
   {
-    const combatResult = resolveCombat(updatedUnits, actions, combatSeed);
+    const combatResult = resolveCombat(updatedUnits, actions, combatSeed, existingAgreements);
     if (combatResult.destroyedUnitIds.length > 0 || combatResult.events.length > 0) {
       updatedUnits = combatResult.units.map(u => ({
         ...u,
@@ -2719,8 +2934,9 @@ export function resolveTick(
 
   // --- Phase 0.3: Settlement capture (after combat) ---
   // Check if any settlement hexes now have enemy units but no owner units.
+  // NAP prevents capture between allied parties.
   {
-    const captureResult = resolveSettlementCapture(updatedSettlements, updatedUnits);
+    const captureResult = resolveSettlementCapture(updatedSettlements, updatedUnits, existingAgreements);
     if (captureResult.events.length > 0) {
       events.push(...captureResult.events);
     }
@@ -2813,6 +3029,18 @@ export function resolveTick(
     events.push(...messageResult.events);
     actionResults.push(...messageResult.actionResults);
     newMessages = messageResult.messages;
+  }
+
+  // --- Phase 1.92: Resolve agreement actions (diplomacy) ---
+  const agreementActions = actions.filter(a =>
+    ['propose_agreement', 'accept_agreement', 'reject_agreement', 'break_agreement'].includes(a.type)
+  );
+  if (agreementActions.length > 0 && worldId && currentTick !== undefined) {
+    const agreementResult = resolveAgreements(updatedColonies, existingAgreements, actions, worldId, currentTick);
+    events.push(...agreementResult.events);
+    actionResults.push(...agreementResult.actionResults);
+    newAgreements = agreementResult.newAgreements;
+    updatedAgreements = agreementResult.updatedAgreements;
   }
 
   // --- Phase 1.95: Resolve convert_resources actions (market) ---
@@ -3310,5 +3538,7 @@ export function resolveTick(
     actionResults,
     fogReveals,
     newMessages,
+    newAgreements,
+    updatedAgreements,
   };
 }
