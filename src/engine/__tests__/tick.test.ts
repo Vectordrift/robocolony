@@ -1,3 +1,4 @@
+
 import { describe, it, expect } from 'vitest';
 import {
   resolveTick,
@@ -7,6 +8,7 @@ import {
   resolveTrainUnit,
   resolveUpgradeSettlement,
   resolveUpgradeBuilding,
+  resolveDemolish,
   buildingUpgradeCost,
   calculateProduction,
   calculateBuildingUpkeep,
@@ -40,6 +42,8 @@ import {
   GRANARY_BONUS_PER_LEVEL,
   STOCKPILE_DECAY_RATE,
   IDLE_WARNING_TICKS,
+  DEMOLISH_REFUND_RATE,
+  DECAY_CHANCE_PER_BUILDING,
   type Colony,
   type Settlement,
   type Unit,
@@ -2758,5 +2762,290 @@ describe('Idle unit tracking', () => {
     const trainedUnit = result.units.find(u => u.type === 'scout');
     expect(trainedUnit).toBeDefined();
     expect(trainedUnit!.idleTicks).toBe(0);
+  });
+});
+
+describe('resolveDemolish', () => {
+  it('should remove building and refund 25% of cost', () => {
+    const colony = makeColony({ resources: { food: 10, timber: 10, stone: 10, iron: 10, influence: 10 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+    });
+
+    const action: QueuedAction = {
+      id: 'act-demolish-1',
+      colonyId: 'colony-1',
+      type: 'demolish',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveDemolish([settlement], [colony], [action]);
+
+    // Farm costs 20 timber. 25% of 20 = 5 timber refund
+    expect(colony.resources.timber).toBe(15); // 10 + 5
+    expect(settlement.buildings).toHaveLength(0);
+    expect(result.actionResults[0].status).toBe('resolved');
+
+    const event = result.events.find(e => e.type === 'building_demolished');
+    expect(event).toBeDefined();
+    expect(event!.data.buildingType).toBe('farm');
+    expect(event!.data.level).toBe(1);
+    expect((event!.data.refund as Record<string, number>).timber).toBe(5);
+  });
+
+  it('should refund based on level for upgraded buildings', () => {
+    const colony = makeColony({ resources: { food: 10, timber: 10, stone: 10, iron: 10, influence: 10 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'mine', level: 2 }],
+    });
+
+    const action: QueuedAction = {
+      id: 'act-demolish-2',
+      colonyId: 'colony-1',
+      type: 'demolish',
+      params: { settlementId: 'settlement-1', buildingType: 'mine' },
+    };
+
+    const result = resolveDemolish([settlement], [colony], [action]);
+
+    // Mine costs stone: 30, timber: 20. Level 2 total = stone: 60, timber: 40
+    // 25% refund = stone: 15, timber: 10
+    expect(colony.resources.stone).toBe(25); // 10 + 15
+    expect(colony.resources.timber).toBe(20); // 10 + 10
+    expect(settlement.buildings).toHaveLength(0);
+    expect(result.actionResults[0].status).toBe('resolved');
+  });
+
+  it('should fail when settlement does not exist', () => {
+    const colony = makeColony();
+
+    const action: QueuedAction = {
+      id: 'act-demolish-3',
+      colonyId: 'colony-1',
+      type: 'demolish',
+      params: { settlementId: 'nonexistent', buildingType: 'farm' },
+    };
+
+    const result = resolveDemolish([], [colony], [action]);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('not found');
+  });
+
+  it('should fail when settlement does not belong to colony', () => {
+    const colony = makeColony({ id: 'colony-2' });
+    const settlement = makeSettlement({ colonyId: 'colony-1', buildings: [{ type: 'farm', level: 1 }] });
+
+    const action: QueuedAction = {
+      id: 'act-demolish-4',
+      colonyId: 'colony-2',
+      type: 'demolish',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveDemolish([settlement], [colony], [action]);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('does not belong');
+  });
+
+  it('should fail when building type does not exist in settlement', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
+
+    const action: QueuedAction = {
+      id: 'act-demolish-5',
+      colonyId: 'colony-1',
+      type: 'demolish',
+      params: { settlementId: 'settlement-1', buildingType: 'mine' },
+    };
+
+    const result = resolveDemolish([settlement], [colony], [action]);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('does not have');
+  });
+
+  it('should fail when building type is invalid', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement();
+
+    const action: QueuedAction = {
+      id: 'act-demolish-6',
+      colonyId: 'colony-1',
+      type: 'demolish',
+      params: { settlementId: 'settlement-1', buildingType: 'trebuchet' },
+    };
+
+    const result = resolveDemolish([settlement], [colony], [action]);
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Invalid building type');
+  });
+
+  it('should also clear build queue entries for demolished building type', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+      buildQueue: [{ type: 'farm', ticksRemaining: 2 }],
+    });
+
+    const action: QueuedAction = {
+      id: 'act-demolish-7',
+      colonyId: 'colony-1',
+      type: 'demolish',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveDemolish([settlement], [colony], [action]);
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(settlement.buildings).toHaveLength(0);
+    expect(settlement.buildQueue).toHaveLength(0);
+  });
+});
+
+describe('demolish in resolveTick (integration)', () => {
+  it('should process demolish action in full tick', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 50, stone: 30, iron: 10, influence: 50 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }, { type: 'lumberMill', level: 1 }],
+      population: 5,
+    });
+    const hexes = [makeHex(0, 0)];
+
+    const action: QueuedAction = {
+      id: 'act-1',
+      colonyId: 'colony-1',
+      type: 'demolish',
+      params: { settlementId: 'settlement-1', buildingType: 'farm' },
+    };
+
+    const result = resolveTick([colony], [settlement], [], hexes, [action]);
+
+    // Farm should be demolished
+    const farmRemains = result.settlements[0].buildings.find(b => b.type === 'farm');
+    expect(farmRemains).toBeUndefined();
+
+    // LumberMill should still be there
+    const lumberMill = result.settlements[0].buildings.find(b => b.type === 'lumberMill');
+    expect(lumberMill).toBeDefined();
+
+    // Demolished event should be present
+    const demolishEvent = result.events.find(e => e.type === 'building_demolished');
+    expect(demolishEvent).toBeDefined();
+  });
+});
+
+describe('Building decay on food deficit', () => {
+  it('should decay buildings when colony food is 0 (with forced random)', () => {
+    // Force Math.random to return 0.05 (below 0.10 threshold = decay happens)
+    const originalRandom = Math.random;
+    Math.random = () => 0.05;
+
+    try {
+      const colony = makeColony({
+        resources: { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 },
+      });
+      const settlement = makeSettlement({
+        buildings: [{ type: 'farm', level: 2 }],
+        population: 0,
+      });
+      // Need hexes for production calculation
+      const hexes = [makeHex(0, 0, { resources: { food: 0, timber: 0, stone: 0, iron: 0 } })];
+
+      const result = resolveTick([colony], [settlement], [], hexes, []);
+
+      // Farm L2 should decay to L1
+      const farm = result.settlements[0].buildings.find(b => b.type === 'farm');
+      expect(farm).toBeDefined();
+      expect(farm!.level).toBe(1);
+
+      const decayEvent = result.events.find(e => e.type === 'building_decayed');
+      expect(decayEvent).toBeDefined();
+      expect(decayEvent!.data.previousLevel).toBe(2);
+      expect(decayEvent!.data.newLevel).toBe(1);
+      expect(decayEvent!.data.destroyed).toBe(false);
+    } finally {
+      Math.random = originalRandom;
+    }
+  });
+
+  it('should destroy level 1 buildings on decay', () => {
+    const originalRandom = Math.random;
+    Math.random = () => 0.05;
+
+    try {
+      const colony = makeColony({
+        resources: { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 },
+      });
+      const settlement = makeSettlement({
+        buildings: [{ type: 'farm', level: 1 }],
+        population: 0,
+      });
+      const hexes = [makeHex(0, 0, { resources: { food: 0, timber: 0, stone: 0, iron: 0 } })];
+
+      const result = resolveTick([colony], [settlement], [], hexes, []);
+
+      // Farm L1 should be destroyed
+      const farm = result.settlements[0].buildings.find(b => b.type === 'farm');
+      expect(farm).toBeUndefined();
+
+      const decayEvent = result.events.find(e => e.type === 'building_decayed');
+      expect(decayEvent).toBeDefined();
+      expect(decayEvent!.data.destroyed).toBe(true);
+    } finally {
+      Math.random = originalRandom;
+    }
+  });
+
+  it('should not decay buildings when colony has food', () => {
+    const originalRandom = Math.random;
+    Math.random = () => 0.05; // Would trigger decay if food was 0
+
+    try {
+      const colony = makeColony({
+        resources: { food: 100, timber: 100, stone: 50, iron: 20, influence: 10 },
+      });
+      const settlement = makeSettlement({
+        buildings: [{ type: 'farm', level: 1 }],
+        population: 5,
+      });
+      const hexes = makeHexRing(0, 0);
+
+      const result = resolveTick([colony], [settlement], [], hexes, []);
+
+      // Building should still exist (colony has food)
+      const farm = result.settlements[0].buildings.find(b => b.type === 'farm');
+      expect(farm).toBeDefined();
+      expect(farm!.level).toBe(1);
+
+      const decayEvent = result.events.find(e => e.type === 'building_decayed');
+      expect(decayEvent).toBeUndefined();
+    } finally {
+      Math.random = originalRandom;
+    }
+  });
+
+  it('should not decay buildings when random roll is above threshold', () => {
+    const originalRandom = Math.random;
+    Math.random = () => 0.50; // Above 0.10 threshold = no decay
+
+    try {
+      const colony = makeColony({
+        resources: { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 },
+      });
+      const settlement = makeSettlement({
+        buildings: [{ type: 'farm', level: 1 }],
+        population: 0,
+      });
+      const hexes = [makeHex(0, 0, { resources: { food: 0, timber: 0, stone: 0, iron: 0 } })];
+
+      const result = resolveTick([colony], [settlement], [], hexes, []);
+
+      // Building should still exist (roll was above threshold)
+      const farm = result.settlements[0].buildings.find(b => b.type === 'farm');
+      expect(farm).toBeDefined();
+
+      const decayEvent = result.events.find(e => e.type === 'building_decayed');
+      expect(decayEvent).toBeUndefined();
+    } finally {
+      Math.random = originalRandom;
+    }
   });
 });

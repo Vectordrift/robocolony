@@ -1,5 +1,6 @@
 
 
+
 /**
  * Tick engine — resolves one game tick.
  *
@@ -281,6 +282,12 @@ export const GRANARY_BONUS_PER_LEVEL = 100;
 
 /** Fraction of excess resources that decay each tick (10%) */
 export const STOCKPILE_DECAY_RATE = 0.10;
+
+/** Fraction of building cost refunded on demolish (25%) */
+export const DEMOLISH_REFUND_RATE = 0.25;
+
+/** Chance per tick per building to decay when colony food is at 0 */
+export const DECAY_CHANCE_PER_BUILDING = 0.10;
 const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 
 // --- Helpers ---
@@ -668,6 +675,148 @@ export function resolveUpgradeBuilding(
       actionId: action.id,
       status: 'resolved',
       result: `${bType} upgrade to level ${building.level + 1} started at ${settlement.name} (${UPGRADE_BUILD_TIME} ticks)`,
+    });
+  }
+
+  return { events, actionResults };
+}
+
+// --- Demolish ---
+
+export interface DemolishResult {
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+/**
+ * Resolve demolish actions: remove a building from a settlement and refund 25% of cost.
+ *
+ * Validates:
+ * - Settlement exists and belongs to the colony
+ * - Building type is valid and exists in the settlement
+ *
+ * On success: building removed, partial refund credited, event emitted.
+ */
+export function resolveDemolish(
+  settlements: Settlement[],
+  colonies: Colony[],
+  actions: QueuedAction[],
+): DemolishResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+
+  const demolishActions = actions.filter(a => a.type === 'demolish');
+  if (demolishActions.length === 0) {
+    return { events, actionResults };
+  }
+
+  // Build lookups
+  const settlementMap = new Map<string, Settlement>();
+  for (const s of settlements) {
+    settlementMap.set(s.id, s);
+  }
+  const colonyMap = new Map<string, Colony>();
+  for (const c of colonies) {
+    colonyMap.set(c.id, c);
+  }
+
+  for (const action of demolishActions) {
+    const settlementId = action.params.settlementId as string;
+    const buildingType = action.params.buildingType as string;
+
+    // 1. Settlement exists
+    const settlement = settlementMap.get(settlementId);
+    if (!settlement) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} not found`,
+      });
+      continue;
+    }
+
+    // 2. Colony ownership
+    if (settlement.colonyId !== action.colonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+      });
+      continue;
+    }
+
+    // 3. Valid building type
+    if (!VALID_BUILDING_TYPES.includes(buildingType as BuildingType)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Invalid building type: ${buildingType}`,
+      });
+      continue;
+    }
+
+    const bType = buildingType as BuildingType;
+
+    // 4. Building exists in settlement
+    const buildingIndex = settlement.buildings.findIndex(b => b.type === bType);
+    if (buildingIndex === -1) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement ${settlementId} does not have a ${bType}`,
+      });
+      continue;
+    }
+
+    const building = settlement.buildings[buildingIndex];
+    const colony = colonyMap.get(action.colonyId);
+    if (!colony) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Colony ${action.colonyId} not found`,
+      });
+      continue;
+    }
+
+    // --- All checks passed: remove building and refund ---
+
+    // Calculate refund: 25% of total cost (base cost × level for upgraded buildings)
+    const baseCost = BUILDING_COSTS[bType];
+    const refund: Partial<Resources> = {};
+    for (const [key, amount] of Object.entries(baseCost)) {
+      const totalCost = (amount as number) * building.level;
+      refund[key as keyof Resources] = Math.floor(totalCost * DEMOLISH_REFUND_RATE);
+    }
+
+    // Credit refund
+    for (const [key, amount] of Object.entries(refund)) {
+      if ((amount as number) > 0) {
+        colony.resources[key as keyof Resources] += amount as number;
+      }
+    }
+
+    // Remove building
+    settlement.buildings.splice(buildingIndex, 1);
+
+    // Also remove any pending build queue entries for this building type
+    settlement.buildQueue = settlement.buildQueue.filter(bq => bq.type !== bType);
+
+    events.push({
+      type: 'building_demolished',
+      colonyId: action.colonyId,
+      settlementId: settlement.id,
+      data: {
+        buildingType: bType,
+        level: building.level,
+        refund,
+      },
+    });
+
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: `${bType} (level ${building.level}) demolished at ${settlement.name}`,
     });
   }
 
@@ -1618,6 +1767,14 @@ export function resolveTick(
     actionResults.push(...upgradeResult.actionResults);
   }
 
+  // --- Phase 1.8: Resolve demolish actions ---
+  const demolishActions = actions.filter(a => a.type === 'demolish');
+  if (demolishActions.length > 0) {
+    const demolishResult = resolveDemolish(updatedSettlements, updatedColonies, actions);
+    events.push(...demolishResult.events);
+    actionResults.push(...demolishResult.actionResults);
+  }
+
   // Group settlements and units by colony
   const colonySettlements = new Map<string, Settlement[]>();
   const colonyUnits = new Map<string, Unit[]>();
@@ -1689,6 +1846,49 @@ export function resolveTick(
           data: { resource: key, deficit: colony.resources[key] },
         });
         colony.resources[key] = 0;
+      }
+    }
+
+    // --- Building decay on food deficit ---
+    // When colony food is at 0, each building has DECAY_CHANCE_PER_BUILDING chance to lose 1 level.
+    // Buildings at level 1 that decay are destroyed.
+    if (colony.resources.food <= 0) {
+      for (const settlement of mySettlements) {
+        // Iterate backwards so splicing doesn't shift indices
+        for (let i = settlement.buildings.length - 1; i >= 0; i--) {
+          const building = settlement.buildings[i];
+          const roll = Math.random();
+          if (roll < DECAY_CHANCE_PER_BUILDING) {
+            if (building.level <= 1) {
+              // Destroy the building
+              settlement.buildings.splice(i, 1);
+              events.push({
+                type: 'building_decayed',
+                colonyId: colony.id,
+                settlementId: settlement.id,
+                data: {
+                  buildingType: building.type,
+                  previousLevel: 1,
+                  destroyed: true,
+                },
+              });
+            } else {
+              // Reduce level by 1
+              building.level -= 1;
+              events.push({
+                type: 'building_decayed',
+                colonyId: colony.id,
+                settlementId: settlement.id,
+                data: {
+                  buildingType: building.type,
+                  previousLevel: building.level + 1,
+                  newLevel: building.level,
+                  destroyed: false,
+                },
+              });
+            }
+          }
+        }
       }
     }
 
@@ -1923,3 +2123,5 @@ export function resolveTick(
     fogReveals,
   };
 }
+
+
