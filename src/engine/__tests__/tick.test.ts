@@ -37,6 +37,7 @@ import {
   TIER_ORDER,
   MAX_POPULATION,
   POP_GROWTH_PER_FOOD,
+  IDLE_WARNING_TICKS,
   type Colony,
   type Settlement,
   type Unit,
@@ -2577,3 +2578,118 @@ describe('upgrade_building in resolveTick (integration)', () => {
 });
 
 
+
+
+
+describe('Idle unit tracking', () => {
+  it('increments idleTicks for units with no movement and no actions', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
+    const unit = makeUnit({ id: 'scout-1', type: 'scout', idleTicks: 0 });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [unit], hexes, []);
+
+    const updatedUnit = result.units.find(u => u.id === 'scout-1')!;
+    expect(updatedUnit.idleTicks).toBe(1);
+  });
+
+  it('resets idleTicks when unit receives a move action', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
+    const unit = makeUnit({ id: 'scout-1', type: 'scout', idleTicks: 2 });
+    const hexes = makeHexRing(0, 0);
+
+    const moveAction: QueuedAction = {
+      id: 'action-1',
+      colonyId: 'colony-1',
+      type: 'move_unit',
+      params: { unitId: 'scout-1', targetX: 1, targetY: 0 },
+    };
+
+    const result = resolveTick([colony], [settlement], [unit], hexes, [moveAction]);
+
+    const updatedUnit = result.units.find(u => u.id === 'scout-1')!;
+    expect(updatedUnit.idleTicks).toBe(0);
+  });
+
+  it('resets idleTicks when unit has a movement queue and moves', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
+    const unit = makeUnit({
+      id: 'scout-1',
+      type: 'scout',
+      idleTicks: 5,
+      movementQueue: [{ q: 1, r: 0 }],
+    });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [unit], hexes, []);
+
+    const updatedUnit = result.units.find(u => u.id === 'scout-1')!;
+    expect(updatedUnit.idleTicks).toBe(0);
+  });
+
+  it('emits unit_idle event when idleTicks reaches 3', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
+    const unit = makeUnit({ id: 'scout-1', type: 'scout', idleTicks: 2 });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [unit], hexes, []);
+
+    const idleEvent = result.events.find(e => e.type === 'unit_idle');
+    expect(idleEvent).toBeDefined();
+    expect(idleEvent!.colonyId).toBe('colony-1');
+    expect(idleEvent!.unitId).toBe('scout-1');
+    expect(idleEvent!.data.unitType).toBe('scout');
+    expect(idleEvent!.data.idleTicks).toBe(3);
+  });
+
+  it('does not emit unit_idle event before reaching threshold', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
+    const unit = makeUnit({ id: 'scout-1', type: 'scout', idleTicks: 0 });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [unit], hexes, []);
+
+    const idleEvent = result.events.find(e => e.type === 'unit_idle');
+    expect(idleEvent).toBeUndefined();
+  });
+
+  it('does not re-emit unit_idle event after threshold (only fires at exactly 3)', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ buildings: [{ type: 'farm', level: 1 }] });
+    const unit = makeUnit({ id: 'scout-1', type: 'scout', idleTicks: 3 });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [unit], hexes, []);
+
+    const idleEvent = result.events.find(e => e.type === 'unit_idle');
+    expect(idleEvent).toBeUndefined();
+    const updatedUnit = result.units.find(u => u.id === 'scout-1')!;
+    expect(updatedUnit.idleTicks).toBe(4);
+  });
+
+  it('newly trained units start with idleTicks 0', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 100, stone: 50, iron: 20, influence: 50 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }, { type: 'barracks', level: 1 }],
+    });
+    const hexes = makeHexRing(0, 0);
+
+    const trainAction: QueuedAction = {
+      id: 'action-1',
+      colonyId: 'colony-1',
+      type: 'train_unit',
+      params: { settlementId: 'settlement-1', unitType: 'scout' },
+    };
+
+    const result = resolveTick([colony], [settlement], [], hexes, [trainAction]);
+
+    const trainedUnit = result.units.find(u => u.type === 'scout');
+    expect(trainedUnit).toBeDefined();
+    expect(trainedUnit!.idleTicks).toBe(0);
+  });
+});
