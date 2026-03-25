@@ -53,7 +53,8 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
       };
     case 'famine':
       return {
-        foodDeficit: event.data.foodDeficit,
+        netFood: event.data.netFood,
+        severity: event.data.severity,
       };
     case 'desertion':
       return {
