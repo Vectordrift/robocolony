@@ -20,9 +20,9 @@ export const TERRAIN_COST = {
 export const UNIT_SPEED = {
     scout: 3,
     militia: 2,
-    soldier: 3,
+    soldier: 2,
     siege: 1,
-    settler: 2,
+    settler: 1,
 };
 // --- Vision Radius ---
 /** How far each unit type can see (in hex distance). */
