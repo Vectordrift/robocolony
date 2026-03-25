@@ -42,6 +42,7 @@ const VALID_ACTION_TYPES: Record<string, string[]> = {
   'upgrade_settlement': ['settlementId'],
   'attack': ['unitId', 'targetX', 'targetY'],
   'send_message': ['toColonyId', 'message'],
+  'explore': ['unitId'],
 };
 
 const MAX_ACTIONS_PER_TICK = 10;
@@ -112,6 +113,9 @@ async function validateOwnership(
     }
     if (action.type === 'attack' && unit[0].type === 'settler') {
       return { valid: false, error: `Settlers cannot attack. Use military units (scout, militia, soldier, siege).` };
+    }
+    if (action.type === 'explore' && unit[0].type !== 'scout') {
+      return { valid: false, error: `Unit ${params.unitId} is a ${unit[0].type}, not a scout. Only scouts can use the explore action.` };
     }
   }
 
@@ -377,3 +381,4 @@ export async function actionRoutes(app: FastifyInstance) {
     return rows[0];
   });
 }
+
