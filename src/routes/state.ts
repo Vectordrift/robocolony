@@ -6,9 +6,9 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, or, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { worlds, hexes, colonies, settlements, units } from '../db/schema/index.js';
+import { worlds, hexes, colonies, settlements, units, agreements } from '../db/schema/index.js';
 import { requireAuth } from '../middleware/index.js';
 import { TECH_TREE } from '../engine/tick.js';
 import type { TechId } from '../engine/tick.js';
@@ -203,6 +203,59 @@ export async function stateRoutes(app: FastifyInstance) {
       );
     }
 
+    // Load agreements involving this colony
+    const colonyAgreements = await db
+      .select()
+      .from(agreements)
+      .where(
+        and(
+          eq(agreements.worldId, worldId),
+          or(
+            eq(agreements.proposedBy, colony.id),
+            eq(agreements.proposedTo, colony.id),
+          ),
+        ),
+      );
+
+    // Gather partner IDs for name lookup
+    const agreementPartnerIds = new Set<string>();
+    for (const a of colonyAgreements) {
+      agreementPartnerIds.add(a.proposedBy === colony.id ? a.proposedTo : a.proposedBy);
+    }
+    // Ensure we have names for agreement partners
+    if (agreementPartnerIds.size > 0) {
+      const missingIds = [...agreementPartnerIds].filter(id => !knownColonies[id]);
+      if (missingIds.length > 0) {
+        const partnerRows = await db
+          .select({ id: colonies.id, name: colonies.name })
+          .from(colonies)
+          .where(eq(colonies.worldId, worldId));
+        for (const c of partnerRows) {
+          if (missingIds.includes(c.id)) {
+            knownColonies[c.id] = c.name;
+          }
+        }
+      }
+    }
+
+    // Filter to active/proposed only for state view
+    const visibleAgreements = colonyAgreements
+      .filter(a => a.status === 'active' || a.status === 'proposed')
+      .map(a => {
+        const partnerId = a.proposedBy === colony.id ? a.proposedTo : a.proposedBy;
+        return {
+          id: a.id,
+          type: a.type,
+          status: a.status,
+          partnerColonyId: partnerId,
+          partnerName: knownColonies[partnerId] ?? 'Unknown',
+          terms: a.terms,
+          proposedAtTick: a.proposedAtTick,
+          acceptedAtTick: a.acceptedAtTick,
+          direction: a.proposedBy === colony.id ? 'outgoing' : 'incoming',
+        };
+      });
+
     return {
       tick: world[0].currentTick,
       worldStatus: world[0].status,
@@ -218,6 +271,7 @@ export async function stateRoutes(app: FastifyInstance) {
         researched: (colonyData[0] as any)?.researchedTechs ?? [],
         queue: (colonyData[0] as any)?.researchQueue ?? [],
       },
+      agreements: visibleAgreements,
       settlements: colonySettlements.map((s) => ({
         id: s.id,
         name: s.name,

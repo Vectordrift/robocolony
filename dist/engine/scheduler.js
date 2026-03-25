@@ -27,6 +27,8 @@ const PUBLIC_EVENT_TYPES = new Set([
     'unit_destroyed',
     'shortage',
     'research_complete',
+    'agreement_accepted',
+    'agreement_broken',
 ]);
 /**
  * Build public-safe data for spectator feed.
@@ -85,6 +87,15 @@ function buildPublicData(event) {
             return {
                 techName: event.data.techName,
                 description: event.data.description,
+            };
+        case 'agreement_accepted':
+            return {
+                agreementType: event.data.agreementType,
+            };
+        case 'agreement_broken':
+            return {
+                agreementType: event.data.agreementType,
+                brokenByName: event.data.brokenByName,
             };
         default:
             return null;
@@ -233,8 +244,26 @@ export class TickScheduler {
                 type: a.type,
                 params: a.params,
             }));
+            // Load active/proposed agreements for this world
+            const dbAgreements = await this.db
+                .select()
+                .from(schema.agreements)
+                .where(and(eq(schema.agreements.worldId, this.worldId)));
+            const currentAgreements = dbAgreements
+                .filter(a => a.status === 'proposed' || a.status === 'active')
+                .map(a => ({
+                id: a.id,
+                worldId: a.worldId,
+                type: a.type,
+                proposedBy: a.proposedBy,
+                proposedTo: a.proposedTo,
+                status: a.status,
+                terms: (a.terms ?? {}),
+                proposedAtTick: a.proposedAtTick,
+                acceptedAtTick: a.acceptedAtTick ?? null,
+            }));
             // Resolve tick
-            const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick);
+            const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick, currentAgreements);
             // Persist results
             await this.db.transaction(async (tx) => {
                 // Update world tick
@@ -471,6 +500,33 @@ export class TickScheduler {
                             content: msg.content,
                             read: false,
                         });
+                    }
+                }
+                // Persist agreement mutations (create / update)
+                if (result.agreementMutations && result.agreementMutations.length > 0) {
+                    for (const mutation of result.agreementMutations) {
+                        if (mutation.type === 'create') {
+                            await tx.insert(schema.agreements).values({
+                                id: mutation.agreement.id,
+                                worldId: mutation.agreement.worldId,
+                                type: mutation.agreement.type,
+                                proposedBy: mutation.agreement.proposedBy,
+                                proposedTo: mutation.agreement.proposedTo,
+                                status: mutation.agreement.status,
+                                terms: mutation.agreement.terms,
+                                proposedAtTick: mutation.agreement.proposedAtTick,
+                                acceptedAtTick: mutation.agreement.acceptedAtTick,
+                            });
+                        }
+                        else if (mutation.type === 'update') {
+                            await tx
+                                .update(schema.agreements)
+                                .set({
+                                status: mutation.agreement.status,
+                                acceptedAtTick: mutation.agreement.acceptedAtTick,
+                            })
+                                .where(eq(schema.agreements.id, mutation.agreement.id));
+                        }
                     }
                 }
                 // Insert events

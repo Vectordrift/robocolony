@@ -94,6 +94,32 @@ export interface MessageRecord {
     content: string;
     read: boolean;
 }
+export type AgreementType = 'non_aggression' | 'trade' | 'alliance';
+export type AgreementStatus = 'proposed' | 'active' | 'rejected' | 'broken';
+export interface TradeTerms {
+    gives: Partial<Resources>;
+    receives: Partial<Resources>;
+}
+export interface Agreement {
+    id: string;
+    worldId: string;
+    type: AgreementType;
+    proposedBy: string;
+    proposedTo: string;
+    status: AgreementStatus;
+    terms: TradeTerms | Record<string, unknown>;
+    proposedAtTick: number;
+    acceptedAtTick: number | null;
+}
+/** Influence cost to break a trade agreement */
+export declare const BREAK_TRADE_COST = 50;
+/** Influence cost to break a non-aggression pact */
+export declare const BREAK_NAP_COST = 100;
+/** Influence cost to break an alliance */
+export declare const BREAK_ALLIANCE_COST = 200;
+export declare const BREAK_COSTS: Record<AgreementType, number>;
+/** Max ticks a proposal stays open before auto-expiring */
+export declare const PROPOSAL_EXPIRY_TICKS = 50;
 export interface ResearchQueueEntry {
     techId: string;
     ticksRemaining: number;
@@ -118,6 +144,12 @@ export interface TickResult {
     actionResults: ActionResult[];
     fogReveals: HexExploration[];
     newMessages: MessageRecord[];
+    /** Agreement mutations from this tick (propose/accept/reject/break) */
+    agreementMutations: AgreementMutation[];
+}
+export interface AgreementMutation {
+    type: 'create' | 'update';
+    agreement: Agreement;
 }
 /** Settlement tier multipliers for production */
 export declare const TIER_MULTIPLIER: Record<string, number>;
@@ -449,6 +481,34 @@ export interface ResearchResult {
  * Phase 2: Advance all research queues (decrement ticksRemaining)
  */
 export declare function resolveResearch(colonies: Colony[], settlements: Settlement[], actions: QueuedAction[]): ResearchResult;
-export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number): TickResult;
+export interface AgreementActionResult {
+    events: TickEvent[];
+    actionResults: ActionResult[];
+    mutations: AgreementMutation[];
+}
+/**
+ * Resolve propose_agreement, accept_agreement, reject_agreement, and break_agreement actions.
+ *
+ * propose_agreement: Creates a new agreement with status 'proposed'.
+ * accept_agreement: Changes status from 'proposed' to 'active'.
+ * reject_agreement: Changes status from 'proposed' to 'rejected'.
+ * break_agreement: Changes status from 'active' to 'broken'. Costs influence.
+ */
+export declare function resolveAgreementActions(colonies: Colony[], agreements: Agreement[], actions: QueuedAction[], currentTick: number): AgreementActionResult;
+export interface TradeTransferResult {
+    events: TickEvent[];
+}
+/**
+ * Execute active trade agreements: transfer resources between colonies each tick.
+ *
+ * For each active trade agreement:
+ * - Proposer gives resources to receiver (capped by stockpile)
+ * - Receiver gives resources to proposer (capped by stockpile)
+ * - Emits trade_transfer events for both parties
+ *
+ * If either party can't fully pay, the transfer is partial (pro-rated).
+ */
+export declare function resolveTradeTransfers(colonies: Colony[], agreements: Agreement[]): TradeTransferResult;
+export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number, agreements?: Agreement[]): TickResult;
 export {};
 //# sourceMappingURL=tick.d.ts.map

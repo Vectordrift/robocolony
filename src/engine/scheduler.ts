@@ -9,7 +9,7 @@ import { eq, and } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema/index.js';
 import { resolveTick } from './tick.js';
-import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction, MessageRecord, ResearchQueueEntry } from './tick.js';
+import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction, MessageRecord, ResearchQueueEntry, Agreement, AgreementMutation } from './tick.js';
 import { hexDistance } from './hex.js';
 import { nanoid } from 'nanoid';
 
@@ -34,6 +34,8 @@ const PUBLIC_EVENT_TYPES = new Set([
   'unit_destroyed',
   'shortage',
   'research_complete',
+  'agreement_accepted',
+  'agreement_broken',
 ]);
 
 /**
@@ -93,6 +95,15 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
       return {
         techName: event.data.techName,
         description: event.data.description,
+      };
+    case 'agreement_accepted':
+      return {
+        agreementType: event.data.agreementType,
+      };
+    case 'agreement_broken':
+      return {
+        agreementType: event.data.agreementType,
+        brokenByName: event.data.brokenByName,
       };
     default:
       return null;
@@ -272,8 +283,33 @@ export class TickScheduler {
         params: a.params as Record<string, unknown>,
       }));
 
+      // Load active/proposed agreements for this world
+      const dbAgreements = await this.db
+        .select()
+        .from(schema.agreements)
+        .where(
+          and(
+            eq(schema.agreements.worldId, this.worldId),
+            // Load proposed + active agreements (needed for accept/break/trade transfers)
+          ),
+        );
+
+      const currentAgreements: Agreement[] = dbAgreements
+        .filter(a => a.status === 'proposed' || a.status === 'active')
+        .map(a => ({
+          id: a.id,
+          worldId: a.worldId,
+          type: a.type as Agreement['type'],
+          proposedBy: a.proposedBy,
+          proposedTo: a.proposedTo,
+          status: a.status as Agreement['status'],
+          terms: (a.terms ?? {}) as Agreement['terms'],
+          proposedAtTick: a.proposedAtTick,
+          acceptedAtTick: a.acceptedAtTick ?? null,
+        }));
+
       // Resolve tick
-      const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick);
+      const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick, currentAgreements);
 
       // Persist results
       await this.db.transaction(async (tx) => {
@@ -516,6 +552,33 @@ export class TickScheduler {
               content: msg.content,
               read: false,
             });
+          }
+        }
+
+        // Persist agreement mutations (create / update)
+        if (result.agreementMutations && result.agreementMutations.length > 0) {
+          for (const mutation of result.agreementMutations) {
+            if (mutation.type === 'create') {
+              await tx.insert(schema.agreements).values({
+                id: mutation.agreement.id,
+                worldId: mutation.agreement.worldId,
+                type: mutation.agreement.type,
+                proposedBy: mutation.agreement.proposedBy,
+                proposedTo: mutation.agreement.proposedTo,
+                status: mutation.agreement.status,
+                terms: mutation.agreement.terms as any,
+                proposedAtTick: mutation.agreement.proposedAtTick,
+                acceptedAtTick: mutation.agreement.acceptedAtTick,
+              });
+            } else if (mutation.type === 'update') {
+              await tx
+                .update(schema.agreements)
+                .set({
+                  status: mutation.agreement.status,
+                  acceptedAtTick: mutation.agreement.acceptedAtTick,
+                })
+                .where(eq(schema.agreements.id, mutation.agreement.id));
+            }
           }
         }
 
