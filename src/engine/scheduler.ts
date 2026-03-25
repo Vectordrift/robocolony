@@ -10,7 +10,14 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/schema/index.js';
 import { resolveTick } from './tick.js';
 import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction } from './tick.js';
+import { hexDistance } from './hex.js';
 import { nanoid } from 'nanoid';
+
+/** How often (in ticks) to send compass signal events */
+const COMPASS_SIGNAL_INTERVAL = 25;
+
+/** Minimum ticks before first compass signal (let colonies establish first) */
+const COMPASS_SIGNAL_START = 25;
 
 /** Event types visible on the public feed (spectator view) */
 const PUBLIC_EVENT_TYPES = new Set([
@@ -368,6 +375,99 @@ export class TickScheduler {
                 result: 'Action type not yet implemented',
               },
             });
+          }
+        }
+
+        // --- Compass Signal: periodic directional hint toward nearest undiscovered colony ---
+        if (newTick >= COMPASS_SIGNAL_START && newTick % COMPASS_SIGNAL_INTERVAL === 0) {
+          // Get all colony home settlements
+          const allSettlements = await tx
+            .select({ id: schema.settlements.id, colonyId: schema.settlements.colonyId, hexX: schema.settlements.hexX, hexY: schema.settlements.hexY })
+            .from(schema.settlements)
+            .where(eq(schema.settlements.worldId, this.worldId));
+
+          // Group settlements by colony, using their first settlement as "home"
+          const colonyHomes = new Map<string, { q: number; r: number }>();
+          for (const s of allSettlements) {
+            if (!colonyHomes.has(s.colonyId)) {
+              colonyHomes.set(s.colonyId, { q: s.hexX, r: s.hexY });
+            }
+          }
+
+          // Get explored_by data for each hex to know which colonies are known
+          // A colony "knows" another colony if it has explored a hex with that colony's settlement
+          const settHexes = allSettlements.map(s => `(${s.hexX},${s.hexY})`);
+
+          for (const colony of result.colonies) {
+            if (colony.status !== 'active') continue;
+
+            const myHome = colonyHomes.get(colony.id);
+            if (!myHome) continue;
+
+            // Find nearest colony that this colony hasn't discovered yet
+            // Check which colonies this colony has seen (via fog reveals)
+            const knownColonyIds = new Set<string>();
+            knownColonyIds.add(colony.id); // Always know yourself
+
+            // Check all hexes explored by this colony for enemy settlements
+            for (const s of allSettlements) {
+              if (s.colonyId === colony.id) continue;
+              // Check if the hex containing this settlement is explored by us
+              const hexRow = dbHexes.find(h => h.x === s.hexX && h.y === s.hexY);
+              if (hexRow && Array.isArray(hexRow.exploredBy) && hexRow.exploredBy.includes(colony.id)) {
+                knownColonyIds.add(s.colonyId);
+              }
+            }
+
+            // Find nearest UNKNOWN colony
+            let nearestDist = Infinity;
+            let nearestHome: { q: number; r: number } | null = null;
+
+            for (const [otherId, otherHome] of colonyHomes.entries()) {
+              if (knownColonyIds.has(otherId)) continue;
+              const dist = hexDistance(myHome, otherHome);
+              if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestHome = otherHome;
+              }
+            }
+
+            if (nearestHome) {
+              // Calculate direction (8-point compass)
+              const dq = nearestHome.q - myHome.q;
+              const dr = nearestHome.r - myHome.r;
+              // Convert axial to approximate angle
+              // In axial coords: q increases to the right, r increases down-right
+              const x = dq + dr * 0.5; // approximate cartesian x
+              const y = dr * 0.866;     // approximate cartesian y (sqrt(3)/2)
+              const angle = Math.atan2(y, x) * (180 / Math.PI);
+
+              let direction: string;
+              if (angle >= -22.5 && angle < 22.5) direction = 'east';
+              else if (angle >= 22.5 && angle < 67.5) direction = 'southeast';
+              else if (angle >= 67.5 && angle < 112.5) direction = 'south';
+              else if (angle >= 112.5 && angle < 157.5) direction = 'southwest';
+              else if (angle >= 157.5 || angle < -157.5) direction = 'west';
+              else if (angle >= -157.5 && angle < -112.5) direction = 'northwest';
+              else if (angle >= -112.5 && angle < -67.5) direction = 'north';
+              else direction = 'northeast';
+
+              // Distance band (vague)
+              let distanceBand: string;
+              if (nearestDist <= 15) distanceBand = 'nearby';
+              else if (nearestDist <= 30) distanceBand = 'moderate';
+              else distanceBand = 'distant';
+
+              result.events.push({
+                type: 'compass_signal',
+                colonyId: colony.id,
+                data: {
+                  direction,
+                  distanceBand,
+                  message: `Scouts detect signs of activity to the ${direction}. The source appears ${distanceBand}.`,
+                },
+              });
+            }
           }
         }
 

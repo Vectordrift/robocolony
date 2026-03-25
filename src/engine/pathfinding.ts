@@ -35,9 +35,9 @@ export const UNIT_SPEED: Record<string, number> = {
 
 /** How far each unit type can see (in hex distance). */
 export const VISION_RADIUS: Record<string, number> = {
-  scout: 3,
+  scout: 4,
   militia: 1,
-  soldier: 1,
+  soldier: 2,
   siege: 1,
   settler: 1,
 };
