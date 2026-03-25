@@ -1,3 +1,4 @@
+
 /**
  * Tick engine — resolves one game tick.
  *
@@ -122,8 +123,8 @@ export const TIER_MULTIPLIER: Record<string, number> = {
 
 /** Building production per level */
 export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
-  farm:       { food: 10 },
-  lumberMill: { timber: 6 },
+  farm:       { food: 12 },
+  lumberMill: { timber: 4 },
   quarry:     { stone: 4 },
   mine:       { iron: 3 },
   barracks:   {},
@@ -133,11 +134,11 @@ export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
 
 /** Building upkeep per level (resources consumed per tick) */
 export const BUILDING_UPKEEP: Record<BuildingType, Partial<Resources>> = {
-  farm:       {},
-  lumberMill: {},
+  farm:       { timber: 1 },
+  lumberMill: { timber: 1 },
   quarry:     { timber: 1 },
   mine:       { timber: 1, food: 1 },
-  barracks:   { food: 2, iron: 1 },
+  barracks:   { food: 2, iron: 1, timber: 1 },
   granary:    { timber: 1 },
   market:     { food: 1 },
 };
@@ -182,7 +183,7 @@ export const VALID_BUILDING_TYPES: BuildingType[] = [
 
 /** Unit food upkeep per tick */
 export const UNIT_UPKEEP: Record<UnitType, number> = {
-  scout: 1,
+  scout: 0.5,
   militia: 2,
   soldier: 3,
   siege: 4,
@@ -190,7 +191,7 @@ export const UNIT_UPKEEP: Record<UnitType, number> = {
 };
 
 /** Population food consumption per person per tick */
-export const POP_FOOD_CONSUMPTION = 0.5;
+export const POP_FOOD_CONSUMPTION = 0.4;
 
 /** Unit training costs (resources needed to recruit) */
 export const UNIT_TRAINING_COSTS: Record<UnitType, Partial<Resources>> = {
@@ -261,7 +262,7 @@ export const MAX_POPULATION: Record<string, number> = {
 };
 
 /** Population growth rate: +1 per this many excess food */
-export const POP_GROWTH_PER_FOOD = 10;
+export const POP_GROWTH_PER_FOOD = 5;
 const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 
 // --- Helpers ---
@@ -1808,5 +1809,7 @@ export function resolveTick(
     fogReveals,
   };
 }
+
+
 
 
