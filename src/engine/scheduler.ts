@@ -236,6 +236,7 @@ export class TickScheduler {
         terrain: h.terrain,
         resources: (h.resources ?? { food: 0, timber: 0, stone: 0, iron: 0 }) as HexTileState['resources'],
         settlementId: h.settlementId,
+        exploredBy: h.exploredBy ?? [],
       }));
 
       const queuedActions: QueuedAction[] = dbActions.map(a => ({
@@ -511,6 +512,7 @@ export class TickScheduler {
     }
   }
 }
+
 
 
 
