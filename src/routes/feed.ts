@@ -153,7 +153,6 @@ export async function feedRoutes(app: FastifyInstance) {
         status: world.status,
         currentTick: world.currentTick,
         tickRate: world.tickRate,
-        maxColonies: world.maxColonies,
         colonyCount: colonyRows.length,
       },
       colonies: colonySummaries,

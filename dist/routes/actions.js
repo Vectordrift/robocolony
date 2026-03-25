@@ -44,10 +44,10 @@ function validateActionType(action) {
  */
 async function validateOwnership(colonyId, worldId, action) {
     const params = action.params;
-    // Check unit ownership
+    // Check unit ownership + type constraints
     if (params.unitId && typeof params.unitId === 'string') {
         const unit = await db
-            .select({ colonyId: units.colonyId })
+            .select({ colonyId: units.colonyId, type: units.type })
             .from(units)
             .where(and(eq(units.id, params.unitId), eq(units.worldId, worldId)))
             .limit(1);
@@ -56,6 +56,13 @@ async function validateOwnership(colonyId, worldId, action) {
         }
         if (unit[0].colonyId !== colonyId) {
             return { valid: false, error: `Unit ${params.unitId} does not belong to your colony` };
+        }
+        // Type-specific validation
+        if (action.type === 'found_settlement' && unit[0].type !== 'settler') {
+            return { valid: false, error: `Unit ${params.unitId} is a ${unit[0].type}, not a settler. Only settlers can found settlements.` };
+        }
+        if (action.type === 'attack' && unit[0].type === 'settler') {
+            return { valid: false, error: `Settlers cannot attack. Use military units (scout, militia, soldier, siege).` };
         }
     }
     // Check settlement ownership

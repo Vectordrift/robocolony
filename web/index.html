@@ -308,7 +308,8 @@
     .event-item.movement::before,
     .event-item.unit_moved::before,
     .event-item.movement_complete::before { background: var(--accent); }
-    .event-item.combat::before,
+    .event-item.combat_resolved::before,
+    .event-item.unit_destroyed::before,
     .event-item.famine::before,
     .event-item.desertion::before,
     .event-item.shortage::before { background: var(--red); }
@@ -602,7 +603,7 @@
       production: (e) => e.type === 'production' || e.type === 'famine' || e.type === 'shortage' || e.type === '_repeated',
       movement: (e) => e.type.includes('movement') || e.type === 'unit_moved' || e.type === '_repeated',
       build: (e) => e.type.includes('build') || e.type === 'settlement_founded' || e.type === '_repeated',
-      military: (e) => ['combat', 'desertion', 'unit_trained', '_repeated'].includes(e.type),
+      military: (e) => ['combat_resolved', 'unit_destroyed', 'desertion', 'unit_trained', '_repeated'].includes(e.type),
     };
 
     document.querySelectorAll('.feed-controls button').forEach((btn) => {
@@ -630,21 +631,21 @@
           return parts.length > 0 ? parts.join(', ') : '<span class="resource">no change</span>';
         }
         case 'unit_moved':
-          return `Unit moved to (${d.to?.x}, ${d.to?.y}) — ${d.remainingPath || 0} steps remaining`;
+          return `🚶 Unit moved — ${d.remainingPath || 0} steps remaining`;
         case 'movement_complete':
-          return `Unit arrived at (${d.hexX}, ${d.hexY})`;
+          return `📍 Unit arrived at destination`;
         case 'movement_queued':
-          return `Movement queued: ${d.pathLength} steps to (${d.to?.x}, ${d.to?.y})`;
+          return `🗺️ Movement queued: ${d.pathLength} steps`;
         case 'movement_failed':
-          return `Movement failed: ${d.reason || 'no path'}`;
+          return `❌ Movement failed: ${d.reason || 'no path'}`;
         case 'build_started':
           return `🔨 Construction started: <span class="resource">${d.buildingType}</span> (${d.ticksRemaining} ticks)`;
         case 'build_complete':
           return `✅ Building complete: <span class="resource">${d.buildingType}</span> (level ${d.level})`;
         case 'settlement_founded':
-          return `🏗️ Settlement founded: <span class="colony-ref">${d.name}</span> at (${d.hexX}, ${d.hexY})`;
+          return `🏗️ Settlement founded: <span class="colony-ref">${d.name}</span>`;
         case 'unit_trained':
-          return `⚔️ ${d.unitType} trained at (${d.hexX}, ${d.hexY})`;
+          return `⚔️ <span class="resource">${d.unitType}</span> trained`;
         case 'famine':
           return d.foodDeficit != null
             ? `<span class="negative">⚠️ Famine! Food deficit: ${d.foodDeficit}</span>`
@@ -656,8 +657,10 @@
           return `<span class="negative">💀 ${d.unitType || d.summary || 'unit'} deserted</span>`;
         case 'shortage':
           return `<span class="negative">📦 ${d.resource} depleted!</span>`;
-        case 'combat':
-          return `⚔️ Combat at (${d.hexX}, ${d.hexY})`;
+        case 'combat_resolved':
+          return `⚔️ Combat! Losses: ${d.attackerLosses || 0} attacker, ${d.defenderLosses || 0} defender`;
+        case 'unit_destroyed':
+          return `<span class="negative">💀 ${d.unitType || 'unit'} destroyed${d.cause ? ' (' + d.cause + ')' : ''}</span>`;
         case '_repeated':
           return `<span style="color:var(--text-dim);font-style:italic">… ${d.count} identical tick${d.count > 1 ? 's' : ''} skipped</span>`;
         default:

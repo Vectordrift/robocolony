@@ -16,9 +16,9 @@ const PUBLIC_EVENT_TYPES = new Set([
     'famine',
     'desertion',
     'settlement_upgraded',
-    'combat',
+    'combat_resolved',
+    'unit_destroyed',
     'shortage',
-    'unit_idle',
 ]);
 /**
  * Build public-safe data for spectator feed.
@@ -61,10 +61,17 @@ function buildPublicData(event) {
                 resource: event.data.resource,
                 deficit: event.data.deficit,
             };
-        case 'unit_idle':
+        case 'combat_resolved':
+            return {
+                attackerColonyId: event.data.attackerColonyId,
+                defenderColonyId: event.data.defenderColonyId,
+                attackerLosses: event.data.attackerLosses,
+                defenderLosses: event.data.defenderLosses,
+            };
+        case 'unit_destroyed':
             return {
                 unitType: event.data.unitType,
-                idleTicks: event.data.idleTicks,
+                cause: event.data.cause || 'combat',
             };
         default:
             return null;

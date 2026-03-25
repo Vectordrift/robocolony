@@ -1859,6 +1859,25 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
     }
     // Remove deserted units
     const survivingUnits = updatedUnits.filter(u => !desertedUnitIds.includes(u.id));
+    // Emit action_failed events so failures appear in the event feed
+    for (const ar of actionResults) {
+        if (ar.status === 'failed') {
+            // Find the original action to get colony context
+            const action = actions.find(a => a.id === ar.actionId);
+            if (action) {
+                events.push({
+                    type: 'action_failed',
+                    colonyId: action.colonyId,
+                    data: {
+                        actionId: ar.actionId,
+                        actionType: action.type,
+                        reason: ar.result || 'Unknown error',
+                        params: action.params,
+                    },
+                });
+            }
+        }
+    }
     return {
         colonies: updatedColonies,
         settlements: updatedSettlements,
