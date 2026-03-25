@@ -33,6 +33,7 @@ const PUBLIC_EVENT_TYPES = new Set([
   'combat_resolved',
   'unit_destroyed',
   'shortage',
+  'settlement_captured',
 ]);
 
 /**
@@ -87,6 +88,12 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
       return {
         unitType: event.data.unitType,
         cause: event.data.cause || 'combat',
+      };
+    case 'settlement_captured':
+      return {
+        name: event.data.name,
+        previousTier: event.data.previousTier,
+        newTier: event.data.newTier,
       };
     default:
       return null;
