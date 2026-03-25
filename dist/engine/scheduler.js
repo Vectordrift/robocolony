@@ -200,6 +200,7 @@ export class TickScheduler {
                 terrain: h.terrain,
                 resources: (h.resources ?? { food: 0, timber: 0, stone: 0, iron: 0 }),
                 settlementId: h.settlementId,
+            exploredBy: h.exploredBy ?? [],
                 exploredBy: (h.exploredBy ?? []),
             }));
             const queuedActions = dbActions.map(a => ({
