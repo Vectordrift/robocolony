@@ -37,9 +37,10 @@ export function hexesWithinRadius(center, radius, validHexes) {
  * @param movedUnits - Units that moved this tick, with their new positions
  * @param allHexCoords - Set of all valid hex coordinate keys ("q,r")
  * @param alreadyExplored - Map of "colonyId:q,r" → true for hexes already explored
+ * @param intel - Optional map intel for scouting reports
  * @returns Hexes to reveal and events
  */
-export function computeFogReveals(movedUnits, allHexCoords, alreadyExplored) {
+export function computeFogReveals(movedUnits, allHexCoords, alreadyExplored, intel) {
     const reveals = [];
     const events = [];
     // Track newly revealed hexes per colony to avoid duplicate events
@@ -81,6 +82,46 @@ export function computeFogReveals(movedUnits, allHexCoords, alreadyExplored) {
                     newHexCount: newCount,
                 },
             });
+            // Scouting reports: check newly revealed hexes for enemy presence
+            if (intel) {
+                const colonyReveals = newRevealsPerColony.get(unit.colonyId);
+                if (colonyReveals) {
+                    for (const hexKey of colonyReveals) {
+                        // Enemy settlement discovered
+                        const settlement = intel.settlementHexes.get(hexKey);
+                        if (settlement && settlement.colonyId !== unit.colonyId) {
+                            events.push({
+                                type: 'enemy_settlement_discovered',
+                                colonyId: unit.colonyId,
+                                data: {
+                                    enemyColonyId: settlement.colonyId,
+                                    settlementName: settlement.name,
+                                    scoutUnitId: unit.id,
+                                    scoutUnitType: unit.type,
+                                },
+                            });
+                        }
+                        // Enemy units discovered
+                        const enemyUnits = intel.unitHexes.get(hexKey);
+                        if (enemyUnits) {
+                            const foreignUnits = enemyUnits.filter(u => u.colonyId !== unit.colonyId);
+                            if (foreignUnits.length > 0) {
+                                events.push({
+                                    type: 'enemy_units_discovered',
+                                    colonyId: unit.colonyId,
+                                    data: {
+                                        enemyColonyId: foreignUnits[0].colonyId,
+                                        unitCount: foreignUnits.length,
+                                        unitTypes: [...new Set(foreignUnits.map(u => u.type))],
+                                        scoutUnitId: unit.id,
+                                        scoutUnitType: unit.type,
+                                    },
+                                });
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     return { reveals, events };

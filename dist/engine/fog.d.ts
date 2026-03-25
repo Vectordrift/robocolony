@@ -27,15 +27,29 @@ export interface FogRevealResult {
  * Returns coordinates that exist in the provided hex set.
  */
 export declare function hexesWithinRadius(center: HexCoord, radius: number, validHexes: Set<string>): HexCoord[];
+/** Info about entities on the map, used for scouting reports */
+export interface MapIntel {
+    /** Map of "q,r" → colonyId for enemy settlements */
+    settlementHexes: Map<string, {
+        colonyId: string;
+        name: string;
+    }>;
+    /** Map of "q,r" → array of enemy units */
+    unitHexes: Map<string, Array<{
+        colonyId: string;
+        type: string;
+    }>>;
+}
 /**
  * Compute fog-of-war reveals for units that moved this tick.
  *
  * @param movedUnits - Units that moved this tick, with their new positions
  * @param allHexCoords - Set of all valid hex coordinate keys ("q,r")
  * @param alreadyExplored - Map of "colonyId:q,r" → true for hexes already explored
+ * @param intel - Optional map intel for scouting reports
  * @returns Hexes to reveal and events
  */
-export declare function computeFogReveals(movedUnits: Unit[], allHexCoords: Set<string>, alreadyExplored: Map<string, boolean>): FogRevealResult;
+export declare function computeFogReveals(movedUnits: Unit[], allHexCoords: Set<string>, alreadyExplored: Map<string, boolean>, intel?: MapIntel): FogRevealResult;
 /**
  * Compute initial fog reveal for a new colony's starting position.
  * Uses the same logic as unit movement but with a fixed radius.

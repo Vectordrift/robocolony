@@ -74,9 +74,84 @@ export async function stateRoutes(app) {
             .where(eq(units.colonyId, colony.id));
         // Get visible map (fog of war)
         const visibleMap = await getVisibleHexes(worldId, colony.id);
+        // Get world radius for map size hint
+        const worldMeta = await db
+            .select({ mapRadius: worlds.mapRadius })
+            .from(worlds)
+            .where(eq(worlds.id, worldId))
+            .limit(1);
+        // Find enemy units and settlements on visible hexes
+        const visibleCoords = visibleMap.map(h => ({ x: h.x, y: h.y }));
+        let enemyUnitsOnMap = [];
+        let enemySettlementsOnMap = [];
+        if (visibleCoords.length > 0) {
+            // Get all enemy units on hexes visible to this colony
+            const allVisibleUnits = await db
+                .select({
+                id: units.id,
+                colonyId: units.colonyId,
+                type: units.type,
+                hexX: units.hexX,
+                hexY: units.hexY,
+                health: units.health,
+            })
+                .from(units)
+                .where(and(eq(units.worldId, worldId), sql `${units.colonyId} != ${colony.id}`));
+            // Filter to only units on visible hexes
+            const visibleSet = new Set(visibleCoords.map(c => `${c.x},${c.y}`));
+            enemyUnitsOnMap = allVisibleUnits
+                .filter(u => visibleSet.has(`${u.hexX},${u.hexY}`))
+                .map(u => ({
+                id: u.id,
+                colonyId: u.colonyId,
+                type: u.type,
+                hex: { x: u.hexX, y: u.hexY },
+                health: u.health,
+            }));
+            // Get enemy settlements on visible hexes
+            const visibleSettlementIds = visibleMap
+                .filter(h => h.settlementId !== null)
+                .map(h => h.settlementId);
+            if (visibleSettlementIds.length > 0) {
+                const allSettlements = await db
+                    .select({
+                    id: settlements.id,
+                    colonyId: settlements.colonyId,
+                    name: settlements.name,
+                    hexX: settlements.hexX,
+                    hexY: settlements.hexY,
+                    tier: settlements.tier,
+                })
+                    .from(settlements)
+                    .where(and(eq(settlements.worldId, worldId), sql `${settlements.colonyId} != ${colony.id}`));
+                enemySettlementsOnMap = allSettlements
+                    .filter(s => visibleSet.has(`${s.hexX},${s.hexY}`))
+                    .map(s => ({
+                    id: s.id,
+                    colonyId: s.colonyId,
+                    name: s.name,
+                    hex: { x: s.hexX, y: s.hexY },
+                    tier: s.tier,
+                }));
+            }
+        }
+        // Get colony names for enemy reference
+        const enemyColonyIds = new Set([
+            ...enemyUnitsOnMap.map(u => u.colonyId),
+            ...enemySettlementsOnMap.map(s => s.colonyId),
+        ]);
+        let knownColonies = {};
+        if (enemyColonyIds.size > 0) {
+            const colRows = await db
+                .select({ id: colonies.id, name: colonies.name })
+                .from(colonies)
+                .where(eq(colonies.worldId, worldId));
+            knownColonies = Object.fromEntries(colRows.filter(c => enemyColonyIds.has(c.id)).map(c => [c.id, c.name]));
+        }
         return {
             tick: world[0].currentTick,
             worldStatus: world[0].status,
+            mapRadius: worldMeta[0]?.mapRadius ?? null,
             colony: {
                 id: colony.id,
                 name: colony.name,
@@ -102,6 +177,11 @@ export async function stateRoutes(app) {
                 morale: u.morale,
                 movementQueue: u.movementQueue,
             })),
+            intel: {
+                enemyUnits: enemyUnitsOnMap,
+                enemySettlements: enemySettlementsOnMap,
+                knownColonies,
+            },
             map: visibleMap,
         };
     });

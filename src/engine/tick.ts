@@ -14,7 +14,7 @@ import type { HexResources } from './mapgen.js';
 import { findPath, movementStepsThisTick, createHexLookup } from './pathfinding.js';
 import type { HexLookup } from './pathfinding.js';
 import { computeFogReveals, hexesWithinRadius } from './fog.js';
-import type { HexExploration } from './fog.js';
+import type { HexExploration, MapIntel } from './fog.js';
 
 // --- Types ---
 
@@ -1958,7 +1958,19 @@ export function resolveTick(
       }
     }
 
-    const fogResult = computeFogReveals(movedUnits, allHexCoords, alreadyExplored);
+    // Build intel map for scouting reports
+    const settlementHexes = new Map<string, { colonyId: string; name: string }>();
+    for (const s of updatedSettlements) {
+      settlementHexes.set(`${s.hexX},${s.hexY}`, { colonyId: s.colonyId, name: s.name });
+    }
+    const unitHexes = new Map<string, Array<{ colonyId: string; type: string }>>();
+    for (const u of updatedUnits) {
+      const key = `${u.hexX},${u.hexY}`;
+      if (!unitHexes.has(key)) unitHexes.set(key, []);
+      unitHexes.get(key)!.push({ colonyId: u.colonyId, type: u.type });
+    }
+
+    const fogResult = computeFogReveals(movedUnits, allHexCoords, alreadyExplored, { settlementHexes, unitHexes });
     fogReveals.push(...fogResult.reveals);
     events.push(...fogResult.events);
   }
@@ -2346,6 +2358,26 @@ export function resolveTick(
 
   // Remove deserted units
   const survivingUnits = updatedUnits.filter(u => !desertedUnitIds.includes(u.id));
+
+  // Emit action_failed events so failures appear in the event feed
+  for (const ar of actionResults) {
+    if (ar.status === 'failed') {
+      // Find the original action to get colony context
+      const action = actions.find(a => a.id === ar.actionId);
+      if (action) {
+        events.push({
+          type: 'action_failed',
+          colonyId: action.colonyId,
+          data: {
+            actionId: ar.actionId,
+            actionType: action.type,
+            reason: ar.result || 'Unknown error',
+            params: action.params,
+          },
+        });
+      }
+    }
+  }
 
   return {
     colonies: updatedColonies,

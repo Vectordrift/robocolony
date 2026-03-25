@@ -1505,7 +1505,19 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
                 }
             }
         }
-        const fogResult = computeFogReveals(movedUnits, allHexCoords, alreadyExplored);
+        // Build intel map for scouting reports
+        const settlementHexes = new Map();
+        for (const s of updatedSettlements) {
+            settlementHexes.set(`${s.hexX},${s.hexY}`, { colonyId: s.colonyId, name: s.name });
+        }
+        const unitHexes = new Map();
+        for (const u of updatedUnits) {
+            const key = `${u.hexX},${u.hexY}`;
+            if (!unitHexes.has(key))
+                unitHexes.set(key, []);
+            unitHexes.get(key).push({ colonyId: u.colonyId, type: u.type });
+        }
+        const fogResult = computeFogReveals(movedUnits, allHexCoords, alreadyExplored, { settlementHexes, unitHexes });
         fogReveals.push(...fogResult.reveals);
         events.push(...fogResult.events);
     }
