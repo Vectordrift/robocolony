@@ -2019,12 +2019,202 @@ export function resolveResearch(colonies, settlements, actions) {
     }
     return { events, actionResults };
 }
-export function resolveTick(colonies, settlements, units, hexes, actions = [], combatSeed, worldId, currentTick) {
+export const BREAK_TRADE_COST = 50;
+export const BREAK_COSTS = {
+    non_aggression: 30,
+    trade: 50,
+    alliance: 100,
+};
+export const PROPOSAL_EXPIRY_TICKS = 50;
+/**
+ * Resolve propose/accept/reject/break agreement actions.
+ */
+export function resolveAgreementActions(colonies, agreements, actions, currentTick) {
+    const events = [];
+    const actionResults = [];
+    const mutations = [];
+    const agreementActions = actions.filter(a => ['propose_agreement', 'accept_agreement', 'reject_agreement', 'break_agreement'].includes(a.type));
+    for (const action of agreementActions) {
+        const colony = colonies.find(c => c.id === action.colonyId);
+        if (!colony) {
+            actionResults.push({ actionId: action.id, status: 'failed', result: 'Colony not found' });
+            continue;
+        }
+        if (action.type === 'propose_agreement') {
+            const targetColonyId = action.params?.targetColonyId;
+            const agreementType = action.params?.agreementType;
+            if (!targetColonyId || !agreementType) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: 'Missing targetColonyId or agreementType' });
+                continue;
+            }
+            const targetColony = colonies.find(c => c.id === targetColonyId);
+            if (!targetColony) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: 'Target colony not found' });
+                continue;
+            }
+            const existing = agreements.find(a => a.type === agreementType &&
+                (a.status === 'proposed' || a.status === 'active') &&
+                ((a.proposedBy === colony.id && a.proposedTo === targetColonyId) ||
+                    (a.proposedBy === targetColonyId && a.proposedTo === colony.id)));
+            if (existing) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: `Already have ${existing.status} ${agreementType} agreement` });
+                continue;
+            }
+            const newAgreement = {
+                id: `agr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+                worldId: '',
+                type: agreementType,
+                proposedBy: colony.id,
+                proposedTo: targetColonyId,
+                status: 'proposed',
+                terms: action.params?.terms || {},
+                proposedAtTick: currentTick,
+                acceptedAtTick: null,
+            };
+            mutations.push({ type: 'create', agreement: newAgreement });
+            actionResults.push({ actionId: action.id, status: 'resolved' });
+            events.push({ type: 'agreement_proposed', colonyId: colony.id, data: { agreementId: newAgreement.id, agreementType, targetColonyId, visibility: [colony.id, targetColonyId] } });
+        }
+        if (action.type === 'accept_agreement') {
+            const agreementId = action.params?.agreementId;
+            const agreement = agreements.find(a => a.id === agreementId);
+            if (!agreement) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: 'Agreement not found' });
+                continue;
+            }
+            if (agreement.proposedTo !== colony.id) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: 'Only the recipient can accept' });
+                continue;
+            }
+            if (agreement.status !== 'proposed') {
+                actionResults.push({ actionId: action.id, status: 'failed', result: `Agreement is ${agreement.status}` });
+                continue;
+            }
+            agreement.status = 'active';
+            agreement.acceptedAtTick = currentTick;
+            mutations.push({ type: 'update', agreement: { ...agreement } });
+            actionResults.push({ actionId: action.id, status: 'resolved' });
+            events.push({ type: 'agreement_accepted', colonyId: colony.id, data: { agreementId, agreementType: agreement.type, partnerColonyId: agreement.proposedBy, visibility: [colony.id, agreement.proposedBy] } });
+        }
+        if (action.type === 'reject_agreement') {
+            const agreementId = action.params?.agreementId;
+            const agreement = agreements.find(a => a.id === agreementId);
+            if (!agreement) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: 'Agreement not found' });
+                continue;
+            }
+            if (agreement.proposedTo !== colony.id) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: 'Only the recipient can reject' });
+                continue;
+            }
+            if (agreement.status !== 'proposed') {
+                actionResults.push({ actionId: action.id, status: 'failed', result: `Agreement is ${agreement.status}` });
+                continue;
+            }
+            agreement.status = 'rejected';
+            mutations.push({ type: 'update', agreement: { ...agreement } });
+            actionResults.push({ actionId: action.id, status: 'resolved' });
+            events.push({ type: 'agreement_rejected', colonyId: colony.id, data: { agreementId, agreementType: agreement.type, visibility: [colony.id, agreement.proposedBy] } });
+        }
+        if (action.type === 'break_agreement') {
+            const agreementId = action.params?.agreementId;
+            const agreement = agreements.find(a => a.id === agreementId);
+            if (!agreement) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: 'Agreement not found' });
+                continue;
+            }
+            if (agreement.status !== 'active') {
+                actionResults.push({ actionId: action.id, status: 'failed', result: `Agreement is ${agreement.status}` });
+                continue;
+            }
+            if (agreement.proposedBy !== colony.id && agreement.proposedTo !== colony.id) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: 'Not party to this agreement' });
+                continue;
+            }
+            const influenceCost = BREAK_COSTS[agreement.type] || 50;
+            if ((colony.resources?.influence ?? 0) < influenceCost) {
+                actionResults.push({ actionId: action.id, status: 'failed', result: `Need ${influenceCost} influence` });
+                continue;
+            }
+            colony.resources.influence = (colony.resources.influence ?? 0) - influenceCost;
+            agreement.status = 'broken';
+            mutations.push({ type: 'update', agreement: { ...agreement } });
+            actionResults.push({ actionId: action.id, status: 'resolved' });
+            const partnerId = agreement.proposedBy === colony.id ? agreement.proposedTo : agreement.proposedBy;
+            events.push({ type: 'agreement_broken', colonyId: colony.id, data: { agreementId, agreementType: agreement.type, brokenBy: colony.id, influenceCost, visibility: [colony.id, partnerId] } });
+        }
+    }
+    // Expire old proposals
+    for (const agreement of agreements) {
+        if (agreement.status === 'proposed' && (currentTick - agreement.proposedAtTick) >= PROPOSAL_EXPIRY_TICKS) {
+            agreement.status = 'rejected';
+            mutations.push({ type: 'update', agreement: { ...agreement } });
+            events.push({ type: 'agreement_expired', colonyId: agreement.proposedBy, data: { agreementId: agreement.id, agreementType: agreement.type, visibility: [agreement.proposedBy, agreement.proposedTo] } });
+        }
+    }
+    return { events, actionResults, mutations };
+}
+/**
+ * Transfer resources between colonies with active trade agreements.
+ */
+export function resolveTradeTransfers(colonies, agreements) {
+    const events = [];
+    const activeTradeAgreements = agreements.filter(a => a.type === 'trade' && a.status === 'active');
+    for (const agreement of activeTradeAgreements) {
+        const terms = agreement.terms;
+        if (!terms?.gives || !terms?.receives)
+            continue;
+        const giver = colonies.find(c => c.id === agreement.proposedBy);
+        const receiver = colonies.find(c => c.id === agreement.proposedTo);
+        if (!giver || !receiver)
+            continue;
+        let canTransfer = true;
+        for (const [res, amount] of Object.entries(terms.gives)) {
+            if ((giver.resources[res] ?? 0) < (amount ?? 0)) {
+                canTransfer = false;
+                break;
+            }
+        }
+        if (!canTransfer)
+            continue;
+        for (const [res, amount] of Object.entries(terms.receives)) {
+            if ((receiver.resources[res] ?? 0) < (amount ?? 0)) {
+                canTransfer = false;
+                break;
+            }
+        }
+        if (!canTransfer)
+            continue;
+        for (const [res, amount] of Object.entries(terms.gives)) {
+            const key = res;
+            giver.resources[key] = (giver.resources[key] ?? 0) - (amount ?? 0);
+            receiver.resources[key] = (receiver.resources[key] ?? 0) + (amount ?? 0);
+        }
+        for (const [res, amount] of Object.entries(terms.receives)) {
+            const key = res;
+            receiver.resources[key] = (receiver.resources[key] ?? 0) - (amount ?? 0);
+            giver.resources[key] = (giver.resources[key] ?? 0) + (amount ?? 0);
+        }
+        events.push({ type: 'trade_transfer', colonyId: giver.id, data: { agreementId: agreement.id, from: giver.id, to: receiver.id, visibility: [giver.id, receiver.id] } });
+    }
+    return { colonies, events };
+}
+export function resolveTick(colonies, settlements, units, hexes, actions = [], combatSeed, worldId, currentTick, agreements) {
     const events = [];
     const desertedUnitIds = [];
     let actionResults = [];
     let fogReveals = [];
     let newMessages = [];
+    let agreementMutations = [];
+    // --- Agreement resolution (before other actions) ---
+    {
+        const agreementResult = resolveAgreementActions(colonies, agreements || [], actions, currentTick || 0);
+        events.push(...agreementResult.events);
+        actionResults.push(...agreementResult.actionResults);
+        agreementMutations = agreementResult.mutations;
+        const agreementTypes = new Set(['propose_agreement', 'accept_agreement', 'reject_agreement', 'break_agreement']);
+        actions = actions.filter(a => !agreementTypes.has(a.type));
+    }
     // --- Deduplicate actions per unit ---
     // If multiple move/attack actions target the same unit, only keep the last one.
     // This prevents performance issues from processing many pathfinding calls for one unit.
@@ -2377,6 +2567,11 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
                 }
             }
         }
+        // --- Trade agreement transfers ---
+        if (agreements && agreements.length > 0) {
+            const tradeResult = resolveTradeTransfers(colonies, agreements);
+            events.push(...tradeResult.events);
+        }
         // --- Stockpile decay: resources above cap decay each tick ---
         // Cap is determined by the highest-tier settlement the colony owns.
         // Granary buildings add bonus capacity.
@@ -2668,6 +2863,7 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         actionResults,
         fogReveals,
         newMessages,
+        agreementMutations,
     };
 }
 //# sourceMappingURL=tick.js.map

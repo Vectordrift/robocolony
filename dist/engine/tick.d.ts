@@ -118,6 +118,7 @@ export interface TickResult {
     actionResults: ActionResult[];
     fogReveals: HexExploration[];
     newMessages: MessageRecord[];
+    agreementMutations: AgreementMutation[];
 }
 /** Settlement tier multipliers for production */
 export declare const TIER_MULTIPLIER: Record<string, number>;
@@ -449,6 +450,47 @@ export interface ResearchResult {
  * Phase 2: Advance all research queues (decrement ticksRemaining)
  */
 export declare function resolveResearch(colonies: Colony[], settlements: Settlement[], actions: QueuedAction[]): ResearchResult;
-export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number): TickResult;
+export type AgreementType = 'non_aggression' | 'trade' | 'alliance';
+export type AgreementStatus = 'proposed' | 'active' | 'rejected' | 'broken';
+export interface TradeTerms {
+    gives: Partial<Resources>;
+    receives: Partial<Resources>;
+}
+export interface Agreement {
+    id: string;
+    worldId: string;
+    type: AgreementType;
+    proposedBy: string;
+    proposedTo: string;
+    status: AgreementStatus;
+    terms: TradeTerms | Record<string, unknown>;
+    proposedAtTick: number;
+    acceptedAtTick: number | null;
+}
+export interface AgreementMutation {
+    type: 'create' | 'update';
+    agreement: Agreement;
+}
+export interface AgreementActionResult {
+    events: TickEvent[];
+    actionResults: ActionResult[];
+    mutations: AgreementMutation[];
+}
+export interface TradeTransferResult {
+    colonies: Colony[];
+    events: TickEvent[];
+}
+export declare const BREAK_TRADE_COST = 50;
+export declare const BREAK_COSTS: Record<AgreementType, number>;
+export declare const PROPOSAL_EXPIRY_TICKS = 50;
+/**
+ * Resolve propose/accept/reject/break agreement actions.
+ */
+export declare function resolveAgreementActions(colonies: Colony[], agreements: Agreement[], actions: QueuedAction[], currentTick: number): AgreementActionResult;
+/**
+ * Transfer resources between colonies with active trade agreements.
+ */
+export declare function resolveTradeTransfers(colonies: Colony[], agreements: Agreement[]): TradeTransferResult;
+export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number, agreements?: Agreement[]): TickResult;
 export {};
 //# sourceMappingURL=tick.d.ts.map
