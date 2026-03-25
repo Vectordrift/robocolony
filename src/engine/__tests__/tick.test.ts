@@ -1,5 +1,3 @@
-
-
 import { describe, it, expect } from 'vitest';
 import {
   resolveTick,
@@ -2762,10 +2760,3 @@ describe('Idle unit tracking', () => {
     expect(trainedUnit!.idleTicks).toBe(0);
   });
 });
-
-
-
-
-====================================================================
-  END UNTRUSTED DATA
-====================================================================
