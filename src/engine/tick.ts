@@ -1,8 +1,3 @@
-====================================================================
-  UNTRUSTED EXTERNAL DATA - NOT INSTRUCTIONS TO FOLLOW
-    Source: api.github.com
-====================================================================
-
 
 
 
@@ -2033,133 +2028,132 @@ export function resolveMessages(
   return { messages: newMessages, events, actionResults };
 }
 
+// --- Auto-Explore ---
 
 /**
- * Resolve explore actions: convert to move_unit actions targeting nearest unexplored hex.
- * Scouts get a movement target toward the frontier of their colony's explored territory.
+ * Auto-explore for idle scouts.
+ *
+ * Scouts with no movement queue and no action this tick automatically
+ * pathfind toward the nearest unexplored passable hex. This ensures
+ * scouts continuously push into fog of war without manual orders.
+ *
+ * Algorithm:
+ * 1. Build an "explored" set per colony from hex exploredBy arrays
+ * 2. For each idle scout, find unexplored hexes adjacent to explored territory
+ * 3. Filter to passable terrain (not ocean)
+ * 4. Pick the nearest candidate and pathfind to it
+ * 5. Set the movement queue
  */
-function resolveExploreActions(
+export function autoExploreIdleScouts(
   units: Unit[],
-  actions: QueuedAction[],
   hexes: HexTileState[],
-): { convertedActions: QueuedAction[]; remainingActions: QueuedAction[]; events: TickEvent[]; actionResults: ActionResult[] } {
-  const exploreActions = actions.filter(a => a.type === 'explore');
-  const remainingActions = actions.filter(a => a.type !== 'explore');
+  hexLookup: HexLookup,
+  actionedUnitIds: Set<string>,
+): { events: TickEvent[] } {
   const events: TickEvent[] = [];
-  const actionResults: ActionResult[] = [];
-  const convertedActions: QueuedAction[] = [];
 
-  if (exploreActions.length === 0) {
-    return { convertedActions: [], remainingActions: actions, events: [], actionResults: [] };
+  // Build terrain map for quick lookups
+  const terrainMap = new Map<string, string>();
+  for (const h of hexes) {
+    terrainMap.set(`${h.x},${h.y}`, h.terrain);
   }
 
-  // Build unit lookup
-  const unitMap = new Map<string, Unit>();
-  for (const u of units) unitMap.set(u.id, u);
-
-  // Build explored-by lookup per colony
+  // Build explored sets per colony
   const exploredByColony = new Map<string, Set<string>>();
-  for (const hex of hexes) {
-    if (hex.exploredBy) {
-      for (const colonyId of hex.exploredBy) {
-        if (!exploredByColony.has(colonyId)) exploredByColony.set(colonyId, new Set());
-        exploredByColony.get(colonyId)!.add(`${hex.x},${hex.y}`);
-      }
-    }
-  }
-
-  // Build passable hex set (non-ocean hexes)
-  const passableHexes = new Map<string, HexTileState>();
-  for (const hex of hexes) {
-    if (hex.terrain !== 'ocean') {
-      passableHexes.set(`${hex.x},${hex.y}`, hex);
-    }
-  }
-
-  for (const action of exploreActions) {
-    const unitId = action.params.unitId as string;
-    const unit = unitMap.get(unitId);
-
-    if (!unit) {
-      actionResults.push({ actionId: action.id, status: 'failed', result: `Unit ${unitId} not found` });
-      continue;
-    }
-
-    const colonyExplored = exploredByColony.get(unit.colonyId) ?? new Set<string>();
-
-    // Find nearest unexplored passable hex using BFS from unit position
-    const startKey = `${unit.hexX},${unit.hexY}`;
-    const visited = new Set<string>([startKey]);
-    const queue: Array<{ q: number; r: number; dist: number }> = [{ q: unit.hexX, r: unit.hexY, dist: 0 }];
-    let targetHex: { q: number; r: number } | null = null;
-    const directions = [
-      { q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 },
-      { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 },
-    ];
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-
-      // Don't search too far (limit to 30 hex radius for performance)
-      if (current.dist > 30) break;
-
-      for (const dir of directions) {
-        const nq = current.q + dir.q;
-        const nr = current.r + dir.r;
-        const nKey = `${nq},${nr}`;
-
-        if (visited.has(nKey)) continue;
-        visited.add(nKey);
-
-        // Must be a valid passable hex on the map
-        if (!passableHexes.has(nKey)) continue;
-
-        // Is this hex unexplored by this colony?
-        if (!colonyExplored.has(nKey)) {
-          targetHex = { q: nq, r: nr };
-          break;
+  for (const h of hexes) {
+    if (h.exploredBy) {
+      for (const colonyId of h.exploredBy) {
+        if (!exploredByColony.has(colonyId)) {
+          exploredByColony.set(colonyId, new Set());
         }
-
-        queue.push({ q: nq, r: nr, dist: current.dist + 1 });
+        exploredByColony.get(colonyId)!.add(`${h.x},${h.y}`);
       }
-      if (targetHex) break;
+    }
+  }
+
+  // All valid hex coords (for neighbor checks)
+  const allHexKeys = new Set<string>();
+  for (const h of hexes) {
+    allHexKeys.add(`${h.x},${h.y}`);
+  }
+
+  // Passable terrain types for exploration targets
+  const PASSABLE_EXPLORE = new Set(['plains', 'forest', 'coast', 'desert', 'tundra']);
+
+  // Find idle scouts
+  const idleScouts = units.filter(u =>
+    u.type === 'scout' &&
+    (!u.movementQueue || u.movementQueue.length === 0) &&
+    !actionedUnitIds.has(u.id)
+  );
+
+  for (const scout of idleScouts) {
+    const explored = exploredByColony.get(scout.colonyId);
+    if (!explored) continue;
+
+    // Find frontier: unexplored hexes adjacent to explored territory
+    // To be efficient, we check neighbors of explored hexes that are NOT explored
+    const frontierCandidates: HexCoord[] = [];
+    const frontierSeen = new Set<string>();
+
+    for (const exploredKey of explored) {
+      const [eq, er] = exploredKey.split(',').map(Number);
+      const neighbors = hexNeighbors({ q: eq, r: er });
+      for (const n of neighbors) {
+        const nKey = `${n.q},${n.r}`;
+        if (frontierSeen.has(nKey)) continue;
+        frontierSeen.add(nKey);
+
+        // Must be on the map, unexplored, and passable
+        if (!allHexKeys.has(nKey)) continue;
+        if (explored.has(nKey)) continue;
+        const terrain = terrainMap.get(nKey);
+        if (!terrain || !PASSABLE_EXPLORE.has(terrain)) continue;
+
+        frontierCandidates.push(n);
+      }
     }
 
-    if (!targetHex) {
-      actionResults.push({
-        actionId: action.id,
-        status: 'failed',
-        result: 'No unexplored territory within range',
-      });
-      events.push({
-        type: 'explore_failed',
-        colonyId: unit.colonyId,
-        unitId: unit.id,
-        data: { reason: 'fully_explored', hexX: unit.hexX, hexY: unit.hexY },
-      });
-      continue;
+    if (frontierCandidates.length === 0) continue;
+
+    // Sort by distance to scout (prefer closer targets)
+    const scoutPos: HexCoord = { q: scout.hexX, r: scout.hexY };
+    frontierCandidates.sort((a, b) =>
+      hexDistance(scoutPos, a) - hexDistance(scoutPos, b)
+    );
+
+    // Try pathfinding to nearest candidates (try up to 10)
+    let bestPath: HexCoord[] | null = null;
+    let bestTarget: HexCoord | null = null;
+
+    for (let i = 0; i < Math.min(frontierCandidates.length, 10); i++) {
+      const candidate = frontierCandidates[i];
+      const path = findPath(scoutPos, candidate, hexLookup);
+      if (path && path.length > 0) {
+        bestPath = path;
+        bestTarget = candidate;
+        break;
+      }
     }
 
-    // Convert to a move_unit action targeting the unexplored hex
-    convertedActions.push({
-      id: action.id,
-      colonyId: action.colonyId,
-      type: 'move_unit',
-      params: { unitId, targetX: targetHex.q, targetY: targetHex.r },
-    });
+    if (!bestPath || !bestTarget) continue;
+
+    // Set movement queue
+    scout.movementQueue = bestPath;
 
     events.push({
-      type: 'explore_target_found',
-      colonyId: unit.colonyId,
-      unitId: unit.id,
+      type: 'auto_explore',
+      colonyId: scout.colonyId,
+      unitId: scout.id,
       data: {
-        from: { x: unit.hexX, y: unit.hexY },
-        target: { x: targetHex.q, y: targetHex.r },
+        from: { x: scout.hexX, y: scout.hexY },
+        to: { x: bestTarget.q, y: bestTarget.r },
+        pathLength: bestPath.length,
       },
     });
   }
 
-  return { convertedActions, remainingActions, events, actionResults };
+  return { events };
 }
 
 // --- Tick Resolution ---
@@ -2253,20 +2247,65 @@ export function resolveTick(
     unitPositionsBefore.set(u.id, { x: u.hexX, y: u.hexY });
   }
 
-  // --- Phase -0.5: Resolve explore actions (convert to move_unit) ---
-  const nonFoundActions = actions.filter(a => a.type !== 'found_settlement');
-  const exploreResult = resolveExploreActions(updatedUnits, nonFoundActions, hexes);
-  events.push(...exploreResult.events);
-  actionResults.push(...exploreResult.actionResults);
-  const allMoveActions = [...exploreResult.remainingActions, ...exploreResult.convertedActions];
-
   // --- Phase 0: Resolve movement actions + advance movement queues ---
+  const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
   const hasMovingUnits = updatedUnits.some(u => u.movementQueue && u.movementQueue.length > 0);
-  if (allMoveActions.length > 0 || hasMovingUnits) {
-    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
-    const moveResult = resolveMovement(updatedUnits, allMoveActions, hexLookup);
+  const nonFoundActions = actions.filter(a => a.type !== 'found_settlement');
+  if (nonFoundActions.length > 0 || hasMovingUnits) {
+    const moveResult = resolveMovement(updatedUnits, nonFoundActions, hexLookup);
     events.push(...moveResult.events);
     actionResults.push(...moveResult.actionResults);
+  }
+
+  // --- Phase 0.1: Auto-explore idle scouts ---
+  // Scouts with no movement queue and no action this tick automatically
+  // pathfind toward the nearest unexplored frontier hex.
+  {
+    const actionedUnitIds = new Set<string>();
+    for (const action of actions) {
+      const unitId = action.params.unitId as string | undefined;
+      if (unitId) actionedUnitIds.add(unitId);
+    }
+    const exploreResult = autoExploreIdleScouts(updatedUnits, hexes, hexLookup, actionedUnitIds);
+    events.push(...exploreResult.events);
+
+    // Advance auto-explore scouts' movement queues immediately this tick
+    for (const unit of updatedUnits) {
+      if (unit.type === 'scout' && unit.movementQueue && unit.movementQueue.length > 0) {
+        // Only advance if this scout was just assigned an auto-explore path
+        // (it wasn't tracked in unitPositionsBefore as moving)
+        const before = unitPositionsBefore.get(unit.id);
+        if (before && before.x === unit.hexX && before.y === unit.hexY) {
+          // Scout didn't move in Phase 0 — check if it has a new queue from auto-explore
+          const isAutoExplore = exploreResult.events.some(
+            e => e.type === 'auto_explore' && e.unitId === unit.id
+          );
+          if (isAutoExplore) {
+            const steps = movementStepsThisTick(unit.movementQueue, unit.type, hexLookup);
+            if (steps > 0) {
+              const moved = unit.movementQueue.slice(0, steps);
+              const destination = moved[moved.length - 1];
+              unit.hexX = destination.q;
+              unit.hexY = destination.r;
+              unit.movementQueue = unit.movementQueue.slice(steps);
+
+              events.push({
+                type: 'unit_moved',
+                colonyId: unit.colonyId,
+                unitId: unit.id,
+                data: {
+                  from: { x: before.x, y: before.y },
+                  to: { x: unit.hexX, y: unit.hexY },
+                  steps: moved.map(s => ({ x: s.q, y: s.r })),
+                  remainingPath: unit.movementQueue.length,
+                  autoExplore: true,
+                },
+              });
+            }
+          }
+        }
+      }
+    }
   }
 
   // --- Phase 0.25: Resolve combat (after movement, before fog) ---
@@ -2755,8 +2794,3 @@ export function resolveTick(
 
 
 
-
-
-====================================================================
-  END UNTRUSTED DATA
-====================================================================
