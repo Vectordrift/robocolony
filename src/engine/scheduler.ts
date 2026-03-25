@@ -19,6 +19,9 @@ const COMPASS_SIGNAL_INTERVAL = 25;
 /** Minimum ticks before first compass signal (let colonies establish first) */
 const COMPASS_SIGNAL_START = 25;
 
+/** Maximum time (ms) for a single tick to complete before being killed */
+const TICK_TIMEOUT_MS = 60_000;
+
 /** Event types visible on the public feed (spectator view) */
 const PUBLIC_EVENT_TYPES = new Set([
   'settlement_founded',
@@ -102,6 +105,7 @@ export class TickScheduler {
   private db: PostgresJsDatabase<typeof schema>;
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private tickStartedAt = 0;
   private onTick?: (tick: number, events: unknown[]) => void;
   private onError?: (error: Error) => void;
 
@@ -145,8 +149,18 @@ export class TickScheduler {
    * Execute a single tick. Can be called directly for testing.
    */
   async executeTick(): Promise<void> {
-    if (this.running) return; // skip if previous tick still processing
+    if (this.running) {
+      // If a tick has been running for more than TICK_TIMEOUT_MS, force-reset
+      const elapsed = Date.now() - this.tickStartedAt;
+      if (elapsed > TICK_TIMEOUT_MS) {
+        this.onError?.(new Error(`Tick stuck for ${elapsed}ms — force-resetting scheduler`));
+        this.running = false;
+      } else {
+        return; // previous tick still processing normally
+      }
+    }
     this.running = true;
+    this.tickStartedAt = Date.now();
 
     try {
       // Load current state
