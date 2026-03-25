@@ -36,6 +36,7 @@ const PUBLIC_EVENT_TYPES = new Set([
   'research_complete',
   'agreement_accepted',
   'agreement_broken',
+  'nap_blocked_combat',
 ]);
 
 /**
@@ -104,6 +105,12 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
       return {
         agreementType: event.data.agreementType,
         brokenByName: event.data.brokenByName,
+      };
+    case 'nap_blocked_combat':
+      return {
+        hexX: event.data.hexX,
+        hexY: event.data.hexY,
+        reason: event.data.reason,
       };
     default:
       return null;
