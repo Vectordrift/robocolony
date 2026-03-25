@@ -1,4 +1,5 @@
 
+
 /**
  * Tick engine — resolves one game tick.
  *
@@ -135,13 +136,13 @@ export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
 
 /** Building upkeep per level (resources consumed per tick) */
 export const BUILDING_UPKEEP: Record<BuildingType, Partial<Resources>> = {
-  farm:       { timber: 1 },
-  lumberMill: { timber: 1 },
-  quarry:     { timber: 1 },
-  mine:       { timber: 1, food: 1 },
-  barracks:   { food: 2, iron: 1, timber: 1 },
+  farm:       { timber: 2 },
+  lumberMill: { timber: 1, stone: 1 },
+  quarry:     { timber: 2, food: 1 },
+  mine:       { timber: 2, food: 2 },
+  barracks:   { food: 3, iron: 2, timber: 1 },
   granary:    { timber: 1 },
-  market:     { food: 1 },
+  market:     { food: 2, timber: 1 },
 };
 
 /** Building construction costs */
@@ -244,12 +245,12 @@ export const FOUNDING_REVEAL_RADIUS = 2;
 /** Settlement upgrade requirements */
 export const UPGRADE_COSTS: Record<string, { resources: Partial<Resources>; minPopulation: number; minBuildings: number }> = {
   town: {
-    resources: { food: 200, timber: 150, stone: 100 },
+    resources: { food: 200, timber: 150, stone: 100, influence: 25 },
     minPopulation: 50,
     minBuildings: 3,
   },
   city: {
-    resources: { food: 500, timber: 300, stone: 200, iron: 100 },
+    resources: { food: 500, timber: 300, stone: 200, iron: 100, influence: 75 },
     minPopulation: 200,
     minBuildings: 5,
   },
@@ -267,6 +268,19 @@ export const MAX_POPULATION: Record<string, number> = {
 
 /** Population growth rate: +1 per this many excess food */
 export const POP_GROWTH_PER_FOOD = 5;
+
+/** Stockpile capacity per settlement tier (per resource) */
+export const STOCKPILE_CAP: Record<string, number> = {
+  outpost: 300,
+  town: 600,
+  city: 1200,
+};
+
+/** Additional stockpile capacity per granary level */
+export const GRANARY_BONUS_PER_LEVEL = 100;
+
+/** Fraction of excess resources that decay each tick (10%) */
+export const STOCKPILE_DECAY_RATE = 0.10;
 const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 
 // --- Helpers ---
@@ -1678,7 +1692,42 @@ export function resolveTick(
       }
     }
 
-    // Production event emitted AFTER clamping so players see accurate stockpile values
+    // --- Stockpile decay: resources above cap decay each tick ---
+    // Cap is determined by the highest-tier settlement the colony owns.
+    // Granary buildings add bonus capacity.
+    let highestTier = 'outpost';
+    let totalGranaryLevels = 0;
+    for (const s of mySettlements) {
+      const tierIdx = TIER_ORDER.indexOf(s.tier);
+      if (tierIdx > TIER_ORDER.indexOf(highestTier)) {
+        highestTier = s.tier;
+      }
+      for (const b of s.buildings) {
+        if (b.type === 'granary') totalGranaryLevels += b.level;
+      }
+    }
+    const baseCap = STOCKPILE_CAP[highestTier] ?? 300;
+    const effectiveCap = baseCap + totalGranaryLevels * GRANARY_BONUS_PER_LEVEL;
+
+    for (const key of ['food', 'timber', 'stone', 'iron'] as (keyof Resources)[]) {
+      if (colony.resources[key] > effectiveCap) {
+        const excess = colony.resources[key] - effectiveCap;
+        const decayed = Math.round(excess * STOCKPILE_DECAY_RATE * 100) / 100;
+        colony.resources[key] = Math.round((colony.resources[key] - decayed) * 100) / 100;
+        events.push({
+          type: 'stockpile_decay',
+          colonyId: colony.id,
+          data: {
+            resource: key,
+            decayed,
+            cap: effectiveCap,
+            remaining: colony.resources[key],
+          },
+        });
+      }
+    }
+
+    // Production event emitted AFTER clamping and decay so players see accurate stockpile values
     events.push({
       type: 'production',
       colonyId: colony.id,
@@ -1686,6 +1735,7 @@ export function resolveTick(
         produced: { ...totalProduction },
         consumed: { ...totalUpkeep },
         net: { ...net },
+        stockpileCap: effectiveCap,
         resources: { ...colony.resources },
       },
     });
@@ -1873,6 +1923,8 @@ export function resolveTick(
     fogReveals,
   };
 }
+
+
 
 
 
