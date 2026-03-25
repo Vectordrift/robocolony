@@ -44,6 +44,10 @@ const VALID_ACTION_TYPES: Record<string, string[]> = {
   'send_message': ['toColonyId', 'message'],
   'explore': ['unitId'],
   'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
+  'propose_agreement': ['toColonyId', 'agreementType'],
+  'accept_agreement': ['agreementId'],
+  'reject_agreement': ['agreementId'],
+  'break_agreement': ['agreementId'],
 };
 
 const MAX_ACTIONS_PER_TICK = 10;
