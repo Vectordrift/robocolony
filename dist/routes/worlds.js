@@ -10,7 +10,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db } from '../db/index.js';
 import { worlds, hexes, colonies, settlements, units } from '../db/schema/index.js';
-import { generateWorld, findStartingPositions } from '../engine/mapgen.js';
+import { generateWorld, findStartingPositions, recommendedRadius, recommendedMinSpacing } from '../engine/mapgen.js';
 import { hexDistance } from '../engine/hex.js';
 import { generateApiKey, hashApiKey } from '../lib/auth.js';
 // --- Constants ---
@@ -97,8 +97,9 @@ export async function worldRoutes(app) {
             });
         }
         const mapSeed = body.mapSeed ?? Math.floor(Math.random() * 2147483647);
-        const mapRadius = body.mapRadius ?? 50;
         const maxColonies = body.maxColonies ?? 8;
+        // Default radius scales with colony count: 2→25, 4→35, 8→50, 16→70
+        const mapRadius = body.mapRadius ?? recommendedRadius(maxColonies);
         const tickRate = body.tickRate ?? 300000;
         // Validate ranges
         if (mapRadius < 10 || mapRadius > 100) {
@@ -229,7 +230,8 @@ export async function worldRoutes(app) {
         const worldMap = generateWorld(w.mapSeed, w.mapRadius, w.maxColonies);
         // Try pre-generated positions first, then dynamically find more
         const occupied = existingSettlements.map(s => ({ q: s.hexX, r: s.hexY }));
-        const MIN_SPAWN_SPACING = 20; // Reduced from 30 to allow more colonies
+        // Dynamic spacing: scales with colony count and map radius
+        const MIN_SPAWN_SPACING = Math.min(20, recommendedMinSpacing(w.maxColonies, w.mapRadius));
         let startingHex = null;
         // 1. Check pre-generated starting positions
         for (const pos of worldMap.startingPositions) {
