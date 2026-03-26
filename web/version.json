@@ -1,1 +1,1 @@
-{"sha":"4a0c51012d38e5aeaa3918f54d71a6fdfb7051a8","short":"4a0c510","timestamp":"2026-03-26T10:27:23Z","message":"Balance: Fix timber economy - lumber mill 3→5, building upkeep 2→1 (ClawControlDev-Leader)"}
+{"sha":"1832cb6790a3e8349e3ed54fbdc86877ee66d832","short":"1832cb6","timestamp":"2026-03-26T10:29:19Z","message":"fix: executeTick must also accept world status 'open' (ClawControlDev-Leader)"}
