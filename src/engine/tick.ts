@@ -310,6 +310,18 @@ export const MORALE_WARNING_THRESHOLD = 0.4;
 /** Maximum morale loss multiplier from deficit severity */
 export const MAX_DEFICIT_MULTIPLIER = 3.0;
 
+/** Minimum morale from famine — units won't drop below this from starvation alone */
+export const MORALE_FAMINE_FLOOR = 0.15;
+
+/** Max desertions per colony per tick — prevents cascade wipes */
+export const MAX_DESERTIONS_PER_TICK = 2;
+
+/** Hex range within which a friendly settlement provides morale support */
+export const GARRISON_MORALE_RANGE = 3;
+
+/** Morale recovery per tick for units near a friendly settlement (even during famine) */
+export const GARRISON_MORALE_RECOVERY = 0.02;
+
 // --- Legacy Score Awards ---
 // --- Snapshot-based scoring (recalculated every tick from current state) ---
 export const SCORE_SETTLEMENT: Record<string, number> = { outpost: 10, town: 30, city: 100 };
@@ -3628,14 +3640,27 @@ export function resolveTick(
 
       if (stockpileDepleted && effectiveMoraleLoss > 0) {
         // All units of this colony lose morale (scaled by deficit severity)
+        // Units near friendly settlements have reduced morale loss (garrison effect)
         const tickDesertions: Array<{ type: string; id: string; morale: number }> = [];
         const moraleWarnings: Array<{ type: string; id: string; morale: number }> = [];
 
+        // Build settlement positions for garrison range check
+        const colonySettlements = updatedSettlements.filter(s => s.colonyId === colony.id);
+
         for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
-          unit.morale = Math.max(0, unit.morale - effectiveMoraleLoss);
+          // Check if unit is near a friendly settlement (garrison effect)
+          const nearSettlement = colonySettlements.some(s =>
+            hexDistance({ q: unit.hexX, r: unit.hexY }, { q: s.hexX, r: s.hexY }) <= GARRISON_MORALE_RANGE
+          );
+
+          // Apply morale loss with famine floor — units won't starve below MORALE_FAMINE_FLOOR
+          // Garrisoned units lose morale at half rate
+          const unitMoraleLoss = nearSettlement ? effectiveMoraleLoss * 0.5 : effectiveMoraleLoss;
+          unit.morale = Math.max(MORALE_FAMINE_FLOOR, unit.morale - unitMoraleLoss);
 
           // Probabilistic desertion: each unit at/below threshold has DESERTION_CHANCE to desert
-          if (unit.morale <= DESERTION_THRESHOLD) {
+          // Capped at MAX_DESERTIONS_PER_TICK per colony to prevent cascade wipes
+          if (unit.morale <= DESERTION_THRESHOLD && tickDesertions.length < MAX_DESERTIONS_PER_TICK) {
             const roll = Math.random();
             if (roll < DESERTION_CHANCE) {
               desertedUnitIds.push(unit.id);
@@ -3672,6 +3697,7 @@ export function resolveTick(
               count: tickDesertions.length,
               units: tickDesertions.map(d => ({ unitType: d.type, unitId: d.id })),
               summary: tickDesertions.map(d => d.type).join(', '),
+              desertionCapped: tickDesertions.length >= MAX_DESERTIONS_PER_TICK,
             },
           });
         }
@@ -3684,6 +3710,19 @@ export function resolveTick(
       for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
         if (unit.morale < 1.0) {
           unit.morale = Math.min(1.0, unit.morale + MORALE_RECOVERY_RATE);
+        }
+      }
+    } else {
+      // --- Garrison morale recovery (even during famine) ---
+      // Units near friendly settlements get small morale boost — garrison cohesion
+      // This addresses siege morale decay (#143) and gives units near home a fighting chance
+      const colonySettlements = updatedSettlements.filter(s => s.colonyId === colony.id);
+      for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
+        const nearSettlement = colonySettlements.some(s =>
+          hexDistance({ q: unit.hexX, r: unit.hexY }, { q: s.hexX, r: s.hexY }) <= GARRISON_MORALE_RANGE
+        );
+        if (nearSettlement && unit.morale < 1.0) {
+          unit.morale = Math.min(1.0, unit.morale + GARRISON_MORALE_RECOVERY);
         }
       }
     }

@@ -162,6 +162,14 @@ export declare const DESERTION_CHANCE = 0.3;
 export declare const MORALE_WARNING_THRESHOLD = 0.4;
 /** Maximum morale loss multiplier from deficit severity */
 export declare const MAX_DEFICIT_MULTIPLIER = 3;
+/** Minimum morale from famine — units won't drop below this from starvation alone */
+export declare const MORALE_FAMINE_FLOOR = 0.15;
+/** Max desertions per colony per tick — prevents cascade wipes */
+export declare const MAX_DESERTIONS_PER_TICK = 2;
+/** Hex range within which a friendly settlement provides morale support */
+export declare const GARRISON_MORALE_RANGE = 3;
+/** Morale recovery per tick for units near a friendly settlement (even during famine) */
+export declare const GARRISON_MORALE_RECOVERY = 0.02;
 export declare const SCORE_SETTLEMENT: Record<string, number>;
 export declare const SCORE_POP_PER_10 = 1;
 export declare const SCORE_BUILDING_LEVEL = 5;
@@ -505,4 +513,3 @@ export declare function resolveAgreementActions(colonies: Colony[], agreements: 
 export declare function resolveTradeTransfers(colonies: Colony[], agreements: Agreement[]): TradeTransferResult;
 export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number, agreements?: Agreement[]): TickResult;
 export {};
-//# sourceMappingURL=tick.d.ts.map
