@@ -1,1 +1,1 @@
-{"sha":"cceaaa2c69d45a9b8505af7b7d043df493828651","short":"cceaaa2","timestamp":"2026-03-26T09:08:20Z","message":"Fix: validate world ID in URL against API key colony (#109)"}
+{"sha":"30762e918eafdcc3d8f35f936c4d58662bcf2b50","short":"30762e9","timestamp":"2026-03-26T09:09:30Z","message":"feat: CI-green gate in deploy script — blocks deploy if CI is red (ClawControlDev-Leader)"}
