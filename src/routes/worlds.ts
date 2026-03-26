@@ -1,10 +1,11 @@
 /**
- * World creation and colony join endpoints.
+ * World and colony endpoints.
  *
- * POST /api/worlds       — Admin: create a new world (generates hex map)
  * POST /api/worlds/:id/join — Public: join a world (creates colony, returns API key)
- * GET  /api/worlds       — Public: list worlds
- * GET  /api/worlds/:id   — Public: world info
+ * GET  /api/worlds           — Public: list worlds
+ * GET  /api/worlds/:id       — Public: world info
+ *
+ * World creation is not exposed via API — create worlds via DB/CLI.
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
@@ -35,26 +36,7 @@ function sanitizeName(name: string, maxLength: number): { valid: boolean; saniti
   return { valid: true, sanitized: trimmed };
 }
 
-// --- Admin Auth ---
-
-const ADMIN_KEY = process.env.ADMIN_KEY || null;
-
-function isAdminRequest(request: FastifyRequest): boolean {
-  if (!ADMIN_KEY) return false; // If no admin key configured, admin endpoints are locked
-  const authHeader = request.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
-  return authHeader.slice(7) === ADMIN_KEY;
-}
-
 // --- Types ---
-
-interface CreateWorldBody {
-  name: string;
-  mapSeed?: number;
-  mapRadius?: number;
-  maxColonies?: number;
-  tickRate?: number;
-}
 
 interface JoinWorldBody {
   name: string;
@@ -142,111 +124,6 @@ export async function worldRoutes(app: FastifyInstance) {
     };
   });
 
-  // Create world (admin only — requires ADMIN_KEY)
-  app.post('/api/worlds', async (request: FastifyRequest<{ Body: CreateWorldBody }>, reply: FastifyReply) => {
-    // Admin authentication required
-    if (!isAdminRequest(request)) {
-      return reply.code(403).send({
-        error: 'forbidden',
-        message: 'World creation requires admin authentication',
-      });
-    }
-
-    const body = request.body as CreateWorldBody;
-
-    if (!body?.name || typeof body.name !== 'string') {
-      return reply.code(400).send({
-        error: 'validation_error',
-        message: 'World name is required',
-      });
-    }
-
-    const nameCheck = sanitizeName(body.name, 50);
-    if (!nameCheck.valid) {
-      return reply.code(400).send({
-        error: 'validation_error',
-        message: nameCheck.error,
-      });
-    }
-    const name = nameCheck.sanitized;
-
-    const mapSeed = body.mapSeed ?? Math.floor(Math.random() * 2147483647);
-    const maxColonies = body.maxColonies ?? 8;
-    // Default radius scales with colony count: 2→25, 4→35, 8→50, 16→70
-    const mapRadius = body.mapRadius ?? recommendedRadius(maxColonies);
-    const tickRate = body.tickRate ?? 300000;
-
-    // Validate ranges
-    if (mapRadius < 10 || mapRadius > 100) {
-      return reply.code(400).send({
-        error: 'validation_error',
-        message: 'Map radius must be between 10 and 100',
-      });
-    }
-
-    if (maxColonies < 2 || maxColonies > 16) {
-      return reply.code(400).send({
-        error: 'validation_error',
-        message: 'Max colonies must be between 2 and 16',
-      });
-    }
-
-    const worldId = `world_${nanoid(12)}`;
-
-    // Generate the hex map
-    const worldMap = generateWorld(mapSeed, mapRadius, maxColonies);
-
-    if (worldMap.startingPositions.length < 2) {
-      return reply.code(500).send({
-        error: 'generation_error',
-        message: 'Map seed produced insufficient starting positions. Try a different seed.',
-      });
-    }
-
-    // Insert world
-    await db.insert(worlds).values({
-      id: worldId,
-      name,
-      tickRate,
-      currentTick: 0,
-      mapSeed,
-      status: 'open',
-      mapRadius,
-      maxColonies,
-    });
-
-    // Insert hexes in batches (7850+ hexes for radius 50)
-    const hexRows = worldMap.hexes.map((h) => ({
-      worldId,
-      x: h.q,
-      y: h.r,
-      terrain: h.terrain,
-      resources: h.resources,
-      settlementId: null,
-      exploredBy: [] as string[],
-    }));
-
-    // Batch insert (500 at a time to avoid query size limits)
-    const BATCH_SIZE = 500;
-    for (let i = 0; i < hexRows.length; i += BATCH_SIZE) {
-      const batch = hexRows.slice(i, i + BATCH_SIZE);
-      await db.insert(hexes).values(batch);
-    }
-
-    return reply.code(201).send({
-      id: worldId,
-      name,
-      status: 'open',
-      mapSeed,
-      mapRadius,
-      maxColonies,
-      tickRate,
-      currentTick: 0,
-      hexCount: worldMap.hexes.length,
-      startingPositions: worldMap.startingPositions.length,
-    });
-  });
-
   // Join world (creates colony)
   app.post('/api/worlds/:id/join', async (
     request: FastifyRequest<{ Params: { id: string }; Body: JoinWorldBody }>,
@@ -320,7 +197,6 @@ export async function worldRoutes(app: FastifyInstance) {
     const colonyCount = Number(colonyCountResult[0]?.count ?? 0);
 
     if (colonyCount >= w.maxColonies) {
-      // Also mark world as full if not already
       if (w.status !== 'full') {
         await db.update(worlds).set({ status: 'full' }).where(eq(worlds.id, worldId));
       }
@@ -331,18 +207,14 @@ export async function worldRoutes(app: FastifyInstance) {
     }
 
     // Find a starting position dynamically
-    // Get existing colony settlements to determine occupied positions
     const existingSettlements = await db
       .select({ hexX: settlements.hexX, hexY: settlements.hexY })
       .from(settlements)
       .where(eq(settlements.worldId, worldId));
 
-    // Regenerate map (deterministic from seed) and find ALL valid spawn positions
     const worldMap = generateWorld(w.mapSeed, w.mapRadius, w.maxColonies);
 
-    // Try pre-generated positions first, then dynamically find more
     const occupied = existingSettlements.map(s => ({ q: s.hexX, r: s.hexY }));
-    // Dynamic spacing: scales with colony count and map radius
     const MIN_SPAWN_SPACING = Math.min(20, recommendedMinSpacing(w.maxColonies, w.mapRadius));
 
     let startingHex: { q: number; r: number } | null = null;
@@ -358,7 +230,7 @@ export async function worldRoutes(app: FastifyInstance) {
       }
     }
 
-    // 2. If none available, dynamically find a spawn point on the ring
+    // 2. Dynamically find a spawn point if needed
     if (!startingHex) {
       const spawnPositions = findStartingPositions(
         worldMap.hexes, w.mapRadius, w.mapSeed, 64, MIN_SPAWN_SPACING,
@@ -446,7 +318,6 @@ export async function worldRoutes(app: FastifyInstance) {
     await db.insert(units).values(unitRows);
 
     // Reveal hexes in a 5-hex radius around starting position
-    // Use raw SQL for efficient batch update with array_append
     const sq = startingHex.q;
     const sr = startingHex.r;
     await db.execute(sql`
@@ -455,8 +326,6 @@ export async function worldRoutes(app: FastifyInstance) {
       WHERE world_id = ${worldId}
         AND NOT (${colonyId} = ANY(explored_by))
         AND (
-          -- Hex distance formula for axial coordinates:
-          -- dist = max(|dq|, |dr|, |dq+dr|) <= radius
           GREATEST(
             ABS(x - ${sq}),
             ABS(y - ${sr}),
@@ -467,11 +336,10 @@ export async function worldRoutes(app: FastifyInstance) {
 
     // Transition world status
     if (w.status === 'open' && colonyCount === 0) {
-      // First colony joins → RUNNING
       await db.update(worlds).set({ status: 'running' }).where(eq(worlds.id, worldId));
     }
 
-    // Check if world should transition to FULL (based on available land, not colony count)
+    // Check if world should transition to FULL
     const unclaimedLand = await db
       .select({ count: sql<number>`count(*)` })
       .from(hexes)
@@ -502,4 +370,3 @@ export async function worldRoutes(app: FastifyInstance) {
     });
   });
 }
-
