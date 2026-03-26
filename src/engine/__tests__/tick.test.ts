@@ -220,7 +220,7 @@ describe('calculateProduction', () => {
     const production = calculateProduction(settlement, []);
 
     expect(production.food).toBeCloseTo(15);   // farm: 15
-    expect(production.timber).toBeCloseTo(3);  // lumberMill: 3
+    expect(production.timber).toBeCloseTo(5);  // lumberMill: 5
     expect(production.iron).toBeCloseTo(3);    // mine: 3
   });
 
@@ -294,7 +294,7 @@ describe('calculateBuildingUpkeep', () => {
     });
     const upkeep = calculateBuildingUpkeep(settlement);
     expect(upkeep.food).toBe(0);
-    expect(upkeep.timber).toBe(6); // farm: timber 2 * level 3
+    expect(upkeep.timber).toBe(3); // farm: timber 1 * level 3
   });
 
   it('calculates upkeep scaled by level', () => {
@@ -303,22 +303,22 @@ describe('calculateBuildingUpkeep', () => {
     });
     const upkeep = calculateBuildingUpkeep(settlement);
 
-    // mine: timber 2*2, food 1*2
-    expect(upkeep.timber).toBe(4);
+    // mine: timber 1*2, food 1*2
+    expect(upkeep.timber).toBe(2);
     expect(upkeep.food).toBe(2);
   });
 
   it('sums upkeep from multiple buildings', () => {
     const settlement = makeSettlement({
       buildings: [
-        { type: 'mine', level: 1 },     // timber 2, food 1
+        { type: 'mine', level: 1 },     // timber 1, food 1
         { type: 'barracks', level: 1 },  // food 2, iron 2, timber 1
       ],
     });
     const upkeep = calculateBuildingUpkeep(settlement);
 
     expect(upkeep.food).toBe(3);    // 1 + 2
-    expect(upkeep.timber).toBe(3);  // mine 2 + barracks 1
+    expect(upkeep.timber).toBe(2);  // mine 1 + barracks 1
     expect(upkeep.iron).toBe(2);    // barracks 2
   });
 });
