@@ -193,7 +193,7 @@ export class TickScheduler {
         .from(schema.worlds)
         .where(eq(schema.worlds.id, this.worldId));
 
-      if (!world || world.status !== 'running') {
+      if (!world || (world.status !== 'running' && world.status !== 'open')) {
         this.stop();
         return;
       }
