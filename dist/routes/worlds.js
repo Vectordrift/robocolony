@@ -356,18 +356,21 @@ export async function worldRoutes(app) {
         const ipKey = Array.isArray(ip) ? ip[0] : ip;
         clearJoinRateLimit(ipKey);
         // Generate a public event
+        const worldState = await db.select({ currentTick: worlds.currentTick }).from(worlds).where(eq(worlds.id, worldId)).limit(1);
+        const currentTick = worldState[0]?.currentTick ?? 0;
+        const eventId = 'evt_' + nanoid(10);
         await db.execute(sql `
       INSERT INTO events (id, world_id, tick, type, public, visibility, data, public_data)
-      SELECT
-        ${'evt_' + nanoid(10)},
+      VALUES (
+        ${eventId},
         ${worldId},
-        current_tick,
+        ${currentTick},
         'colony_departed',
         true,
         ARRAY[]::text[],
-        jsonb_build_object('colonyId', ${colonyId}, 'colonyName', ${colony.name}),
-        jsonb_build_object('colony', ${colony.name})
-      FROM worlds WHERE id = ${worldId}
+        ${JSON.stringify({ colonyId, colonyName: colony.name })}::jsonb,
+        ${JSON.stringify({ colony: colony.name })}::jsonb
+      )
     `);
         request.log.info(`Colony ${colony.name} (${colonyId}) deleted from world ${worldId}`);
         return reply.code(200).send({

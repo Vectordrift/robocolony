@@ -1,1 +1,1 @@
-{"sha":"b270e97f1aeee71c84dfc9573063daf2f8f20014","short":"b270e97","timestamp":"2026-03-26T12:26:19Z","message":"fix: use Fastify generic pattern for delete colony route (ClawControlDev-Leader)"}
+{"sha":"1dfaceec8657a272f5a60a7540f36db815b72db7","short":"1dfacee","timestamp":"2026-03-26T12:29:39Z","message":"fix: use simple INSERT for colony_departed event instead of INSERT...SELECT (ClawControlDev-Leader)"}
