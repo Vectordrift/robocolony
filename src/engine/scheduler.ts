@@ -147,6 +147,7 @@ export class TickScheduler {
    * Start the tick loop for a world.
    */
   async start(): Promise<void> {
+    console.log(`[SCHEDULER] start() called for world ${this.worldId}`);
     const [world] = await this.db
       .select()
       .from(schema.worlds)
@@ -155,11 +156,22 @@ export class TickScheduler {
     if (!world) throw new Error(`World ${this.worldId} not found`);
     if (world.status !== 'running' && world.status !== 'open') throw new Error(`World ${this.worldId} is not running (status: ${world.status})`);
 
+    console.log(`[SCHEDULER] World found: ${world.name}, status=${world.status}, tickRate=${world.tickRate}ms, currentTick=${world.currentTick}`);
+
+    // Fire first tick immediately, then schedule interval
+    this.executeTick().catch((err) => {
+      console.error(`[SCHEDULER] Initial tick error:`, err);
+      this.onError?.(err instanceof Error ? err : new Error(String(err)));
+    });
+
     this.timer = setInterval(() => {
+      console.log(`[SCHEDULER] setInterval fired at ${new Date().toISOString()}`);
       this.executeTick().catch((err) => {
+        console.error(`[SCHEDULER] Tick error in setInterval:`, err);
         this.onError?.(err instanceof Error ? err : new Error(String(err)));
       });
     }, world.tickRate);
+    console.log(`[SCHEDULER] setInterval created with ${world.tickRate}ms interval`);
   }
 
   /**
@@ -176,13 +188,16 @@ export class TickScheduler {
    * Execute a single tick. Can be called directly for testing.
    */
   async executeTick(): Promise<void> {
+    console.log(`[TICK] executeTick() called at ${new Date().toISOString()}, running=${this.running}`);
     if (this.running) {
       // If a tick has been running for more than TICK_TIMEOUT_MS, force-reset
       const elapsed = Date.now() - this.tickStartedAt;
       if (elapsed > TICK_TIMEOUT_MS) {
+        console.error(`[TICK] Force-resetting: stuck for ${elapsed}ms`);
         this.onError?.(new Error(`Tick stuck for ${elapsed}ms — force-resetting scheduler`));
         this.running = false;
       } else {
+        console.log(`[TICK] Skipped: previous tick still running (${elapsed}ms)`);
         return; // previous tick still processing normally
       }
     }
@@ -191,6 +206,7 @@ export class TickScheduler {
 
     try {
       // Load current state
+      console.log(`[TICK] Loading world state...`);
       const [world] = await this.db
         .select()
         .from(schema.worlds)
@@ -321,9 +337,12 @@ export class TickScheduler {
         }));
 
       // Resolve tick
+      console.log(`[TICK] Running resolveTick for tick ${newTick}...`);
       const result = resolveTick(colonies, settlements, units, hexes, queuedActions, undefined, this.worldId, newTick, currentAgreements);
+      console.log(`[TICK] resolveTick complete. colonies=${result.colonies.length}, units=${result.units.length}, events=${result.events.length}`);
 
       // Persist results
+      console.log(`[TICK] Starting DB transaction...`);
       await this.db.transaction(async (tx) => {
         // Update world tick
         await tx
@@ -681,8 +700,13 @@ export class TickScheduler {
         }
       });
 
+      console.log(`[TICK] Tick ${newTick} persisted successfully. Calling onTick...`);
       this.onTick?.(newTick, result.events);
+    } catch (tickErr) {
+      console.error(`[TICK] ERROR in executeTick:`, tickErr);
+      throw tickErr;
     } finally {
+      console.log(`[TICK] executeTick finished, setting running=false`);
       this.running = false;
     }
   }
