@@ -113,8 +113,8 @@ async function startSchedulers(logger) {
             },
             onError: (err) => {
                 logger.error(`[${world.id}] Tick error: ${err.message}`);
+                logger.error(`[${world.id}] Full error stack: ${err.stack}`);
                 if (err.message.includes('column') || err.message.includes('relation') || err.message.includes('undefined')) {
-                    logger.error(`[${world.id}] Full error stack: ${err.stack}`);
                     logger.error(`[${world.id}] HINT: This may be a missing DB column. Run ensureSchema() or check src/db/migrate.ts`);
                 }
             },

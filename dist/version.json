@@ -1,1 +1,1 @@
-{"sha":"f8ecb5121601e7be73c6c56a7f0e69a6128f68f7","short":"f8ecb51","timestamp":"2026-03-26T18:27:14Z","message":"balance: allow 2 farms per settlement to prevent unrecoverable famine (#147)"}
+{"sha":"92c633052975a511468055ad8d669bc21dd88d65","short":"92c6330","timestamp":"2026-03-26T18:49:49Z","message":"debug: always log full error stack on tick errors (ClawControlDev-Leader)"}
