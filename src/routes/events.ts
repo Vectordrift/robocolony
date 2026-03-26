@@ -88,6 +88,7 @@ export async function eventRoutes(app: FastifyInstance) {
         tick: events.tick,
         type: events.type,
         public: events.public,
+        visibility: events.visibility,
         data: events.data,
         publicData: events.publicData,
       })
@@ -96,16 +97,25 @@ export async function eventRoutes(app: FastifyInstance) {
       .orderBy(desc(events.tick))
       .limit(limit);
 
-    // For public events from other colonies, return publicData instead of full data
+    // For public events from other colonies, return publicData instead of full data.
+    // A colony "owns" an event if its ID is in the visibility array.
+    // Public events without the colony in visibility are from other colonies —
+    // those get the redacted publicData to prevent information leakage.
     const mappedEvents = rows.map((row) => {
-      // Check if this event is visible via the colony's visibility array
-      // If it's only public (not in visibility), use publicData when available
+      const isOwnEvent = Array.isArray(row.visibility) && row.visibility.includes(colony.id);
+
+      // Use full data for own events, publicData for other colonies' public events
+      const eventData = isOwnEvent
+        ? row.data
+        : (row.publicData ?? row.data); // fall back to data if publicData not set
+
       return {
         id: row.id,
         tick: row.tick,
         type: row.type,
-        data: row.data,
+        data: eventData,
         public: row.public,
+        own: isOwnEvent, // let clients distinguish own vs observed events
       };
     });
 
