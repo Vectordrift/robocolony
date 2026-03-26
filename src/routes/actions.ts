@@ -51,7 +51,66 @@ const VALID_ACTION_TYPES: Record<string, string[]> = {
   'break_agreement': ['agreementId'],
 };
 
+// Allowed params per action type (used to strip extra fields)
+const ALLOWED_PARAMS: Record<string, string[]> = {
+  'move_unit': ['unitId', 'targetX', 'targetY'],
+  'build': ['settlementId', 'buildingType'],
+  'upgrade_building': ['settlementId', 'buildingType'],
+  'train_unit': ['settlementId', 'unitType'],
+  'found_settlement': ['unitId', 'name'],
+  'demolish': ['settlementId', 'buildingType'],
+  'upgrade_settlement': ['settlementId'],
+  'attack': ['unitId', 'targetX', 'targetY'],
+  'send_message': ['toColonyId', 'message'],
+  'explore': ['unitId'],
+  'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
+  'research': ['techId'],
+  'propose_agreement': ['targetColonyId', 'agreementType', 'terms'],
+  'accept_agreement': ['agreementId'],
+  'reject_agreement': ['agreementId'],
+  'break_agreement': ['agreementId'],
+};
+
+// Valid building types
+const VALID_BUILDING_TYPES = new Set([
+  'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop',
+]);
+
+// Valid unit types
+const VALID_UNIT_TYPES = new Set([
+  'scout', 'militia', 'soldier', 'siege', 'settler',
+]);
+
+// Valid resources
+const VALID_RESOURCES = new Set([
+  'food', 'timber', 'stone', 'iron', 'influence',
+]);
+
+// Valid agreement types
+const VALID_AGREEMENT_TYPES = new Set([
+  'non_aggression', 'trade', 'alliance', 'ceasefire',
+]);
+
 const MAX_ACTIONS_PER_TICK = 10;
+const MAX_SETTLEMENT_NAME_LENGTH = 40;
+const MAX_MESSAGE_LENGTH = 500;
+
+// --- Sanitization ---
+
+/** Strip HTML tags from a string */
+function stripHtml(input: string): string {
+  return input.replace(/<[^>]*>/g, '');
+}
+
+/** Check if a value is a finite integer */
+function isFiniteInt(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val) && Number.isInteger(val);
+}
+
+/** Check if a value is a finite number (int or float) */
+function isFiniteNum(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val);
+}
 
 // --- Validation ---
 
@@ -60,7 +119,11 @@ interface ValidationResult {
   error?: string;
 }
 
-function validateActionType(action: ActionInput): ValidationResult {
+/**
+ * Validate action type, required params, param types, and param values.
+ * Also strips unknown params (additionalProperties: false equivalent).
+ */
+function validateActionParams(action: ActionInput, mapRadius: number): ValidationResult {
   if (!action.type || typeof action.type !== 'string') {
     return { valid: false, error: 'Action type is required' };
   }
@@ -74,9 +137,152 @@ function validateActionType(action: ActionInput): ValidationResult {
     return { valid: false, error: `Action params are required for type: ${action.type}` };
   }
 
+  // Check required params exist
   for (const param of requiredParams) {
     if (action.params[param] === undefined || action.params[param] === null) {
       return { valid: false, error: `Missing required param '${param}' for action type '${action.type}'` };
+    }
+  }
+
+  // Strip unknown params
+  const allowed = ALLOWED_PARAMS[action.type];
+  if (allowed) {
+    for (const key of Object.keys(action.params)) {
+      if (!allowed.includes(key)) {
+        delete action.params[key];
+      }
+    }
+  }
+
+  // --- Type-specific validation ---
+
+  const p = action.params;
+
+  // Coordinate validation for move_unit and attack
+  if (action.type === 'move_unit' || action.type === 'attack') {
+    if (!isFiniteInt(p.targetX)) {
+      return { valid: false, error: `'targetX' must be an integer, got: ${typeof p.targetX === 'number' ? p.targetX : typeof p.targetX}` };
+    }
+    if (!isFiniteInt(p.targetY)) {
+      return { valid: false, error: `'targetY' must be an integer, got: ${typeof p.targetY === 'number' ? p.targetY : typeof p.targetY}` };
+    }
+    if ((p.targetX as number) < -mapRadius || (p.targetX as number) > mapRadius) {
+      return { valid: false, error: `'targetX' out of map bounds: ${p.targetX} (must be between -${mapRadius} and ${mapRadius})` };
+    }
+    if ((p.targetY as number) < -mapRadius || (p.targetY as number) > mapRadius) {
+      return { valid: false, error: `'targetY' out of map bounds: ${p.targetY} (must be between -${mapRadius} and ${mapRadius})` };
+    }
+    if (typeof p.unitId !== 'string' || p.unitId.length === 0) {
+      return { valid: false, error: `'unitId' must be a non-empty string` };
+    }
+  }
+
+  // String ID validation for unit-based actions
+  if (['explore', 'found_settlement'].includes(action.type)) {
+    if (typeof p.unitId !== 'string' || p.unitId.length === 0) {
+      return { valid: false, error: `'unitId' must be a non-empty string` };
+    }
+  }
+
+  // Settlement name validation
+  if (action.type === 'found_settlement') {
+    if (typeof p.name !== 'string' || p.name.trim().length === 0) {
+      return { valid: false, error: `'name' must be a non-empty string` };
+    }
+    if (p.name.length > MAX_SETTLEMENT_NAME_LENGTH) {
+      return { valid: false, error: `'name' too long: max ${MAX_SETTLEMENT_NAME_LENGTH} characters` };
+    }
+    // Strip HTML from settlement names
+    p.name = stripHtml(p.name as string).trim();
+    if (p.name.length === 0) {
+      return { valid: false, error: `'name' must contain visible characters (not just HTML tags)` };
+    }
+  }
+
+  // Building type validation
+  if (['build', 'upgrade_building', 'demolish'].includes(action.type)) {
+    if (typeof p.settlementId !== 'string' || p.settlementId.length === 0) {
+      return { valid: false, error: `'settlementId' must be a non-empty string` };
+    }
+    if (typeof p.buildingType !== 'string' || !VALID_BUILDING_TYPES.has(p.buildingType as string)) {
+      return { valid: false, error: `Invalid buildingType '${p.buildingType}'. Valid: ${[...VALID_BUILDING_TYPES].join(', ')}` };
+    }
+  }
+
+  // Unit type validation for train_unit
+  if (action.type === 'train_unit') {
+    if (typeof p.settlementId !== 'string' || p.settlementId.length === 0) {
+      return { valid: false, error: `'settlementId' must be a non-empty string` };
+    }
+    if (typeof p.unitType !== 'string' || !VALID_UNIT_TYPES.has(p.unitType as string)) {
+      return { valid: false, error: `Invalid unitType '${p.unitType}'. Valid: ${[...VALID_UNIT_TYPES].join(', ')}` };
+    }
+  }
+
+  // upgrade_settlement validation
+  if (action.type === 'upgrade_settlement') {
+    if (typeof p.settlementId !== 'string' || p.settlementId.length === 0) {
+      return { valid: false, error: `'settlementId' must be a non-empty string` };
+    }
+  }
+
+  // send_message validation — sanitize HTML
+  if (action.type === 'send_message') {
+    if (typeof p.toColonyId !== 'string' || p.toColonyId.length === 0) {
+      return { valid: false, error: `'toColonyId' must be a non-empty string` };
+    }
+    if (typeof p.message !== 'string') {
+      return { valid: false, error: `'message' must be a string` };
+    }
+    // Strip HTML tags from message content
+    p.message = stripHtml(p.message as string).trim();
+    if (p.message.length === 0) {
+      return { valid: false, error: `'message' must contain visible text (not just HTML tags)` };
+    }
+    if ((p.message as string).length > MAX_MESSAGE_LENGTH) {
+      return { valid: false, error: `'message' too long: max ${MAX_MESSAGE_LENGTH} characters (got ${(p.message as string).length})` };
+    }
+  }
+
+  // convert_resources validation
+  if (action.type === 'convert_resources') {
+    if (typeof p.settlementId !== 'string' || p.settlementId.length === 0) {
+      return { valid: false, error: `'settlementId' must be a non-empty string` };
+    }
+    if (typeof p.fromResource !== 'string' || !VALID_RESOURCES.has(p.fromResource as string)) {
+      return { valid: false, error: `Invalid fromResource '${p.fromResource}'. Valid: ${[...VALID_RESOURCES].join(', ')}` };
+    }
+    if (typeof p.toResource !== 'string' || !VALID_RESOURCES.has(p.toResource as string)) {
+      return { valid: false, error: `Invalid toResource '${p.toResource}'. Valid: ${[...VALID_RESOURCES].join(', ')}` };
+    }
+    if (p.fromResource === p.toResource) {
+      return { valid: false, error: `'fromResource' and 'toResource' must be different` };
+    }
+    if (!isFiniteNum(p.amount) || (p.amount as number) <= 0) {
+      return { valid: false, error: `'amount' must be a positive number` };
+    }
+  }
+
+  // research validation
+  if (action.type === 'research') {
+    if (typeof p.techId !== 'string' || p.techId.length === 0) {
+      return { valid: false, error: `'techId' must be a non-empty string` };
+    }
+  }
+
+  // Agreement validations
+  if (action.type === 'propose_agreement') {
+    if (typeof p.targetColonyId !== 'string' || p.targetColonyId.length === 0) {
+      return { valid: false, error: `'targetColonyId' must be a non-empty string` };
+    }
+    if (typeof p.agreementType !== 'string' || !VALID_AGREEMENT_TYPES.has(p.agreementType as string)) {
+      return { valid: false, error: `Invalid agreementType '${p.agreementType}'. Valid: ${[...VALID_AGREEMENT_TYPES].join(', ')}` };
+    }
+  }
+
+  if (['accept_agreement', 'reject_agreement', 'break_agreement'].includes(action.type)) {
+    if (typeof p.agreementId !== 'string' || p.agreementId.length === 0) {
+      return { valid: false, error: `'agreementId' must be a non-empty string` };
     }
   }
 
@@ -174,9 +380,9 @@ export async function actionRoutes(app: FastifyInstance) {
       });
     }
 
-    // Get world for current tick
+    // Get world for current tick and map radius
     const world = await db
-      .select({ currentTick: worlds.currentTick, status: worlds.status })
+      .select({ currentTick: worlds.currentTick, status: worlds.status, mapRadius: worlds.mapRadius })
       .from(worlds)
       .where(eq(worlds.id, worldId))
       .limit(1);
@@ -191,6 +397,35 @@ export async function actionRoutes(app: FastifyInstance) {
 
     const currentTick = world[0].currentTick;
     const nextTick = currentTick + 1;
+    const mapRadius = world[0].mapRadius;
+
+    // Validate all actions first (before rate limit — invalid actions should not consume slots)
+    const validationErrors: Array<{ index: number; error: string }> = [];
+
+    for (let i = 0; i < body.actions.length; i++) {
+      const action = body.actions[i];
+
+      // Comprehensive type + value validation (also strips extra params)
+      const paramResult = validateActionParams(action, mapRadius);
+      if (!paramResult.valid) {
+        validationErrors.push({ index: i, error: paramResult.error! });
+        continue;
+      }
+
+      // Ownership validation
+      const ownerResult = await validateOwnership(colony.id, worldId, action);
+      if (!ownerResult.valid) {
+        validationErrors.push({ index: i, error: ownerResult.error! });
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      return reply.code(400).send({
+        error: 'validation_error',
+        message: 'One or more actions failed validation',
+        details: validationErrors,
+      });
+    }
 
     // Rate limit: count existing queued actions for next tick
     const existingCount = await db
@@ -219,34 +454,6 @@ export async function actionRoutes(app: FastifyInstance) {
       }
       body.actions = body.actions.slice(0, remainingSlots);
       truncated = true;
-    }
-
-    // Validate all actions first (fail fast)
-    const validationErrors: Array<{ index: number; error: string }> = [];
-
-    for (let i = 0; i < body.actions.length; i++) {
-      const action = body.actions[i];
-
-      // Type validation
-      const typeResult = validateActionType(action);
-      if (!typeResult.valid) {
-        validationErrors.push({ index: i, error: typeResult.error! });
-        continue;
-      }
-
-      // Ownership validation
-      const ownerResult = await validateOwnership(colony.id, worldId, action);
-      if (!ownerResult.valid) {
-        validationErrors.push({ index: i, error: ownerResult.error! });
-      }
-    }
-
-    if (validationErrors.length > 0) {
-      return reply.code(400).send({
-        error: 'validation_error',
-        message: 'One or more actions failed validation',
-        details: validationErrors,
-      });
     }
 
     // Insert all actions
@@ -387,5 +594,3 @@ export async function actionRoutes(app: FastifyInstance) {
     return rows[0];
   });
 }
-
-
