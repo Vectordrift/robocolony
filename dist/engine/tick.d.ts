@@ -179,6 +179,12 @@ export declare const SCORE_TECH = 25;
 export declare const SCORE_EXPLORED_PER_10 = 1;
 /** Morale recovery per tick when food is positive */
 export declare const MORALE_RECOVERY_RATE = 0.1;
+/** Military unit types that benefit from field army morale bonuses */
+export declare const MILITARY_UNIT_TYPES: ReadonlySet<string>;
+/** Passive morale recovery per tick for military units during famine (field cohesion/foraging) */
+export declare const FIELD_ARMY_MORALE_RECOVERY = 0.01;
+/** Famine morale loss multiplier for military units NOT near a settlement (hardened troops) */
+export declare const MILITARY_FAMINE_RESISTANCE = 0.75;
 /** Ticks of inactivity before emitting idle unit warning */
 export declare const IDLE_WARNING_TICKS = 3;
 /** Ticks of colony inactivity before warning event */
@@ -235,7 +241,7 @@ export declare const COMBAT_MORALE_LOSS = 0.1;
 /** Max random bonus multiplier for attack damage (0 to this value) */
 export declare const COMBAT_RANDOM_BONUS = 0.3;
 /** Morale boost for units on the winning side of combat */
-export declare const COMBAT_MORALE_WIN = 0.1;
+export declare const COMBAT_MORALE_WIN = 0.15;
 /** Morale penalty for units on the losing side of combat */
 export declare const COMBAT_MORALE_LOSE = 0.15;
 /** Maximum morale a unit can reach from combat victories */
