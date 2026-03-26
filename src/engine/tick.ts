@@ -2440,8 +2440,9 @@ export function autoExploreIdleScouts(
   );
 
   for (const scout of idleScouts) {
-    const explored = exploredByColony.get(scout.colonyId);
-    if (!explored) continue;
+    const exploredOrUndefined = exploredByColony.get(scout.colonyId);
+    if (!exploredOrUndefined) continue;
+    const explored: Set<string> = exploredOrUndefined;
 
     // Find frontier: unexplored hexes adjacent to explored territory
     // To be efficient, we check neighbors of explored hexes that are NOT explored
