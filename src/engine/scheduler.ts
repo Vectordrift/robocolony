@@ -393,10 +393,12 @@ export class TickScheduler {
             await tx
               .update(schema.settlements)
               .set({
+                colonyId: settlement.colonyId,
                 buildings: settlement.buildings,
                 tier: settlement.tier,
                 population: settlement.population,
                 buildQueue: settlement.buildQueue,
+                loyalty: settlement.loyalty,
               })
               .where(eq(schema.settlements.id, settlement.id));
           } else {
