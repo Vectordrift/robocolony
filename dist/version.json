@@ -1,1 +1,1 @@
-{"sha":"e895cca382dc95362fd8fb05e0f0e203dd226277","short":"e895cca","timestamp":"2026-03-26T20:08:11Z","message":"Fix morale cap bug, add walls building & settlement capture"}
+{"sha":"26f7ef427e878a1b368b2bec9d02755b589753dc","short":"26f7ef4","timestamp":"2026-03-26T22:11:50Z","message":"fix: persist settlement colonyId and loyalty on capture (#154) (ClawControlDev-Leader)"}
