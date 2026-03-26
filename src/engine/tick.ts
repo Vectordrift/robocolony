@@ -446,6 +446,12 @@ const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 
 // --- Helpers ---
 
+/** Truncate user-supplied IDs in error messages to prevent log bloat */
+function truncId(id: string, maxLen = 50): string {
+  if (id.length <= maxLen) return id;
+  return id.substring(0, maxLen) + '…[truncated]';
+}
+
 function hexKey(x: number, y: number): string {
   return `${x},${y}`;
 }
@@ -517,7 +523,7 @@ export function resolveBuilding(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} not found`,
+        result: `Settlement ${truncId(settlementId)} not found`,
       });
       continue;
     }
@@ -527,7 +533,7 @@ export function resolveBuilding(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+        result: `Settlement ${truncId(settlementId)} does not belong to this colony`,
       });
       continue;
     }
@@ -583,7 +589,7 @@ export function resolveBuilding(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Colony ${action.colonyId} not found`,
+        result: `Colony ${truncId(action.colonyId)} not found`,
       });
       continue;
     }
@@ -733,7 +739,7 @@ export function resolveUpgradeBuilding(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} not found`,
+        result: `Settlement ${truncId(settlementId)} not found`,
       });
       continue;
     }
@@ -743,7 +749,7 @@ export function resolveUpgradeBuilding(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+        result: `Settlement ${truncId(settlementId)} does not belong to this colony`,
       });
       continue;
     }
@@ -797,7 +803,7 @@ export function resolveUpgradeBuilding(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Colony ${action.colonyId} not found`,
+        result: `Colony ${truncId(action.colonyId)} not found`,
       });
       continue;
     }
@@ -897,7 +903,7 @@ export function resolveDemolish(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} not found`,
+        result: `Settlement ${truncId(settlementId)} not found`,
       });
       continue;
     }
@@ -907,7 +913,7 @@ export function resolveDemolish(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+        result: `Settlement ${truncId(settlementId)} does not belong to this colony`,
       });
       continue;
     }
@@ -941,7 +947,7 @@ export function resolveDemolish(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Colony ${action.colonyId} not found`,
+        result: `Colony ${truncId(action.colonyId)} not found`,
       });
       continue;
     }
@@ -1064,7 +1070,7 @@ export function resolveFoundSettlement(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Unit ${unitId} not found`,
+        result: `Unit ${truncId(unitId)} not found`,
       });
       continue;
     }
@@ -1074,7 +1080,7 @@ export function resolveFoundSettlement(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Unit ${unitId} does not belong to colony ${action.colonyId}`,
+        result: `Unit ${truncId(unitId)} does not belong to this colony`,
       });
       continue;
     }
@@ -1149,7 +1155,7 @@ export function resolveFoundSettlement(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Colony ${action.colonyId} not found`,
+        result: `Colony ${truncId(action.colonyId)} not found`,
       });
       continue;
     }
@@ -1282,7 +1288,7 @@ export function resolveTrainUnit(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} not found`,
+        result: `Settlement ${truncId(settlementId)} not found`,
       });
       continue;
     }
@@ -1292,7 +1298,7 @@ export function resolveTrainUnit(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+        result: `Settlement ${truncId(settlementId)} does not belong to this colony`,
       });
       continue;
     }
@@ -1325,7 +1331,7 @@ export function resolveTrainUnit(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Colony ${action.colonyId} not found`,
+        result: `Colony ${truncId(action.colonyId)} not found`,
       });
       continue;
     }
@@ -1433,7 +1439,7 @@ export function resolveUpgradeSettlement(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} not found`,
+        result: `Settlement ${truncId(settlementId)} not found`,
       });
       continue;
     }
@@ -1443,7 +1449,7 @@ export function resolveUpgradeSettlement(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+        result: `Settlement ${truncId(settlementId)} does not belong to this colony`,
       });
       continue;
     }
@@ -1477,7 +1483,7 @@ export function resolveUpgradeSettlement(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Colony ${action.colonyId} not found`,
+        result: `Colony ${truncId(action.colonyId)} not found`,
       });
       continue;
     }
@@ -1577,7 +1583,7 @@ export function resolveMovement(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Unit ${unitId} not found`,
+        result: `Unit ${truncId(unitId)} not found`,
       });
       continue;
     }
@@ -1587,7 +1593,7 @@ export function resolveMovement(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Unit ${unitId} does not belong to colony ${action.colonyId}`,
+        result: `Unit ${truncId(unitId)} does not belong to this colony`,
       });
       continue;
     }
@@ -2280,7 +2286,7 @@ export function resolveConvertResources(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} not found`,
+        result: `Settlement ${truncId(settlementId)} not found`,
       });
       continue;
     }
@@ -2290,7 +2296,7 @@ export function resolveConvertResources(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Settlement ${settlementId} does not belong to colony ${action.colonyId}`,
+        result: `Settlement ${truncId(settlementId)} does not belong to this colony`,
       });
       continue;
     }
@@ -2359,7 +2365,7 @@ export function resolveConvertResources(
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Colony ${action.colonyId} not found`,
+        result: `Colony ${truncId(action.colonyId)} not found`,
       });
       continue;
     }
@@ -2520,25 +2526,29 @@ export function autoExploreIdleScouts(
 
     frontierCandidates.sort((a, b) => frontierScore(b) - frontierScore(a));
 
-    // Try pathfinding to top-scored candidates (try up to 15)
+    // Partition candidates: prefer those at distance >= 2 from the scout
+    // to prevent 1-hop oscillation (scout bounces between adjacent hexes).
+    const farCandidates = frontierCandidates.filter(c => hexDistance(scoutPos, c) >= 2);
+    const nearCandidates = frontierCandidates.filter(c => hexDistance(scoutPos, c) < 2);
+
+    // Try far candidates first (prevents oscillation)
     let bestPath: HexCoord[] | null = null;
     let bestTarget: HexCoord | null = null;
 
-    for (let i = 0; i < Math.min(frontierCandidates.length, 15); i++) {
-      const candidate = frontierCandidates[i];
+    for (let i = 0; i < Math.min(farCandidates.length, 15); i++) {
+      const candidate = farCandidates[i];
       const path = findPath(scoutPos, candidate, hexLookup);
-      // Require path length >= 2 to avoid 1-hop oscillation
-      if (path && path.length >= 2) {
+      if (path && path.length > 0) {
         bestPath = path;
         bestTarget = candidate;
         break;
       }
     }
 
-    // Fallback: if no path with length >= 2, accept any valid path
+    // Fallback: near candidates only if no far candidates have paths
     if (!bestPath) {
-      for (let i = 0; i < Math.min(frontierCandidates.length, 15); i++) {
-        const candidate = frontierCandidates[i];
+      for (let i = 0; i < Math.min(nearCandidates.length, 15); i++) {
+        const candidate = nearCandidates[i];
         const path = findPath(scoutPos, candidate, hexLookup);
         if (path && path.length > 0) {
           bestPath = path;
