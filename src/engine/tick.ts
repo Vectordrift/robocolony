@@ -182,7 +182,6 @@ export const TECH_TREE: Record<TechId, TechDefinition> = {
   },
 };
 
-export const SCORE_RESEARCH_COMPLETE = 75;
 
 export interface TickResult {
   colonies: Colony[];
@@ -312,13 +311,13 @@ export const MORALE_WARNING_THRESHOLD = 0.4;
 export const MAX_DEFICIT_MULTIPLIER = 3.0;
 
 // --- Legacy Score Awards ---
-export const SCORE_PER_TICK = 1;
-export const SCORE_SETTLEMENT_FOUNDED = 50;
-export const SCORE_UPGRADE_TOWN = 100;
-export const SCORE_UPGRADE_CITY = 250;
-export const SCORE_BUILDING_BUILT = 25;
-export const SCORE_UNIT_TRAINED = 10;
-export const SCORE_COMBAT_VICTORY = 100;
+// --- Snapshot-based scoring (recalculated every tick from current state) ---
+export const SCORE_SETTLEMENT: Record<string, number> = { outpost: 10, town: 30, city: 100 };
+export const SCORE_POP_PER_10 = 1;
+export const SCORE_BUILDING_LEVEL = 5;
+export const SCORE_UNIT: Record<string, number> = { scout: 2, militia: 5, soldier: 10, siege: 15, settler: 3 };
+export const SCORE_TECH = 25;
+export const SCORE_EXPLORED_PER_10 = 1;
 
 /** Morale recovery per tick when food is positive */
 export const MORALE_RECOVERY_RATE = 0.10;
@@ -3770,40 +3769,38 @@ export function resolveTick(
   }
 
 
-  // --- Legacy Score Tracking ---
-  // Award points based on events that happened this tick
+  // --- Snapshot Score (recalculated every tick from current state) ---
   for (const colony of updatedColonies) {
-    if (colony.status !== 'active') continue;
-    
-    // +1 per tick alive
-    colony.legacyScore = (colony.legacyScore ?? 0) + SCORE_PER_TICK;
-    
-    // Score from events
-    for (const event of events) {
-      if (!('colonyId' in event) || event.colonyId !== colony.id) continue;
-      
-      switch (event.type) {
-        case 'settlement_founded':
-          colony.legacyScore += SCORE_SETTLEMENT_FOUNDED;
-          break;
-        case 'settlement_upgraded':
-          if ((event.data as any)?.newTier === 'town') colony.legacyScore += SCORE_UPGRADE_TOWN;
-          if ((event.data as any)?.newTier === 'city') colony.legacyScore += SCORE_UPGRADE_CITY;
-          break;
-        case 'building_complete':
-          colony.legacyScore += SCORE_BUILDING_BUILT;
-          break;
-        case 'unit_trained':
-          colony.legacyScore += SCORE_UNIT_TRAINED;
-          break;
-        case 'combat_resolved':
-          if ((event.data as any)?.winner === colony.id) colony.legacyScore += SCORE_COMBAT_VICTORY;
-          break;
-        case 'research_complete':
-          colony.legacyScore += SCORE_RESEARCH_COMPLETE;
-          break;
+    if (colony.status !== 'active') { continue; }
+    let score = 0;
+
+    // Settlements: tier-based
+    const mySettlements = colonySettlements.get(colony.id) ?? [];
+    for (const s of mySettlements) {
+      score += SCORE_SETTLEMENT[s.tier] ?? 10;
+      // Buildings: per level
+      for (const b of (s.buildings ?? [])) {
+        score += SCORE_BUILDING_LEVEL * (b.level || 1);
       }
+      // Population: per 10
+      score += Math.floor(s.population / 10) * SCORE_POP_PER_10;
     }
+
+    // Army: per unit type
+    const myUnits = colonyUnits.get(colony.id) ?? [];
+    for (const u of myUnits) {
+      score += SCORE_UNIT[u.type] ?? 2;
+    }
+
+    // Research: per completed tech
+    const researched: string[] = (colony as any).researchedTechs ?? [];
+    score += researched.length * SCORE_TECH;
+
+    // Territory: per 10 explored hexes
+    const exploredCount = hexes.filter(h => h.exploredBy?.includes(colony.id)).length;
+    score += Math.floor(exploredCount / 10) * SCORE_EXPLORED_PER_10;
+
+    colony.legacyScore = score;
   }
 
 
