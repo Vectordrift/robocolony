@@ -1,9 +1,3 @@
-/**
- * Tick engine — resolves one game tick.
- *
- * Pure function: takes world state in, returns updated state + events out.
- * No database access — the scheduler handles persistence.
- */
 import type { HexCoord } from './hex.js';
 import type { HexResources } from './mapgen.js';
 import type { HexLookup } from './pathfinding.js';
@@ -153,8 +147,8 @@ export declare const BUILD_TIME = 3;
 export declare const VALID_BUILDING_TYPES: BuildingType[];
 /** Unit food upkeep per tick */
 export declare const UNIT_UPKEEP: Record<UnitType, number>;
-/** Population food consumption per person per tick */
-export declare const POP_FOOD_CONSUMPTION = 0.4;
+/** Population food consumption per person per tick (reduced from 0.4 to enable faster growth) */
+export declare const POP_FOOD_CONSUMPTION = 0.25;
 /** Unit training costs (resources needed to recruit) */
 export declare const UNIT_TRAINING_COSTS: Record<UnitType, Partial<Resources>>;
 /** All valid unit types for training */
@@ -208,15 +202,15 @@ export declare const MAX_POPULATION: Record<string, number>;
 /** Maximum number of building slots per settlement tier */
 export declare const BUILDING_SLOTS: Record<string, number>;
 /** Population growth rate: +1 per this many excess food */
-export declare const POP_GROWTH_PER_FOOD = 5;
+export declare const POP_GROWTH_PER_FOOD = 3;
 /** Stockpile capacity per settlement tier (per resource) */
 export declare const STOCKPILE_CAP: Record<string, number>;
 /** Additional stockpile capacity per granary level */
 export declare const GRANARY_BONUS_PER_LEVEL = 200;
 /** Additional stockpile capacity per warehouse level (all resources) */
 export declare const WAREHOUSE_BONUS_PER_LEVEL = 150;
-/** Fraction of excess resources that decay each tick (5%) */
-export declare const STOCKPILE_DECAY_RATE = 0.03;
+/** Fraction of excess resources that decay each tick (2%) */
+export declare const STOCKPILE_DECAY_RATE = 0.02;
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
 export declare const STOCKPILE_HARD_CEILING = 2;
 /** Fraction of building cost refunded on demolish (25%) */
