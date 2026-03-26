@@ -13,6 +13,32 @@ import { worlds, hexes, colonies, settlements, units } from '../db/schema/index.
 import { generateWorld, findStartingPositions, recommendedRadius, recommendedMinSpacing } from '../engine/mapgen.js';
 import { hexDistance } from '../engine/hex.js';
 import { generateApiKey, hashApiKey } from '../lib/auth.js';
+// --- Input Sanitization ---
+/** Only allow alphanumeric, spaces, hyphens, underscores, apostrophes */
+const VALID_NAME_REGEX = /^[a-zA-Z0-9 _'-]+$/;
+function sanitizeName(name, maxLength) {
+    const trimmed = name.trim();
+    if (trimmed.length === 0) {
+        return { valid: false, sanitized: '', error: 'Name is required' };
+    }
+    if (trimmed.length > maxLength) {
+        return { valid: false, sanitized: '', error: `Name must be ${maxLength} characters or less` };
+    }
+    if (!VALID_NAME_REGEX.test(trimmed)) {
+        return { valid: false, sanitized: '', error: 'Name may only contain letters, numbers, spaces, hyphens, underscores, and apostrophes' };
+    }
+    return { valid: true, sanitized: trimmed };
+}
+// --- Admin Auth ---
+const ADMIN_KEY = process.env.ADMIN_KEY || null;
+function isAdminRequest(request) {
+    if (!ADMIN_KEY)
+        return false; // If no admin key configured, admin endpoints are locked
+    const authHeader = request.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer '))
+        return false;
+    return authHeader.slice(7) === ADMIN_KEY;
+}
 // --- Constants ---
 const DEFAULT_RESOURCES = {
     food: 100,
@@ -80,22 +106,30 @@ export async function worldRoutes(app) {
             colonyCount: Number(colonyCount[0]?.count ?? 0),
         };
     });
-    // Create world (admin)
+    // Create world (admin only — requires ADMIN_KEY)
     app.post('/api/worlds', async (request, reply) => {
+        // Admin authentication required
+        if (!isAdminRequest(request)) {
+            return reply.code(403).send({
+                error: 'forbidden',
+                message: 'World creation requires admin authentication',
+            });
+        }
         const body = request.body;
-        if (!body?.name || typeof body.name !== 'string' || body.name.trim().length === 0) {
+        if (!body?.name || typeof body.name !== 'string') {
             return reply.code(400).send({
                 error: 'validation_error',
                 message: 'World name is required',
             });
         }
-        const name = body.name.trim();
-        if (name.length > 50) {
+        const nameCheck = sanitizeName(body.name, 50);
+        if (!nameCheck.valid) {
             return reply.code(400).send({
                 error: 'validation_error',
-                message: 'World name must be 50 characters or less',
+                message: nameCheck.error,
             });
         }
+        const name = nameCheck.sanitized;
         const mapSeed = body.mapSeed ?? Math.floor(Math.random() * 2147483647);
         const maxColonies = body.maxColonies ?? 8;
         // Default radius scales with colony count: 2→25, 4→35, 8→50, 16→70
@@ -167,19 +201,20 @@ export async function worldRoutes(app) {
     app.post('/api/worlds/:id/join', async (request, reply) => {
         const { id: worldId } = request.params;
         const body = request.body;
-        if (!body?.name || typeof body.name !== 'string' || body.name.trim().length === 0) {
+        if (!body?.name || typeof body.name !== 'string') {
             return reply.code(400).send({
                 error: 'validation_error',
                 message: 'Colony name is required',
             });
         }
-        const colonyName = body.name.trim();
-        if (colonyName.length > 40) {
+        const nameCheck = sanitizeName(body.name, 40);
+        if (!nameCheck.valid) {
             return reply.code(400).send({
                 error: 'validation_error',
-                message: 'Colony name must be 40 characters or less',
+                message: nameCheck.error,
             });
         }
+        const colonyName = nameCheck.sanitized;
         // Get world
         const world = await db
             .select()
@@ -214,12 +249,22 @@ export async function worldRoutes(app) {
                 message: 'Colony name is already taken in this world',
             });
         }
-        // Count existing colonies (for status tracking, no hard cap — map geometry is the limit)
+        // Count existing colonies and enforce maxColonies limit
         const colonyCountResult = await db
             .select({ count: sql `count(*)` })
             .from(colonies)
             .where(eq(colonies.worldId, worldId));
         const colonyCount = Number(colonyCountResult[0]?.count ?? 0);
+        if (colonyCount >= w.maxColonies) {
+            // Also mark world as full if not already
+            if (w.status !== 'full') {
+                await db.update(worlds).set({ status: 'full' }).where(eq(worlds.id, worldId));
+            }
+            return reply.code(409).send({
+                error: 'world_full',
+                message: `This world has reached the maximum of ${w.maxColonies} colonies.`,
+            });
+        }
         // Find a starting position dynamically
         // Get existing colony settlements to determine occupied positions
         const existingSettlements = await db
