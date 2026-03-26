@@ -10,6 +10,7 @@ export const hexes = pgTable('hexes', {
   resources: jsonb('resources').notNull().default({}),
   settlementId: text('settlement_id'),
   exploredBy: text('explored_by').array().default(sql`'{}'`),
+  poi: jsonb('poi'),  // { type, discoveredBy?, discoveredAtTick? } — null if no POI
 }, (table) => [
   primaryKey({ columns: [table.worldId, table.x, table.y] }),
 ]);

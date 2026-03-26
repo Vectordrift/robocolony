@@ -76,6 +76,12 @@ export interface Unit {
 
 export type UnitType = 'scout' | 'militia' | 'soldier' | 'siege' | 'settler';
 
+export interface PoiState {
+  type: string;
+  discoveredBy?: string;
+  discoveredAtTick?: number;
+}
+
 export interface HexTileState {
   x: number;
   y: number;
@@ -83,6 +89,7 @@ export interface HexTileState {
   resources: HexResources;
   settlementId: string | null;
   exploredBy?: string[];
+  poi?: PoiState | null;
 }
 
 export interface QueuedAction {
@@ -3157,6 +3164,58 @@ export function resolveTick(
     const fogResult = computeFogReveals(movedUnits, allHexCoords, alreadyExplored, { settlementHexes, unitHexes });
     fogReveals.push(...fogResult.reveals);
     events.push(...fogResult.events);
+
+    // --- POI Discovery: check newly revealed hexes for discovery POIs ---
+    const DISCOVERY_BONUSES: Record<string, Partial<Resources>> = {
+      ancient_ruins:   { stone: 50, iron: 30 },
+      abandoned_cache: { food: 30, timber: 20, stone: 20 },
+      crystal_cavern:  { iron: 80 },
+    };
+
+    for (const reveal of fogResult.reveals) {
+      const hex = hexMap.get(hexKey(reveal.hex.q, reveal.hex.r));
+      if (!hex?.poi) continue;
+      if (hex.poi.discoveredBy) continue; // Already discovered by someone else
+
+      const poiType = hex.poi.type;
+      const bonus = DISCOVERY_BONUSES[poiType];
+
+      // Mark POI as discovered
+      hex.poi = { ...hex.poi, discoveredBy: reveal.colonyId, discoveredAtTick: currentTick ?? 0 };
+
+      if (bonus) {
+        // Apply one-time resource bonus to discovering colony
+        const colony = updatedColonies.find(c => c.id === reveal.colonyId);
+        if (colony) {
+          for (const [resource, amount] of Object.entries(bonus)) {
+            colony.resources[resource as keyof Resources] += amount as number;
+          }
+          events.push({
+            type: 'poi_discovered',
+            colonyId: reveal.colonyId,
+            data: {
+              poiType,
+              x: reveal.hex.q,
+              y: reveal.hex.r,
+              bonus,
+              message: `Discovered ${poiType.replace(/_/g, ' ')}! Gained ${Object.entries(bonus).map(([r, a]) => `${a} ${r}`).join(', ')}.`,
+            },
+          });
+        }
+      } else {
+        // Strategic POIs (watchtower, sacred_grove) — just announce discovery
+        events.push({
+          type: 'poi_discovered',
+          colonyId: reveal.colonyId,
+          data: {
+            poiType,
+            x: reveal.hex.q,
+            y: reveal.hex.r,
+            message: `Discovered ${poiType.replace(/_/g, ' ')} at (${reveal.hex.q}, ${reveal.hex.r})!`,
+          },
+        });
+      }
+    }
   }
 
   // --- Phase 0.9: Resolve upgrade_building actions (before build queue advances) ---
@@ -3297,6 +3356,44 @@ export function resolveTick(
       if (mySettlements.length > 1) {
         totalProduction.food += (mySettlements.length - 1) * 2;
       }
+    }
+
+    // --- POI Resource Bonuses ---
+    // Resource POIs within 3 hexes of a settlement provide bonus resources per tick
+    const POI_RESOURCE_RANGE = 3;
+    const poiBonuses: Resources = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
+    const claimedPoiHexes = new Set<string>();
+
+    for (const settlement of mySettlements) {
+      const settlementCoord: HexCoord = { q: settlement.hexX, r: settlement.hexY };
+      // Scan all hexes with POIs and check distance
+      for (const [key, hex] of hexMap.entries()) {
+        if (!hex.poi) continue;
+        if (claimedPoiHexes.has(key)) continue; // Don't double-count
+        if (hexDistance(settlementCoord, { q: hex.x, r: hex.y }) > POI_RESOURCE_RANGE) continue;
+
+        switch (hex.poi.type) {
+          case 'mineral_deposit':
+            poiBonuses.iron += 2;
+            poiBonuses.stone += 1;
+            claimedPoiHexes.add(key);
+            break;
+          case 'fertile_valley':
+            poiBonuses.food += 3;
+            claimedPoiHexes.add(key);
+            break;
+          case 'ancient_forest':
+            poiBonuses.timber += 2;
+            poiBonuses.food += 1;
+            claimedPoiHexes.add(key);
+            break;
+          // Discovery and strategic POIs don't produce resources here
+        }
+      }
+    }
+
+    for (const key of Object.keys(totalProduction) as (keyof Resources)[]) {
+      totalProduction[key] += poiBonuses[key];
     }
 
     // --- Apply net resources ---
@@ -3559,6 +3656,20 @@ export function resolveTick(
       for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
         if (unit.morale < 1.0) {
           unit.morale = Math.min(1.0, unit.morale + MORALE_RECOVERY_RATE);
+        }
+      }
+    }
+
+    // --- Sacred Grove morale bonus ---
+    // Units within 5 hexes of a sacred_grove get +0.01 morale/tick
+    const SACRED_GROVE_RANGE = 5;
+    const SACRED_GROVE_BONUS = 0.01;
+    for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
+      for (const hex of hexes) {
+        if (!hex.poi || hex.poi.type !== 'sacred_grove') continue;
+        if (hexDistance({ q: unit.hexX, r: unit.hexY }, { q: hex.x, r: hex.y }) <= SACRED_GROVE_RANGE) {
+          unit.morale = Math.min(1.0, Math.round((unit.morale + SACRED_GROVE_BONUS) * 100) / 100);
+          break; // One grove is enough
         }
       }
     }

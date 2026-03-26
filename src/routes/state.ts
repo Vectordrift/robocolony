@@ -21,6 +21,7 @@ export interface VisibleHex {
   terrain: string;
   resources: Record<string, number>;
   settlementId: string | null;
+  poi?: { type: string; discoveredBy?: string; discoveredAtTick?: number } | null;
 }
 
 /**
@@ -61,6 +62,7 @@ export async function getVisibleHexes(worldId: string, colonyId: string): Promis
       terrain: hexes.terrain,
       resources: hexes.resources,
       settlementId: hexes.settlementId,
+      poi: hexes.poi,
     })
     .from(hexes)
     .where(
@@ -76,6 +78,7 @@ export async function getVisibleHexes(worldId: string, colonyId: string): Promis
     terrain: h.terrain,
     resources: h.resources as Record<string, number>,
     settlementId: h.settlementId,
+    ...(h.poi ? { poi: h.poi as VisibleHex['poi'] } : {}),
   }));
 }
 

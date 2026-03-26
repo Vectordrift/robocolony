@@ -12,11 +12,28 @@ import { multiOctaveNoise, noiseAt, createRng } from './noise.js';
 
 export type TerrainType = 'ocean' | 'coast' | 'plains' | 'forest' | 'mountains' | 'desert' | 'tundra';
 
+export type PoiType =
+  | 'mineral_deposit'   // +2 iron, +1 stone/tick to nearest settlement ≤3 hexes
+  | 'fertile_valley'    // +3 food/tick to nearest settlement ≤3 hexes
+  | 'ancient_forest'    // +2 timber, +1 food/tick to nearest settlement ≤3 hexes
+  | 'ancient_ruins'     // One-time: +50 stone, +30 iron on discovery
+  | 'abandoned_cache'   // One-time: +30 food, +20 timber, +20 stone on discovery
+  | 'crystal_cavern'    // One-time: +80 iron on discovery
+  | 'watchtower'        // +2 vision radius for settlements ≤3 hexes
+  | 'sacred_grove';     // +0.01 morale/tick for units ≤5 hexes
+
+export interface PoiData {
+  type: PoiType;
+  discoveredBy?: string;     // colony ID that first explored this hex
+  discoveredAtTick?: number; // tick when discovered
+}
+
 export interface HexTile {
   q: number;
   r: number;
   terrain: TerrainType;
   resources: HexResources;
+  poi?: PoiData;
 }
 
 export interface HexResources {
@@ -109,6 +126,107 @@ function assignResources(
     stone: Math.max(0, base.stone + vary(stoneNoise)),
     iron: Math.max(0, base.iron + vary(ironNoise)),
   };
+}
+
+// --- Points of Interest ---
+
+/** POI terrain affinity: which terrain types each POI can appear on */
+const POI_TERRAIN: Record<PoiType, TerrainType[]> = {
+  mineral_deposit: ['mountains', 'desert', 'tundra'],
+  fertile_valley:  ['plains', 'forest'],
+  ancient_forest:  ['forest'],
+  ancient_ruins:   ['plains', 'desert', 'tundra', 'mountains'],
+  abandoned_cache: ['plains', 'forest', 'desert', 'tundra'],
+  crystal_cavern:  ['mountains'],
+  watchtower:      ['mountains', 'plains', 'tundra'],
+  sacred_grove:    ['forest', 'plains'],
+};
+
+/** Weighted POI distribution (higher = more common) */
+const POI_WEIGHTS: { type: PoiType; weight: number }[] = [
+  { type: 'mineral_deposit', weight: 15 },
+  { type: 'fertile_valley',  weight: 15 },
+  { type: 'ancient_forest',  weight: 12 },
+  { type: 'ancient_ruins',   weight: 12 },
+  { type: 'abandoned_cache', weight: 15 },
+  { type: 'crystal_cavern',  weight: 8 },
+  { type: 'watchtower',      weight: 10 },
+  { type: 'sacred_grove',    weight: 8 },
+];
+
+const POI_TOTAL_WEIGHT = POI_WEIGHTS.reduce((sum, w) => sum + w.weight, 0);
+
+/** Pick a random POI type using weighted distribution */
+function pickPoiType(rng: () => number, terrain: TerrainType): PoiType | null {
+  // Filter to POIs that can appear on this terrain
+  const eligible = POI_WEIGHTS.filter(w => POI_TERRAIN[w.type].includes(terrain));
+  if (eligible.length === 0) return null;
+
+  const totalWeight = eligible.reduce((sum, w) => sum + w.weight, 0);
+  let roll = rng() * totalWeight;
+  for (const { type, weight } of eligible) {
+    roll -= weight;
+    if (roll <= 0) return type;
+  }
+  return eligible[eligible.length - 1].type;
+}
+
+/** Minimum hex distance between any two POIs */
+const POI_MIN_SPACING = 4;
+
+/** Minimum hex distance between POI and a starting position */
+const POI_START_CLEARANCE = 3;
+
+/** Target POI density: fraction of eligible land hexes that get a POI */
+const POI_DENSITY = 0.04; // ~4% of land hexes
+
+/**
+ * Place points of interest on the map.
+ * Deterministic: same seed always produces the same POI layout.
+ */
+export function placePois(
+  hexes: HexTile[],
+  startingPositions: HexCoord[],
+  seed: number,
+): void {
+  const rng = createRng(seed + 80000);
+
+  // Only consider non-ocean, non-coast hexes
+  const landHexes = hexes.filter(h => h.terrain !== 'ocean' && h.terrain !== 'coast');
+
+  // Shuffle land hexes deterministically
+  const shuffled = landHexes.map(h => ({ hex: h, sort: rng() }));
+  shuffled.sort((a, b) => a.sort - b.sort);
+
+  const targetCount = Math.max(5, Math.floor(landHexes.length * POI_DENSITY));
+  const placedCoords: HexCoord[] = [];
+  let placed = 0;
+
+  for (const { hex } of shuffled) {
+    if (placed >= targetCount) break;
+
+    const coord: HexCoord = { q: hex.q, r: hex.r };
+
+    // Check distance from starting positions
+    const tooCloseToStart = startingPositions.some(
+      sp => hexDistance(sp, coord) < POI_START_CLEARANCE
+    );
+    if (tooCloseToStart) continue;
+
+    // Check distance from other POIs
+    const tooCloseToOther = placedCoords.some(
+      pc => hexDistance(pc, coord) < POI_MIN_SPACING
+    );
+    if (tooCloseToOther) continue;
+
+    // Pick a POI type appropriate for this terrain
+    const poiType = pickPoiType(rng, hex.terrain);
+    if (!poiType) continue;
+
+    hex.poi = { type: poiType };
+    placedCoords.push(coord);
+    placed++;
+  }
 }
 
 // --- Map Sizing ---
@@ -248,6 +366,9 @@ export function generateWorld(
   });
 
   const startingPositions = findStartingPositions(hexes, effectiveRadius, seed, maxColonies);
+
+  // Place points of interest after terrain and starting positions are determined
+  placePois(hexes, startingPositions, seed);
 
   return { seed, radius: effectiveRadius, hexes, startingPositions };
 }
