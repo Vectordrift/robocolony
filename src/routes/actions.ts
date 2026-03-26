@@ -194,7 +194,7 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
     }
     // Strip HTML from settlement names
     p.name = stripHtml(p.name as string).trim();
-    if (p.name.length === 0) {
+    if ((p.name as string).length === 0) {
       return { valid: false, error: `'name' must contain visible characters (not just HTML tags)` };
     }
   }
@@ -236,7 +236,7 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
     }
     // Strip HTML tags from message content
     p.message = stripHtml(p.message as string).trim();
-    if (p.message.length === 0) {
+    if ((p.message as string).length === 0) {
       return { valid: false, error: `'message' must contain visible text (not just HTML tags)` };
     }
     if ((p.message as string).length > MAX_MESSAGE_LENGTH) {
