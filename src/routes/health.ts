@@ -20,13 +20,15 @@ export async function healthRoutes(app: FastifyInstance) {
     return {
       status: 'ok',
       version: versionInfo?.short || 'dev',
-      sha: versionInfo?.sha || null,
-      built: versionInfo?.timestamp || null,
     };
   });
 
-  // Dedicated version endpoint
+  // Dedicated version endpoint — omits commit message to avoid leaking internal details
   app.get('/version', async (_request, _reply) => {
-    return versionInfo || { sha: 'dev', short: 'dev', timestamp: null, message: null };
+    return {
+      sha: versionInfo?.sha || 'dev',
+      short: versionInfo?.short || 'dev',
+      timestamp: versionInfo?.timestamp || null,
+    };
   });
 }
