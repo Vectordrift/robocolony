@@ -2053,14 +2053,17 @@ export function resolveResearch(colonies, settlements, actions) {
             actionResults.push({ actionId: action.id, status: 'failed', result: 'Research queue is full (max 1 at a time). Wait for current research to complete.' });
             continue;
         }
-        // Check resources
+        // Check resources — must check ALL before proceeding
+        let resourceShortage = false;
         for (const [resource, amount] of Object.entries(tech.cost)) {
             const key = resource;
             if ((colony.resources[key] ?? 0) < amount) {
                 actionResults.push({ actionId: action.id, status: 'failed', result: `Not enough ${resource}: need ${amount}, have ${Math.floor(colony.resources[key] ?? 0)}` });
-                continue;
+                resourceShortage = true;
             }
         }
+        if (resourceShortage)
+            continue;
         // Deduct resources
         for (const [resource, amount] of Object.entries(tech.cost)) {
             colony.resources[resource] -= amount;
@@ -3152,4 +3155,3 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         agreementMutations,
     };
 }
-//# sourceMappingURL=tick.js.map

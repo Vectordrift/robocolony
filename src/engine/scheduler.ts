@@ -80,13 +80,18 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
         resource: event.data.resource,
         deficit: event.data.deficit,
       };
-    case 'combat_resolved':
+    case 'combat_resolved': {
+      // Extract participant colony IDs and casualty summary from full combat data
+      const participants = (event.data.participants ?? []) as Array<{ colonyId: string; destroyed: boolean }>;
+      const colonyIds = [...new Set(participants.map(p => p.colonyId))];
       return {
-        attackerColonyId: event.data.attackerColonyId,
-        defenderColonyId: event.data.defenderColonyId,
-        attackerLosses: event.data.attackerLosses,
-        defenderLosses: event.data.defenderLosses,
+        hexX: event.data.hexX,
+        hexY: event.data.hexY,
+        involvedColonies: colonyIds,
+        casualties: event.data.casualties ?? 0,
+        unitsDestroyed: participants.filter(p => p.destroyed).length,
       };
+    }
     case 'unit_destroyed':
       return {
         unitType: event.data.unitType,
@@ -673,6 +678,7 @@ export class TickScheduler {
     }
   }
 }
+
 
 
 

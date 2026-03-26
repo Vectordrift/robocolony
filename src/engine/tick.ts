@@ -2665,14 +2665,16 @@ export function resolveResearch(
       continue;
     }
 
-    // Check resources
+    // Check resources — must check ALL before proceeding
+    let resourceShortage = false;
     for (const [resource, amount] of Object.entries(tech.cost)) {
       const key = resource as keyof Resources;
       if ((colony.resources[key] ?? 0) < (amount as number)) {
         actionResults.push({ actionId: action.id, status: 'failed', result: `Not enough ${resource}: need ${amount}, have ${Math.floor(colony.resources[key] ?? 0)}` });
-        continue;
+        resourceShortage = true;
       }
     }
+    if (resourceShortage) continue;
 
     // Deduct resources
     for (const [resource, amount] of Object.entries(tech.cost)) {
@@ -3891,3 +3893,4 @@ export function resolveTick(
     agreementMutations,
   };
 }
+
