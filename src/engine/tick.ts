@@ -392,6 +392,9 @@ export const BUILDING_SLOTS: Record<string, number> = {
   town: 6,
   city: 7,
 };
+
+/** Maximum number of farms per settlement (farms can be built multiple times) */
+export const MAX_FARMS_PER_SETTLEMENT = 2;
 /** Population growth rate: +1 per this many excess food */
 export const POP_GROWTH_PER_FOOD = 3;
 
@@ -556,23 +559,37 @@ export function resolveBuilding(
     const bType = buildingType as BuildingType;
 
     // 4. Settlement doesn't already have this building type
-    if (settlement.buildings.some(b => b.type === bType)) {
-      actionResults.push({
-        actionId: action.id,
-        status: 'failed',
-        result: `Settlement ${settlementId} already has a ${bType}`,
-      });
-      continue;
-    }
+    // Exception: farms can be built multiple times (up to MAX_FARMS_PER_SETTLEMENT)
+    if (bType === 'farm') {
+      const existingFarms = settlement.buildings.filter(b => b.type === 'farm').length;
+      const queuedFarms = settlement.buildQueue.filter(bq => bq.type === 'farm').length;
+      if (existingFarms + queuedFarms >= MAX_FARMS_PER_SETTLEMENT) {
+        actionResults.push({
+          actionId: action.id,
+          status: 'failed',
+          result: `Settlement ${settlementId} already has the maximum ${MAX_FARMS_PER_SETTLEMENT} farms`,
+        });
+        continue;
+      }
+    } else {
+      if (settlement.buildings.some(b => b.type === bType)) {
+        actionResults.push({
+          actionId: action.id,
+          status: 'failed',
+          result: `Settlement ${settlementId} already has a ${bType}`,
+        });
+        continue;
+      }
 
-    // 5. Not already in build queue
-    if (settlement.buildQueue.some(bq => bq.type === bType)) {
-      actionResults.push({
-        actionId: action.id,
-        status: 'failed',
-        result: `${bType} is already in the build queue for settlement ${settlementId}`,
-      });
-      continue;
+      // 5. Not already in build queue
+      if (settlement.buildQueue.some(bq => bq.type === bType)) {
+        actionResults.push({
+          actionId: action.id,
+          status: 'failed',
+          result: `${bType} is already in the build queue for settlement ${settlementId}`,
+        });
+        continue;
+      }
     }
 
 

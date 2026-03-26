@@ -207,6 +207,8 @@ export declare const TIER_ORDER: string[];
 export declare const MAX_POPULATION: Record<string, number>;
 /** Maximum number of building slots per settlement tier */
 export declare const BUILDING_SLOTS: Record<string, number>;
+/** Maximum number of farms per settlement (farms can be built multiple times) */
+export declare const MAX_FARMS_PER_SETTLEMENT = 2;
 /** Population growth rate: +1 per this many excess food */
 export declare const POP_GROWTH_PER_FOOD = 3;
 /** Stockpile capacity per settlement tier (per resource) */
@@ -513,4 +515,3 @@ export declare function resolveAgreementActions(colonies: Colony[], agreements: 
 export declare function resolveTradeTransfers(colonies: Colony[], agreements: Agreement[]): TradeTransferResult;
 export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number, agreements?: Agreement[]): TickResult;
 export {};
-//# sourceMappingURL=tick.d.ts.map
