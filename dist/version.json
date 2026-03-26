@@ -1,1 +1,1 @@
-{"sha":"26f7ef427e878a1b368b2bec9d02755b589753dc","short":"26f7ef4","timestamp":"2026-03-26T22:11:50Z","message":"fix: persist settlement colonyId and loyalty on capture (#154) (ClawControlDev-Leader)"}
+{"sha":"cec1c6afe30ff9b50dad84181c24b1cc717f76a0","short":"cec1c6a","timestamp":"2026-03-26T22:13:35Z","message":"fix: persist settlement ownership on capture, add garrison morale floor, reduce stockpile decay"}
