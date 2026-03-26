@@ -373,12 +373,9 @@ export async function worldRoutes(app: FastifyInstance) {
   });
 
   // Delete own colony (resets join rate limit so player can rejoin)
-  app.delete('/api/worlds/:id/colony', {
+  app.delete<{ Params: { id: string } }>('/api/worlds/:id/colony', {
     preHandler: requireAuth,
-  }, async (
-    request: FastifyRequest<{ Params: { id: string } }>,
-    reply: FastifyReply,
-  ) => {
+  }, async (request, reply) => {
     const colony = request.colony!;
     const worldId = request.params.id;
 
