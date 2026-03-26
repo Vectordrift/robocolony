@@ -41,7 +41,7 @@ export interface BuildQueueEntry {
     type: BuildingType;
     ticksRemaining: number;
 }
-export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market' | 'workshop' | 'warehouse';
+export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market' | 'workshop' | 'warehouse' | 'walls';
 export interface Unit {
     id: string;
     colonyId: string;
@@ -245,11 +245,15 @@ export declare const COMBAT_MORALE_WIN = 0.15;
 /** Morale penalty for units on the losing side of combat */
 export declare const COMBAT_MORALE_LOSE = 0.15;
 /** Maximum morale a unit can reach from combat victories */
-export declare const COMBAT_MORALE_CAP = 1.5;
+export declare const COMBAT_MORALE_CAP = 1;
 /** Range in hexes from own settlement for homeland defense morale bonus */
 export declare const HOMELAND_DEFENSE_RANGE = 5;
 /** Morale bonus for defending within HOMELAND_DEFENSE_RANGE of own settlement */
 export declare const HOMELAND_MORALE_BONUS = 0.1;
+/** Defense multiplier for units defending on a hex with a settlement that has walls */
+export declare const WALLS_DEFENSE_MULTIPLIER = 1.5;
+/** Legacy score awarded for capturing an enemy settlement */
+export declare const SETTLEMENT_CAPTURE_SCORE = 50;
 export interface BuildResult {
     settlements: Settlement[];
     events: TickEvent[];
@@ -399,6 +403,11 @@ export interface CombatResult {
     destroyedUnitIds: string[];
     events: TickEvent[];
     actionResults: ActionResult[];
+    capturedSettlements: Array<{
+        settlementId: string;
+        fromColony: string;
+        toColony: string;
+    }>;
 }
 /**
  * Resolve combat on all hexes where opposing units coexist.
