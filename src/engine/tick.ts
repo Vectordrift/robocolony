@@ -335,6 +335,15 @@ export const SCORE_EXPLORED_PER_10 = 1;
 /** Morale recovery per tick when food is positive */
 export const MORALE_RECOVERY_RATE = 0.10;
 
+/** Military unit types that benefit from field army morale bonuses */
+export const MILITARY_UNIT_TYPES: ReadonlySet<string> = new Set(['militia', 'soldier', 'siege']);
+
+/** Passive morale recovery per tick for military units during famine (field cohesion/foraging) */
+export const FIELD_ARMY_MORALE_RECOVERY = 0.01;
+
+/** Famine morale loss multiplier for military units NOT near a settlement (hardened troops) */
+export const MILITARY_FAMINE_RESISTANCE = 0.75;
+
 /** Ticks of inactivity before emitting idle unit warning */
 export const IDLE_WARNING_TICKS = 3;
 
@@ -451,7 +460,7 @@ export const COMBAT_MORALE_LOSS = 0.1;
 export const COMBAT_RANDOM_BONUS = 0.3;
 
 /** Morale boost for units on the winning side of combat */
-export const COMBAT_MORALE_WIN = 0.1;
+export const COMBAT_MORALE_WIN = 0.15;
 
 /** Morale penalty for units on the losing side of combat */
 export const COMBAT_MORALE_LOSE = 0.15;
@@ -3837,7 +3846,10 @@ export function resolveTick(
 
           // Apply morale loss with famine floor — units won't starve below MORALE_FAMINE_FLOOR
           // Garrisoned units lose morale at half rate
-          const unitMoraleLoss = nearSettlement ? effectiveMoraleLoss * 0.5 : effectiveMoraleLoss;
+          // Military units in the field take reduced famine damage (hardened troops)
+          const isMilitary = MILITARY_UNIT_TYPES.has(unit.type);
+          const fieldResistance = (!nearSettlement && isMilitary) ? MILITARY_FAMINE_RESISTANCE : 1.0;
+          const unitMoraleLoss = nearSettlement ? effectiveMoraleLoss * 0.5 : effectiveMoraleLoss * fieldResistance;
           unit.morale = Math.max(MORALE_FAMINE_FLOOR, unit.morale - unitMoraleLoss);
 
           // Probabilistic desertion: each unit at/below threshold has DESERTION_CHANCE to desert
@@ -3905,6 +3917,12 @@ export function resolveTick(
         );
         if (nearSettlement && unit.morale < 1.0) {
           unit.morale = Math.min(1.0, unit.morale + GARRISON_MORALE_RECOVERY);
+        } else if (!nearSettlement && MILITARY_UNIT_TYPES.has(unit.type) && unit.morale < 1.0) {
+          // --- Field army cohesion (even during famine) ---
+          // Military units in the field get small passive morale recovery from unit cohesion
+          // and foraging. Not enough to prevent eventual decay, but slows the death spiral
+          // so offensive campaigns are viable. (#152)
+          unit.morale = Math.min(1.0, Math.round((unit.morale + FIELD_ARMY_MORALE_RECOVERY) * 100) / 100);
         }
       }
     }

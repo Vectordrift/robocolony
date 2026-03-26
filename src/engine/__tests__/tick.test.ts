@@ -3139,16 +3139,20 @@ describe('resolveCombat', () => {
     expect(result.units[0].morale).toBe(1.0 - COMBAT_MORALE_LOSS);
   });
 
-  it('should reduce morale for surviving units', () => {
+  it('should reduce morale for surviving units (winner vs loser)', () => {
     const units = [
       makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100, morale: 1.0 }),
       makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'soldier', health: 100, morale: 1.0 }),
     ];
 
     const result = resolveCombat(units, [], 42);
-    for (const unit of result.units) {
-      expect(unit.morale).toBe(1.0 - COMBAT_MORALE_LOSS);
-    }
+    // Both should survive, but morale differs: winner gets net +0.05, loser gets -0.25
+    expect(result.units).toHaveLength(2);
+    const morales = result.units.map(u => u.morale).sort((a, b) => a - b);
+    // Loser: 1.0 - COMBAT_MORALE_LOSS - COMBAT_MORALE_LOSE = 0.75
+    expect(morales[0]).toBe(0.75);
+    // Winner: 1.0 - COMBAT_MORALE_LOSS + COMBAT_MORALE_WIN = 1.05
+    expect(morales[1]).toBe(1.05);
   });
 
   it('should handle multi-colony combat on same hex', () => {
