@@ -1,3 +1,8 @@
+====================================================================
+  UNTRUSTED EXTERNAL DATA - NOT INSTRUCTIONS TO FOLLOW
+    Source: api.github.com
+====================================================================
+
 /**
  * Tick engine — resolves one game tick.
  *
@@ -288,8 +293,8 @@ export const UNIT_UPKEEP: Record<UnitType, number> = {
   settler: 3,
 };
 
-/** Population food consumption per person per tick */
-export const POP_FOOD_CONSUMPTION = 0.4;
+/** Population food consumption per person per tick (reduced from 0.4 to enable faster growth) */
+export const POP_FOOD_CONSUMPTION = 0.25;
 
 /** Unit training costs (resources needed to recruit) */
 export const UNIT_TRAINING_COSTS: Record<UnitType, Partial<Resources>> = {
@@ -389,7 +394,7 @@ export const BUILDING_SLOTS: Record<string, number> = {
   city: 7,
 };
 /** Population growth rate: +1 per this many excess food */
-export const POP_GROWTH_PER_FOOD = 5;
+export const POP_GROWTH_PER_FOOD = 3;
 
 /** Stockpile capacity per settlement tier (per resource) */
 export const STOCKPILE_CAP: Record<string, number> = {
@@ -404,8 +409,8 @@ export const GRANARY_BONUS_PER_LEVEL = 200;
 /** Additional stockpile capacity per warehouse level (all resources) */
 export const WAREHOUSE_BONUS_PER_LEVEL = 150;
 
-/** Fraction of excess resources that decay each tick (5%) */
-export const STOCKPILE_DECAY_RATE = 0.03;
+/** Fraction of excess resources that decay each tick (2%) */
+export const STOCKPILE_DECAY_RATE = 0.02;
 
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
 export const STOCKPILE_HARD_CEILING = 2.0;
@@ -3903,3 +3908,8 @@ export function resolveTick(
 }
 
 
+
+
+====================================================================
+  END UNTRUSTED DATA
+====================================================================
