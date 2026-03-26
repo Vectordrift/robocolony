@@ -8,21 +8,21 @@ import { hexDistance, hexNeighbors } from './hex.js';
 /** Movement cost per terrain type. Infinity = impassable. */
 export const TERRAIN_COST = {
     plains: 1,
-    forest: 2,
+    forest: 1.5,
     coast: 1,
-    desert: 2,
-    tundra: 2,
-    mountains: 3,
+    desert: 1.5,
+    tundra: 1.5,
+    mountains: 2,
     ocean: Infinity,
 };
 // --- Unit Movement Speeds ---
 /** Maximum hexes a unit can traverse per tick (in movement cost units). */
 export const UNIT_SPEED = {
-    scout: 3,
-    militia: 2,
-    soldier: 2,
+    scout: 5,
+    militia: 3,
+    soldier: 3,
     siege: 1,
-    settler: 1,
+    settler: 2,
 };
 // --- Vision Radius ---
 /** How far each unit type can see (in hex distance). */

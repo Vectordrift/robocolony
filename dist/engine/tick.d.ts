@@ -193,7 +193,7 @@ export declare const FOUNDING_COST: Partial<Resources>;
 /** Minimum hex distance between any two settlements */
 export declare const MIN_SETTLEMENT_DISTANCE = 3;
 /** Fog reveal radius for a newly founded settlement */
-export declare const FOUNDING_REVEAL_RADIUS = 2;
+export declare const FOUNDING_REVEAL_RADIUS = 5;
 /** Terrains where settlements cannot be founded */
 /** Settlement upgrade requirements */
 export declare const UPGRADE_COSTS: Record<string, {
