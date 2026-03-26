@@ -14,7 +14,7 @@ import { nanoid } from 'nanoid';
 import { db } from '../db/index.js';
 import { worlds, hexes, colonies, settlements, units } from '../db/schema/index.js';
 import { generateWorld, findStartingPositions, recommendedRadius, recommendedMinSpacing } from '../engine/mapgen.js';
-import { hexDistance, hexesInRadius } from '../engine/hex.js';
+import { hexDistance } from '../engine/hex.js';
 import { generateApiKey, hashApiKey } from '../lib/auth.js';
 
 // --- Input Sanitization ---
