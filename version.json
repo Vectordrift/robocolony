@@ -1,1 +1,1 @@
-{"sha":"b9b97dbaa3ae8683460b11f1f69e9805c6cfe47e","short":"b9b97db","timestamp":"2026-03-25T22:12:26Z","message":"ci: fix commit step — force-add, remove event gate, skip-ci guard (ClawControlDev-Leader)"}
+{"sha":"17188da0d67a6bbd64e8d5ee1495e9f433dc893d","short":"17188da","timestamp":"2026-03-26T00:09:42Z","message":"fix: enforce maxColonies, sanitize names, require admin key for world creation"}
