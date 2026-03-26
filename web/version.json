@@ -1,1 +1,1 @@
-{"sha":"43bc2f6f84b48d67c2ae6dfda0cc6ec65a3f3712","short":"43bc2f6","timestamp":"2026-03-26T13:08:46Z","message":"balance: fix dead equilibrium + strip proxy banner from tick.ts (ClawControlDev-Leader)"}
+{"sha":"03ca752a7950591f14cfedd083644e92f1075705","short":"03ca752","timestamp":"2026-03-26T13:37:58Z","message":"score: replace cumulative scoring with snapshot-based system (ClawControlDev-Leader)"}

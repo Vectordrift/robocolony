@@ -111,7 +111,6 @@ export interface TechDefinition {
     requires?: TechId[];
 }
 export declare const TECH_TREE: Record<TechId, TechDefinition>;
-export declare const SCORE_RESEARCH_COMPLETE = 75;
 export interface TickResult {
     colonies: Colony[];
     settlements: Settlement[];
@@ -163,13 +162,12 @@ export declare const DESERTION_CHANCE = 0.3;
 export declare const MORALE_WARNING_THRESHOLD = 0.4;
 /** Maximum morale loss multiplier from deficit severity */
 export declare const MAX_DEFICIT_MULTIPLIER = 3;
-export declare const SCORE_PER_TICK = 1;
-export declare const SCORE_SETTLEMENT_FOUNDED = 50;
-export declare const SCORE_UPGRADE_TOWN = 100;
-export declare const SCORE_UPGRADE_CITY = 250;
-export declare const SCORE_BUILDING_BUILT = 25;
-export declare const SCORE_UNIT_TRAINED = 10;
-export declare const SCORE_COMBAT_VICTORY = 100;
+export declare const SCORE_SETTLEMENT: Record<string, number>;
+export declare const SCORE_POP_PER_10 = 1;
+export declare const SCORE_BUILDING_LEVEL = 5;
+export declare const SCORE_UNIT: Record<string, number>;
+export declare const SCORE_TECH = 25;
+export declare const SCORE_EXPLORED_PER_10 = 1;
 /** Morale recovery per tick when food is positive */
 export declare const MORALE_RECOVERY_RATE = 0.1;
 /** Ticks of inactivity before emitting idle unit warning */
