@@ -1,1 +1,1 @@
-{"sha":"55453aa0c3c4ab55d90f964a3b7ffa8775384b39","short":"55453aa","timestamp":"2026-03-26T18:56:58Z","message":"fix: round health on DB persist + defense-in-depth for integer column (ClawControlDev-Leader)"}
+{"sha":"cb4eec36a8d1bc8c0982783d029001e80ef8d0d0","short":"cb4eec3","timestamp":"2026-03-26T19:07:53Z","message":"feat: combat morale effects — winner boost, loser penalty, homeland defense bonus #127 (ClawControlDev-Leader)"}

@@ -229,10 +229,20 @@ export declare const DECAY_CHANCE_PER_BUILDING = 0.1;
 export declare const UNIT_ATTACK: Record<UnitType, number>;
 /** Unit defense power by type */
 export declare const UNIT_DEFENSE: Record<UnitType, number>;
-/** Morale loss for surviving units after combat */
+/** Morale loss for surviving units after combat (applied to all combatants) */
 export declare const COMBAT_MORALE_LOSS = 0.1;
 /** Max random bonus multiplier for attack damage (0 to this value) */
 export declare const COMBAT_RANDOM_BONUS = 0.3;
+/** Morale boost for units on the winning side of combat */
+export declare const COMBAT_MORALE_WIN = 0.1;
+/** Morale penalty for units on the losing side of combat */
+export declare const COMBAT_MORALE_LOSE = 0.15;
+/** Maximum morale a unit can reach from combat victories */
+export declare const COMBAT_MORALE_CAP = 1.5;
+/** Range in hexes from own settlement for homeland defense morale bonus */
+export declare const HOMELAND_DEFENSE_RANGE = 5;
+/** Morale bonus for defending within HOMELAND_DEFENSE_RANGE of own settlement */
+export declare const HOMELAND_MORALE_BONUS = 0.1;
 export interface BuildResult {
     settlements: Settlement[];
     events: TickEvent[];
@@ -377,7 +387,7 @@ export interface CombatResult {
  * Effective damage = max(0, damage - target.defensePower).
  * Units at health ≤ 0 are destroyed. Survivors lose COMBAT_MORALE_LOSS morale.
  */
-export declare function resolveCombat(units: Unit[], actions: QueuedAction[], seed?: number, activeAgreements?: Agreement[]): CombatResult;
+export declare function resolveCombat(units: Unit[], actions: QueuedAction[], seed?: number, activeAgreements?: Agreement[], settlements?: Settlement[]): CombatResult;
 /** Maximum messages a colony can send per tick */
 export declare const MAX_MESSAGES_PER_TICK = 5;
 /** Maximum message content length (characters) */

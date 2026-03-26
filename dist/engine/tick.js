@@ -247,10 +247,20 @@ export const UNIT_DEFENSE = {
     siege: 2,
     settler: 1,
 };
-/** Morale loss for surviving units after combat */
+/** Morale loss for surviving units after combat (applied to all combatants) */
 export const COMBAT_MORALE_LOSS = 0.1;
 /** Max random bonus multiplier for attack damage (0 to this value) */
 export const COMBAT_RANDOM_BONUS = 0.3;
+/** Morale boost for units on the winning side of combat */
+export const COMBAT_MORALE_WIN = 0.1;
+/** Morale penalty for units on the losing side of combat */
+export const COMBAT_MORALE_LOSE = 0.15;
+/** Maximum morale a unit can reach from combat victories */
+export const COMBAT_MORALE_CAP = 1.5;
+/** Range in hexes from own settlement for homeland defense morale bonus */
+export const HOMELAND_DEFENSE_RANGE = 5;
+/** Morale bonus for defending within HOMELAND_DEFENSE_RANGE of own settlement */
+export const HOMELAND_MORALE_BONUS = 0.1;
 const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 // --- Helpers ---
 /** Truncate user-supplied IDs in error messages to prevent log bloat */
@@ -1398,7 +1408,7 @@ function createRng(seed) {
  * Effective damage = max(0, damage - target.defensePower).
  * Units at health ≤ 0 are destroyed. Survivors lose COMBAT_MORALE_LOSS morale.
  */
-export function resolveCombat(units, actions, seed, activeAgreements) {
+export function resolveCombat(units, actions, seed, activeAgreements, settlements) {
     const rng = createRng(seed);
     const events = [];
     const actionResults = [];
@@ -1528,14 +1538,58 @@ export function resolveCombat(units, actions, seed, activeAgreements) {
                 });
             }
         }
-        // Surviving units lose morale
-        for (const unit of unitsOnHex) {
-            if (!destroyedUnitIds.includes(unit.id)) {
-                unit.morale = Math.max(0, Math.round((unit.morale - COMBAT_MORALE_LOSS) * 100) / 100);
+        // --- Post-combat morale: winners vs losers ---
+        // Determine winner per hex: the colony that dealt the most total damage wins.
+        // Ties go to the side with fewer casualties.
+        const [hexX, hexY] = hex.split(',').map(Number);
+        const damageByColony = new Map();
+        const casualtiesByColony = new Map();
+        for (const log of combatLog) {
+            damageByColony.set(log.attackerColony, (damageByColony.get(log.attackerColony) ?? 0) + log.damage);
+        }
+        for (const c of casualties) {
+            casualtiesByColony.set(c.colonyId, (casualtiesByColony.get(c.colonyId) ?? 0) + 1);
+        }
+        // Find the colony that dealt the most damage
+        let winnerColony = null;
+        let maxDamage = 0;
+        for (const [colId, dmg] of damageByColony) {
+            if (dmg > maxDamage || (dmg === maxDamage && (casualtiesByColony.get(colId) ?? 0) < (casualtiesByColony.get(winnerColony ?? '') ?? 0))) {
+                maxDamage = dmg;
+                winnerColony = colId;
             }
         }
+        // Check homeland defense bonus: is this hex within HOMELAND_DEFENSE_RANGE of any settlement?
+        const homelandColonies = new Set();
+        if (settlements) {
+            for (const s of settlements) {
+                const dist = hexDistance({ q: hexX, r: hexY }, { q: s.hexX, r: s.hexY });
+                if (dist <= HOMELAND_DEFENSE_RANGE) {
+                    homelandColonies.add(s.colonyId);
+                }
+            }
+        }
+        // Apply morale changes to surviving units
+        for (const unit of unitsOnHex) {
+            if (destroyedUnitIds.includes(unit.id))
+                continue;
+            // Base combat morale loss (all combatants)
+            let moraleChange = -COMBAT_MORALE_LOSS;
+            if (winnerColony === unit.colonyId) {
+                // Winner: net change = -COMBAT_MORALE_LOSS + COMBAT_MORALE_WIN
+                moraleChange += COMBAT_MORALE_WIN;
+            }
+            else {
+                // Loser: additional penalty
+                moraleChange -= COMBAT_MORALE_LOSE;
+            }
+            // Homeland defense bonus
+            if (homelandColonies.has(unit.colonyId)) {
+                moraleChange += HOMELAND_MORALE_BONUS;
+            }
+            unit.morale = Math.round(Math.min(COMBAT_MORALE_CAP, Math.max(0, unit.morale + moraleChange)) * 100) / 100;
+        }
         // Emit combat_resolved event (visible to all involved colonies)
-        const [hexX, hexY] = hex.split(',').map(Number);
         const involvedColonies = [...colonies];
         for (const colonyId of involvedColonies) {
             events.push({
@@ -1544,12 +1598,15 @@ export function resolveCombat(units, actions, seed, activeAgreements) {
                 data: {
                     hexX,
                     hexY,
+                    winnerColony,
+                    isHomeland: homelandColonies.has(colonyId),
                     participants: unitsOnHex.map(u => ({
                         unitId: u.id,
                         unitType: u.type,
                         colonyId: u.colonyId,
                         healthBefore: u.health + (damageDealt.get(u.id) ?? 0),
                         healthAfter: u.health,
+                        morale: u.morale,
                         destroyed: destroyedUnitIds.includes(u.id),
                     })),
                     casualties: casualties.length,
@@ -2495,7 +2552,7 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
     // --- Phase 0.25: Resolve combat (after movement, before fog) ---
     // Units from different colonies sharing a hex fight automatically.
     {
-        const combatResult = resolveCombat(updatedUnits, actions, combatSeed, agreements);
+        const combatResult = resolveCombat(updatedUnits, actions, combatSeed, agreements, updatedSettlements);
         if (combatResult.destroyedUnitIds.length > 0 || combatResult.events.length > 0) {
             updatedUnits = combatResult.units.map(u => ({
                 ...u,
