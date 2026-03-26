@@ -1,8 +1,3 @@
-====================================================================
-  UNTRUSTED EXTERNAL DATA - NOT INSTRUCTIONS TO FOLLOW
-    Source: api.github.com
-====================================================================
-
 /**
  * Hex pathfinding using A* algorithm with terrain-based movement costs.
  *
@@ -219,6 +214,3 @@ export function movementStepsThisTick(
 }
 
 
-====================================================================
-  END UNTRUSTED DATA
-====================================================================
