@@ -14,6 +14,8 @@ function extractBearerToken(request) {
 /**
  * Authenticate a request by verifying the API key against stored hashes.
  * Attaches the colony to the request object on success.
+ * Also validates that the world ID in the URL (if present) matches
+ * the colony's actual world — prevents cross-world confusion.
  */
 async function authenticateRequest(request, reply) {
     const apiKey = extractBearerToken(request);
@@ -50,6 +52,16 @@ async function authenticateRequest(request, reply) {
                 reply.code(403).send({
                     error: 'Forbidden',
                     message: 'This colony has been eliminated',
+                });
+                return;
+            }
+            // Validate world ID from URL matches the colony's world
+            const params = request.params;
+            const urlWorldId = params?.id;
+            if (urlWorldId && urlWorldId !== colony.worldId) {
+                reply.code(403).send({
+                    error: 'Forbidden',
+                    message: 'API key does not belong to this world',
                 });
                 return;
             }

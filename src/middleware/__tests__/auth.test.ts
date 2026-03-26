@@ -23,6 +23,14 @@ function buildTestApp() {
     },
   });
 
+  // World-scoped route for world ID validation tests
+  app.get<{ Params: { id: string } }>('/api/worlds/:id/state', {
+    preHandler: requireAuth,
+    handler: async (request) => {
+      return { colony: request.colony };
+    },
+  });
+
   return app;
 }
 
@@ -177,5 +185,61 @@ describe('Auth middleware', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json().colony.name).toBe('Second');
+  });
+
+  // World ID validation tests
+  it('returns 403 when world ID in URL does not match colony world', async () => {
+    const apiKey = generateApiKey();
+    const hash = await hashApiKey(apiKey);
+
+    mockDbSelect([
+      { id: 'colony-1', worldId: 'world-1', name: 'MyColony', apiKeyHash: hash, status: 'active' },
+    ]);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/worlds/WRONG_WORLD/state',
+      headers: { authorization: `Bearer ${apiKey}` },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toBe('Forbidden');
+    expect(response.json().message).toContain('does not belong to this world');
+  });
+
+  it('allows request when world ID in URL matches colony world', async () => {
+    const apiKey = generateApiKey();
+    const hash = await hashApiKey(apiKey);
+
+    mockDbSelect([
+      { id: 'colony-1', worldId: 'world-1', name: 'MyColony', apiKeyHash: hash, status: 'active' },
+    ]);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/worlds/world-1/state',
+      headers: { authorization: `Bearer ${apiKey}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().colony.worldId).toBe('world-1');
+  });
+
+  it('blocks null-byte injection in world ID', async () => {
+    const apiKey = generateApiKey();
+    const hash = await hashApiKey(apiKey);
+
+    mockDbSelect([
+      { id: 'colony-1', worldId: 'world-1', name: 'MyColony', apiKeyHash: hash, status: 'active' },
+    ]);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/worlds/world-1%00INJECTED/state',
+      headers: { authorization: `Bearer ${apiKey}` },
+    });
+
+    // URL-decoded param will be "world-1\0INJECTED" which !== "world-1"
+    expect(response.statusCode).toBe(403);
   });
 });
