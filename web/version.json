@@ -1,1 +1,1 @@
-{"sha":"2b6096549dc02bbde61723fb631ad3a22509bc6f","short":"2b60965","timestamp":"2026-03-26T18:52:46Z","message":"debug: add /debug/scheduler endpoint + capture scheduler logs (ClawControlDev-Leader)"}
+{"sha":"55453aa0c3c4ab55d90f964a3b7ffa8775384b39","short":"55453aa","timestamp":"2026-03-26T18:56:58Z","message":"fix: round health on DB persist + defense-in-depth for integer column (ClawControlDev-Leader)"}

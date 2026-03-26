@@ -1503,7 +1503,7 @@ export function resolveCombat(units, actions, seed, activeAgreements) {
         for (const unit of unitsOnHex) {
             const totalDamage = damageDealt.get(unit.id) ?? 0;
             if (totalDamage > 0) {
-                unit.health = Math.round((unit.health - totalDamage) * 100) / 100;
+                unit.health = Math.round(unit.health - totalDamage);
             }
             if (unit.health <= 0) {
                 destroyedUnitIds.push(unit.id);
