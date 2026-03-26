@@ -435,7 +435,7 @@ export class TickScheduler {
             await tx
               .update(schema.units)
               .set({
-                health: unit.health,
+                health: Math.round(unit.health),
                 morale: unit.morale,
                 hexX: unit.hexX,
                 hexY: unit.hexY,
@@ -452,7 +452,7 @@ export class TickScheduler {
               type: unit.type,
               hexX: unit.hexX,
               hexY: unit.hexY,
-              health: unit.health,
+              health: Math.round(unit.health),
               morale: unit.morale,
               movementQueue: unit.movementQueue ?? [],
               idleTicks: unit.idleTicks ?? 0,
