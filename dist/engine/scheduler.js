@@ -245,6 +245,7 @@ export class TickScheduler {
                 resources: (h.resources ?? { food: 0, timber: 0, stone: 0, iron: 0 }),
                 settlementId: h.settlementId,
                 exploredBy: (h.exploredBy ?? []),
+                poi: h.poi ?? null,
             }));
             const queuedActions = dbActions.map(a => ({
                 id: a.id,
@@ -381,6 +382,35 @@ export class TickScheduler {
                     await tx
                         .delete(schema.units)
                         .where(eq(schema.units.id, unitId));
+                }
+                // --- Persist fog reveals (update explored_by arrays) ---
+                if (result.fogReveals && result.fogReveals.length > 0) {
+                    // Group reveals by colony for batch updates
+                    const revealsByColony = new Map();
+                    for (const reveal of result.fogReveals) {
+                        const list = revealsByColony.get(reveal.colonyId) ?? [];
+                        list.push(reveal.hex);
+                        revealsByColony.set(reveal.colonyId, list);
+                    }
+                    for (const [colonyId, revealedHexes] of revealsByColony.entries()) {
+                        for (const hex of revealedHexes) {
+                            await tx.execute(sql `UPDATE hexes SET explored_by = array_append(explored_by, ${colonyId})
+                    WHERE world_id = ${world.id} AND x = ${hex.q} AND y = ${hex.r}
+                    AND NOT (${colonyId} = ANY(COALESCE(explored_by, ARRAY[]::TEXT[])))`);
+                        }
+                    }
+                }
+                // --- Persist POI discovery state ---
+                // The tick engine marks POIs as discovered in-place on hex objects.
+                // We need to write those changes back to the DB.
+                for (const hex of hexes) {
+                    if (hex.poi && hex.poi.discoveredBy) {
+                        // Check if this was newly discovered this tick
+                        if (hex.poi.discoveredAtTick === newTick) {
+                            await tx.execute(sql `UPDATE hexes SET poi = ${JSON.stringify(hex.poi)}::jsonb
+                    WHERE world_id = ${world.id} AND x = ${hex.x} AND y = ${hex.y}`);
+                        }
+                    }
                 }
                 // Update action statuses + emit action outcome events
                 const actionColonyMap = new Map(dbActions.map(a => [a.id, a.colonyId]));

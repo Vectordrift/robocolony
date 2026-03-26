@@ -11,6 +11,11 @@ export interface VisibleHex {
     terrain: string;
     resources: Record<string, number>;
     settlementId: string | null;
+    poi?: {
+        type: string;
+        discoveredBy?: string;
+        discoveredAtTick?: number;
+    } | null;
 }
 /**
  * Get all hexes visible to a colony (fog of war applied).

@@ -35,6 +35,7 @@ export async function getVisibleHexes(worldId, colonyId) {
         terrain: hexes.terrain,
         resources: hexes.resources,
         settlementId: hexes.settlementId,
+        poi: hexes.poi,
     })
         .from(hexes)
         .where(and(eq(hexes.worldId, worldId), sql `explored_by && ARRAY[${sql.join(visibleColonyIds.map(id => sql `${id}`), sql `, `)}]::text[]`));
@@ -44,6 +45,7 @@ export async function getVisibleHexes(worldId, colonyId) {
         terrain: h.terrain,
         resources: h.resources,
         settlementId: h.settlementId,
+        ...(h.poi ? { poi: h.poi } : {}),
     }));
 }
 export async function stateRoutes(app) {

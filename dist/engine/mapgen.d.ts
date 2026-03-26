@@ -6,11 +6,18 @@
  */
 import { type HexCoord } from './hex.js';
 export type TerrainType = 'ocean' | 'coast' | 'plains' | 'forest' | 'mountains' | 'desert' | 'tundra';
+export type PoiType = 'mineral_deposit' | 'fertile_valley' | 'ancient_forest' | 'ancient_ruins' | 'abandoned_cache' | 'crystal_cavern' | 'watchtower' | 'sacred_grove';
+export interface PoiData {
+    type: PoiType;
+    discoveredBy?: string;
+    discoveredAtTick?: number;
+}
 export interface HexTile {
     q: number;
     r: number;
     terrain: TerrainType;
     resources: HexResources;
+    poi?: PoiData;
 }
 export interface HexResources {
     food: number;
@@ -24,6 +31,11 @@ export interface WorldMap {
     hexes: HexTile[];
     startingPositions: HexCoord[];
 }
+/**
+ * Place points of interest on the map.
+ * Deterministic: same seed always produces the same POI layout.
+ */
+export declare function placePois(hexes: HexTile[], startingPositions: HexCoord[], seed: number): void;
 /**
  * Recommend a map radius based on colony count.
  * Smaller worlds = faster contact = more strategic tension.

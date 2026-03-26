@@ -61,6 +61,11 @@ export interface Unit {
     idleTicks?: number;
 }
 export type UnitType = 'scout' | 'militia' | 'soldier' | 'siege' | 'settler';
+export interface PoiState {
+    type: string;
+    discoveredBy?: string;
+    discoveredAtTick?: number;
+}
 export interface HexTileState {
     x: number;
     y: number;
@@ -68,6 +73,7 @@ export interface HexTileState {
     resources: HexResources;
     settlementId: string | null;
     exploredBy?: string[];
+    poi?: PoiState | null;
 }
 export interface QueuedAction {
     id: string;

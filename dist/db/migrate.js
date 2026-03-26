@@ -65,6 +65,7 @@ const EXPECTED_COLUMNS = [
     { table: 'hexes', column: 'resources', type: 'JSONB', defaultValue: "'{}'" },
     { table: 'hexes', column: 'settlement_id', type: 'TEXT', nullable: true },
     { table: 'hexes', column: 'explored_by', type: 'TEXT[]', defaultValue: "ARRAY[]::TEXT[]", nullable: true },
+    { table: 'hexes', column: 'poi', type: 'JSONB', nullable: true },
     // actions
     { table: 'actions', column: 'id', type: 'TEXT' },
     { table: 'actions', column: 'world_id', type: 'TEXT' },
@@ -134,6 +135,110 @@ export async function ensureSchema(db, logger) {
     }
     else {
         logger.info('[migrate] Schema up to date');
+    }
+    // --- POI migration: seed POIs for existing worlds that don't have any ---
+    await seedPoisForExistingWorlds(db, logger);
+}
+/**
+ * Simple hash function for deterministic POI placement on existing worlds.
+ * Uses the world ID string as seed material.
+ */
+function simpleHash(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h);
+}
+function createSeededRng(seed) {
+    let state = seed | 0;
+    return () => {
+        state = (state + 0x6d2b79f5) | 0;
+        let t = Math.imul(state ^ (state >>> 15), 1 | state);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+const POI_TYPES = [
+    { type: 'mineral_deposit', weight: 15, terrains: ['mountains', 'desert', 'tundra'] },
+    { type: 'fertile_valley', weight: 15, terrains: ['plains', 'forest'] },
+    { type: 'ancient_forest', weight: 12, terrains: ['forest'] },
+    { type: 'ancient_ruins', weight: 12, terrains: ['plains', 'desert', 'tundra', 'mountains'] },
+    { type: 'abandoned_cache', weight: 15, terrains: ['plains', 'forest', 'desert', 'tundra'] },
+    { type: 'crystal_cavern', weight: 8, terrains: ['mountains'] },
+    { type: 'watchtower', weight: 10, terrains: ['mountains', 'plains', 'tundra'] },
+    { type: 'sacred_grove', weight: 8, terrains: ['forest', 'plains'] },
+];
+function pickPoi(rng, terrain) {
+    const eligible = POI_TYPES.filter(p => p.terrains.includes(terrain));
+    if (eligible.length === 0)
+        return null;
+    const total = eligible.reduce((s, p) => s + p.weight, 0);
+    let roll = rng() * total;
+    for (const p of eligible) {
+        roll -= p.weight;
+        if (roll <= 0)
+            return p.type;
+    }
+    return eligible[eligible.length - 1].type;
+}
+function hexDist(x1, y1, x2, y2) {
+    return (Math.abs(x1 - x2) + Math.abs(y1 - y2) + Math.abs(x1 + y1 - x2 - y2)) / 2;
+}
+/**
+ * Seed POIs for worlds that have hexes but no POIs yet.
+ * Idempotent — skips worlds that already have POIs.
+ */
+async function seedPoisForExistingWorlds(db, logger) {
+    // Check if any hex already has a POI
+    const poiCheck = await db.execute(sql.raw(`SELECT COUNT(*) as cnt FROM hexes WHERE poi IS NOT NULL LIMIT 1`));
+    const poiCount = Number(poiCheck[0]?.cnt ?? 0);
+    if (poiCount > 0) {
+        logger.info('[migrate] POIs already seeded, skipping');
+        return;
+    }
+    // Get all worlds
+    const worlds = await db.execute(sql.raw(`SELECT id FROM worlds`));
+    if (!worlds || worlds.length === 0)
+        return;
+    for (const world of worlds) {
+        const worldId = world.id;
+        logger.info(`[migrate] Seeding POIs for world ${worldId}...`);
+        // Get all land hexes (excluding ocean, coast)
+        const allHexes = await db.execute(sql.raw(`SELECT x, y, terrain, settlement_id FROM hexes WHERE world_id = '${worldId}' AND terrain NOT IN ('ocean', 'coast') ORDER BY x, y`));
+        // Get settlement positions to avoid placing POIs too close
+        const settlements = await db.execute(sql.raw(`SELECT hex_x, hex_y FROM settlements WHERE world_id = '${worldId}'`));
+        const settlementCoords = settlements.map((s) => ({ x: s.hex_x, y: s.hex_y }));
+        const seed = simpleHash(worldId);
+        const rng = createSeededRng(seed + 80000);
+        // Shuffle hexes deterministically
+        const shuffled = allHexes.map((h) => ({ ...h, sort: rng() }));
+        shuffled.sort((a, b) => a.sort - b.sort);
+        const targetCount = Math.max(5, Math.floor(shuffled.length * 0.04));
+        const placedCoords = [];
+        let placed = 0;
+        const POI_MIN_SPACING = 4;
+        const POI_SETTLEMENT_CLEARANCE = 3;
+        for (const hex of shuffled) {
+            if (placed >= targetCount)
+                break;
+            // Don't place near settlements
+            const tooCloseToSettlement = settlementCoords.some((s) => hexDist(hex.x, hex.y, s.x, s.y) < POI_SETTLEMENT_CLEARANCE);
+            if (tooCloseToSettlement)
+                continue;
+            // Don't place near other POIs
+            const tooCloseToOther = placedCoords.some((p) => hexDist(hex.x, hex.y, p.x, p.y) < POI_MIN_SPACING);
+            if (tooCloseToOther)
+                continue;
+            const poiType = pickPoi(rng, hex.terrain);
+            if (!poiType)
+                continue;
+            const poiJson = JSON.stringify({ type: poiType });
+            await db.execute(sql.raw(`UPDATE hexes SET poi = '${poiJson}'::jsonb WHERE world_id = '${worldId}' AND x = ${hex.x} AND y = ${hex.y}`));
+            placedCoords.push({ x: hex.x, y: hex.y });
+            placed++;
+        }
+        logger.info(`[migrate] Placed ${placed} POIs in world ${worldId}`);
     }
 }
 //# sourceMappingURL=migrate.js.map
