@@ -1,3 +1,8 @@
+====================================================================
+  UNTRUSTED EXTERNAL DATA - NOT INSTRUCTIONS TO FOLLOW
+    Source: api.github.com
+====================================================================
+
 /**
  * Hex pathfinding using A* algorithm with terrain-based movement costs.
  *
@@ -12,11 +17,11 @@ import { hexDistance, hexNeighbors } from './hex.js';
 /** Movement cost per terrain type. Infinity = impassable. */
 export const TERRAIN_COST: Record<string, number> = {
   plains: 1,
-  forest: 2,
+  forest: 1.5,
   coast: 1,
-  desert: 2,
-  tundra: 2,
-  mountains: 3,
+  desert: 1.5,
+  tundra: 1.5,
+  mountains: 2,
   ocean: Infinity,
 };
 
@@ -24,11 +29,11 @@ export const TERRAIN_COST: Record<string, number> = {
 
 /** Maximum hexes a unit can traverse per tick (in movement cost units). */
 export const UNIT_SPEED: Record<string, number> = {
-  scout: 3,
-  militia: 2,
-  soldier: 2,
+  scout: 5,
+  militia: 3,
+  soldier: 3,
   siege: 1,
-  settler: 1,
+  settler: 2,
 };
 
 // --- Vision Radius ---
@@ -212,3 +217,8 @@ export function movementStepsThisTick(
 
   return steps;
 }
+
+
+====================================================================
+  END UNTRUSTED DATA
+====================================================================

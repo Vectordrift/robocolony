@@ -47,20 +47,28 @@ describe('constants', () => {
     expect(TERRAIN_COST['plains']).toBe(1);
   });
 
-  it('mountains cost is 3', () => {
-    expect(TERRAIN_COST['mountains']).toBe(3);
+  it('mountains cost is 2', () => {
+    expect(TERRAIN_COST['mountains']).toBe(2);
   });
 
-  it('scout speed is 3', () => {
-    expect(UNIT_SPEED['scout']).toBe(3);
+  it('forest cost is 1.5', () => {
+    expect(TERRAIN_COST['forest']).toBe(1.5);
   });
 
-  it('settler speed is 1', () => {
-    expect(UNIT_SPEED['settler']).toBe(1);
+  it('scout speed is 5', () => {
+    expect(UNIT_SPEED['scout']).toBe(5);
   });
 
-  it('scout vision is 3', () => {
-    expect(VISION_RADIUS['scout']).toBe(3);
+  it('settler speed is 2', () => {
+    expect(UNIT_SPEED['settler']).toBe(2);
+  });
+
+  it('militia speed is 3', () => {
+    expect(UNIT_SPEED['militia']).toBe(3);
+  });
+
+  it('scout vision is 6', () => {
+    expect(VISION_RADIUS['scout']).toBe(6);
   });
 
   it('militia vision is 1', () => {
@@ -87,7 +95,6 @@ describe('findPath', () => {
 
     // Path should be optimal — each step is 1 hex closer
     for (let i = 0; i < path!.length; i++) {
-      const expected = i + 1; // distance from start
       const prev = i === 0 ? from : path![i - 1];
       expect(hexDistance(prev, path![i])).toBe(1);
     }
@@ -122,7 +129,6 @@ describe('findPath', () => {
   });
 
   it('returns null when target is unreachable (surrounded by ocean)', () => {
-    // Surround (3,0) with ocean
     const lookup = customMap(5, {
       '2,0': 'ocean',
       '2,1': 'ocean',
@@ -142,8 +148,6 @@ describe('findPath', () => {
   });
 
   it('prefers plains over mountains (terrain costs matter)', () => {
-    // Direct path (q: 0→3) goes through mountains at (1,0), (2,0)
-    // Detour via plains around them should be cheaper
     const lookup = customMap(5, {
       '1,0': 'mountains',
       '2,0': 'mountains',
@@ -152,7 +156,6 @@ describe('findPath', () => {
     const pathDirect = findPath({ q: 0, r: 0 }, { q: 3, r: 0 }, lookup);
     expect(pathDirect).not.toBeNull();
 
-    // Calculate total cost of the path
     let totalCost = 0;
     for (const step of pathDirect!) {
       const terrain = step.q === 1 && step.r === 0 ? 'mountains' :
@@ -160,12 +163,9 @@ describe('findPath', () => {
       totalCost += TERRAIN_COST[terrain];
     }
 
-    // An all-plains path of length 5 costs 5, vs direct (1+3+3+1) = 8
-    // A* should find the cheaper route if one exists
-    // The mountain direct path costs: 3+3+1 = 7 (3 steps through mountains)
-    // A detour might cost 5 (5 steps on plains)
-    // A* should pick the cheaper option
-    expect(totalCost).toBeLessThanOrEqual(7);
+    // Mountains cost 2 now. Direct: 2+2+1=5 (3 steps). Detour: 5 plains = 5 cost.
+    // Either way ≤5
+    expect(totalCost).toBeLessThanOrEqual(5);
   });
 
   it('path endpoints are correct', () => {
@@ -175,15 +175,13 @@ describe('findPath', () => {
 
     const path = findPath(from, to, lookup);
     expect(path).not.toBeNull();
-    // First step is adjacent to from
     expect(hexDistance(from, path![0])).toBe(1);
-    // Last step is the target
     expect(path![path!.length - 1]).toEqual(to);
   });
 });
 
 describe('movementStepsThisTick', () => {
-  it('scout moves 3 steps on plains', () => {
+  it('scout moves 5 steps on plains', () => {
     const lookup = plainsMap(10);
     const path: HexCoord[] = [
       { q: 1, r: 0 },
@@ -191,12 +189,14 @@ describe('movementStepsThisTick', () => {
       { q: 3, r: 0 },
       { q: 4, r: 0 },
       { q: 5, r: 0 },
+      { q: 6, r: 0 },
+      { q: 7, r: 0 },
     ];
     const steps = movementStepsThisTick(path, 'scout', lookup);
-    expect(steps).toBe(3);
+    expect(steps).toBe(5);
   });
 
-  it('settler moves 1 step on plains', () => {
+  it('settler moves 2 steps on plains', () => {
     const lookup = plainsMap(10);
     const path: HexCoord[] = [
       { q: 1, r: 0 },
@@ -204,29 +204,31 @@ describe('movementStepsThisTick', () => {
       { q: 3, r: 0 },
     ];
     const steps = movementStepsThisTick(path, 'settler', lookup);
-    expect(steps).toBe(1);
+    expect(steps).toBe(2);
   });
 
-  it('militia moves 2 steps on plains', () => {
+  it('militia moves 3 steps on plains', () => {
     const lookup = plainsMap(10);
     const path: HexCoord[] = [
       { q: 1, r: 0 },
       { q: 2, r: 0 },
       { q: 3, r: 0 },
+      { q: 4, r: 0 },
     ];
     const steps = movementStepsThisTick(path, 'militia', lookup);
-    expect(steps).toBe(2);
+    expect(steps).toBe(3);
   });
 
   it('scout is slowed by mountains', () => {
-    // Scout speed 3, mountains cost 3 → only 1 mountain hex per tick
-    const lookup = customMap(10, { '1,0': 'mountains' });
+    // Scout speed 5, mountains cost 2 → 2 mountain hexes (cost 4) then can't afford 3rd mountain
+    const lookup = customMap(10, { '1,0': 'mountains', '2,0': 'mountains', '3,0': 'mountains' });
     const path: HexCoord[] = [
-      { q: 1, r: 0 }, // mountains, cost 3
-      { q: 2, r: 0 }, // plains, cost 1
+      { q: 1, r: 0 }, // mountains, cost 2
+      { q: 2, r: 0 }, // mountains, cost 2 (total 4)
+      { q: 3, r: 0 }, // mountains, cost 2 (total 6 > 5)
     ];
     const steps = movementStepsThisTick(path, 'scout', lookup);
-    expect(steps).toBe(1); // 3 cost = 3 budget, can't afford next step
+    expect(steps).toBe(2); // 2+2=4 within budget, 3rd would be 6 > 5
   });
 
   it('returns 0 for empty path', () => {
@@ -236,23 +238,23 @@ describe('movementStepsThisTick', () => {
   });
 
   it('guarantees at least 1 step for passable terrain', () => {
-    // Settler speed 1, forest cost 2 → normally 0, but guarantee 1
-    const lookup = customMap(10, { '1,0': 'forest' });
+    // Siege speed 1, mountains cost 2 → normally 0, but guarantee 1
+    const lookup = customMap(10, { '1,0': 'mountains' });
     const path: HexCoord[] = [
-      { q: 1, r: 0 }, // forest, cost 2 > settler budget 1
+      { q: 1, r: 0 }, // mountains, cost 2 > siege budget 1
     ];
-    const steps = movementStepsThisTick(path, 'settler', lookup);
+    const steps = movementStepsThisTick(path, 'siege', lookup);
     expect(steps).toBe(1); // guaranteed minimum
   });
 
   it('does not move through terrain that exceeds budget (non-first step)', () => {
-    // Militia speed 2: 1 plains (cost 1) then mountains (cost 3) = can't afford step 2
+    // Settler speed 2: 1 plains (cost 1) then mountains (cost 2) = total 3 > budget 2
     const lookup = customMap(10, { '2,0': 'mountains' });
     const path: HexCoord[] = [
       { q: 1, r: 0 }, // plains, cost 1
-      { q: 2, r: 0 }, // mountains, cost 3 → total would be 4 > budget 2
+      { q: 2, r: 0 }, // mountains, cost 2 → total would be 3 > budget 2
     ];
-    const steps = movementStepsThisTick(path, 'militia', lookup);
+    const steps = movementStepsThisTick(path, 'settler', lookup);
     expect(steps).toBe(1);
   });
 
@@ -262,7 +264,7 @@ describe('movementStepsThisTick', () => {
       { q: 1, r: 0 },
       { q: 2, r: 0 },
     ];
-    // Scout speed 3, path length 2 → consumes whole path
+    // Scout speed 5, path length 2 → consumes whole path
     const steps = movementStepsThisTick(path, 'scout', lookup);
     expect(steps).toBe(2);
   });
