@@ -511,6 +511,7 @@ export function resolveBuilding(
   }
 
   // Phase 1: Process build actions — validate and add to build queue
+  // Actions are processed in array order (first-come-first-served for resource deduction).
   const buildActions = actions.filter(a => a.type === 'build');
 
   for (const action of buildActions) {
@@ -2979,9 +2980,23 @@ export function resolveTick(
 
 
   // --- Deduplicate actions per unit ---
-  // If multiple move/attack actions target the same unit, only keep the last one.
-  // This prevents performance issues from processing many pathfinding calls for one unit.
+  // Edge case handling (Issue #123):
+  // 1. Multiple move/attack actions for the same unit → keep only the last one.
+  // 2. found_settlement + move_unit for the same settler → found takes priority,
+  //    move is rejected (founding consumes the settler in Phase -1 before movement).
+  // 3. Resource-consuming actions (build, train, etc.) are processed in array order
+  //    within each phase — first-come-first-served. If multiple actions exceed available
+  //    resources, the first one(s) succeed and later ones fail with "Insufficient resources".
   {
+    // Collect units that have found_settlement actions (these settlers will be consumed)
+    const foundSettlerIds = new Set<string>();
+    for (const a of actions) {
+      if (a.type === 'found_settlement') {
+        const unitId = (a.params?.unitId as string) || null;
+        if (unitId) foundSettlerIds.add(unitId);
+      }
+    }
+
     const unitActions = new Map<string, number>(); // unitId -> last action index
     const deduped: QueuedAction[] = [];
     for (let i = 0; i < actions.length; i++) {
@@ -2995,6 +3010,15 @@ export function resolveTick(
       const a = actions[i];
       const unitId = (a.params?.unitId as string) || null;
       if (unitId && (a.type === 'move_unit' || a.type === 'attack' || a.type === 'explore')) {
+        // Reject movement for settlers that are being consumed by found_settlement
+        if (foundSettlerIds.has(unitId)) {
+          actionResults.push({
+            actionId: a.id,
+            status: 'failed',
+            result: `Unit ${unitId} has a found_settlement action — movement rejected (settler will be consumed)`,
+          });
+          continue;
+        }
         if (unitActions.get(unitId) === i) {
           deduped.push(a); // keep only the last move/attack per unit
         } else {

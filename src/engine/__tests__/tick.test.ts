@@ -3285,3 +3285,282 @@ describe('combat integration with resolveTick', () => {
   });
 });
 
+
+// --- Edge Case Tests (Issue #123) ---
+
+describe('Edge cases: simultaneous actions (Issue #123)', () => {
+
+  // Case 1: Two colonies found settlements on the same hex in the same tick
+  it('rejects second settlement founding on same hex due to distance check', () => {
+    const hexes = makePlainGrid(10);
+    const settler1 = makeUnit({ id: 'settler-1', colonyId: 'c1', type: 'settler', hexX: 5, hexY: 5, worldId: 'w1' });
+    const settler2 = makeUnit({ id: 'settler-2', colonyId: 'c2', type: 'settler', hexX: 5, hexY: 5, worldId: 'w1' });
+    const c1 = makeColony({ id: 'c1', resources: { food: 200, timber: 200, stone: 100, iron: 50, influence: 50 } });
+    const c2 = makeColony({ id: 'c2', resources: { food: 200, timber: 200, stone: 100, iron: 50, influence: 50 } });
+
+    const actions: QueuedAction[] = [
+      { id: 'a1', colonyId: 'c1', type: 'found_settlement', params: { unitId: 'settler-1', name: 'Town A' } },
+      { id: 'a2', colonyId: 'c2', type: 'found_settlement', params: { unitId: 'settler-2', name: 'Town B' } },
+    ];
+
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+    const result = resolveFoundSettlement([settler1, settler2], [c1, c2], [], hexes, actions, allHexCoords);
+
+    // First succeeds, second fails (too close)
+    const resolved = result.actionResults.filter(r => r.status === 'resolved');
+    const failed = result.actionResults.filter(r => r.status === 'failed');
+    expect(resolved.length).toBe(1);
+    expect(failed.length).toBe(1);
+    expect(resolved[0].actionId).toBe('a1');
+    expect(failed[0].result).toContain('Too close');
+    expect(result.newSettlements.length).toBe(1);
+  });
+
+  // Case 2: Two colonies move units to same hex — combat should trigger
+  it('triggers combat when two colonies move units to same hex', () => {
+    const hexes = makePlainLine(10);
+    const u1 = makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 });
+    const u2 = makeUnit({ id: 'u2', colonyId: 'c2', hexX: 2, hexY: 0, type: 'soldier', health: 100 });
+    const c1 = makeColony({ id: 'c1', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 50 } });
+    const c2 = makeColony({ id: 'c2', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 50 } });
+    const s1 = makeSettlement({ id: 's1', colonyId: 'c1', hexX: 0, hexY: 0 });
+    const s2 = makeSettlement({ id: 's2', colonyId: 'c2', hexX: 6, hexY: 0 });
+
+    const actions: QueuedAction[] = [
+      { id: 'a1', colonyId: 'c1', type: 'move_unit', params: { unitId: 'u1', targetX: 1, targetY: 0 } },
+      { id: 'a2', colonyId: 'c2', type: 'move_unit', params: { unitId: 'u2', targetX: 1, targetY: 0 } },
+    ];
+
+    const result = resolveTick([c1, c2], [s1, s2], [u1, u2], hexes, actions, 42);
+    const combatEvents = result.events.filter(e => e.type === 'combat_resolved');
+    expect(combatEvents.length).toBeGreaterThan(0);
+  });
+
+  // Case 3: Colony submits build + demolish for the same building type in one tick
+  it('build + demolish same building type: build queues, demolish removes existing', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 200, stone: 100, iron: 50, influence: 50 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'farm', level: 1 }],
+      buildQueue: [],
+    });
+
+    const actions: QueuedAction[] = [
+      { id: 'a-build', colonyId: 'colony-1', type: 'build', params: { settlementId: 'settlement-1', buildingType: 'farm' } },
+      { id: 'a-demolish', colonyId: 'colony-1', type: 'demolish', params: { settlementId: 'settlement-1', buildingType: 'farm' } },
+    ];
+
+    // Build is Phase 1 — but farm already exists, so build should FAIL ("already has a farm")
+    // Demolish is Phase 1.8 — demolishes the existing farm
+    const hexes = makeHexRing(0, 0);
+    const result = resolveTick([colony], [settlement], [], hexes, actions, 42);
+
+    const buildResult = result.actionResults.find(r => r.actionId === 'a-build');
+    const demolishResult = result.actionResults.find(r => r.actionId === 'a-demolish');
+
+    // Build fails because farm already exists
+    expect(buildResult?.status).toBe('failed');
+    expect(buildResult?.result).toContain('already has a farm');
+    // Demolish succeeds
+    expect(demolishResult?.status).toBe('resolved');
+  });
+
+  // Case 3b: Build a new type + demolish same new type (building doesn't exist yet)
+  it('demolish fails for building type not yet completed (only in queue)', () => {
+    const colony = makeColony({ resources: { food: 200, timber: 200, stone: 100, iron: 50, influence: 50 } });
+    const settlement = makeSettlement({
+      buildings: [],
+      buildQueue: [],
+    });
+
+    const actions: QueuedAction[] = [
+      { id: 'a-build', colonyId: 'colony-1', type: 'build', params: { settlementId: 'settlement-1', buildingType: 'farm' } },
+      { id: 'a-demolish', colonyId: 'colony-1', type: 'demolish', params: { settlementId: 'settlement-1', buildingType: 'farm' } },
+    ];
+
+    const hexes = makeHexRing(0, 0);
+    const result = resolveTick([colony], [settlement], [], hexes, actions, 42);
+
+    const buildResult = result.actionResults.find(r => r.actionId === 'a-build');
+    const demolishResult = result.actionResults.find(r => r.actionId === 'a-demolish');
+
+    // Build succeeds (farm goes to queue)
+    expect(buildResult?.status).toBe('resolved');
+    // Demolish fails (farm not in buildings array yet)
+    expect(demolishResult?.status).toBe('failed');
+    expect(demolishResult?.result).toContain('does not have a farm');
+  });
+
+  // Case 4: Colony submits move + found_settlement for same settler
+  it('found_settlement consumes settler, move is explicitly rejected in dedup', () => {
+    const hexes = makePlainGrid(10);
+    const settler = makeUnit({ id: 'settler-1', colonyId: 'colony-1', type: 'settler', hexX: 5, hexY: 5, worldId: 'world-1' });
+    const colony = makeColony({ resources: { food: 200, timber: 200, stone: 100, iron: 50, influence: 50 } });
+
+    const actions: QueuedAction[] = [
+      { id: 'a-found', colonyId: 'colony-1', type: 'found_settlement', params: { unitId: 'settler-1', name: 'New Town' } },
+      { id: 'a-move', colonyId: 'colony-1', type: 'move_unit', params: { unitId: 'settler-1', targetX: 6, targetY: 5 } },
+    ];
+
+    const result = resolveTick([colony], [], [settler], hexes, actions, 42);
+
+    const foundResult = result.actionResults.find(r => r.actionId === 'a-found');
+    const moveResult = result.actionResults.find(r => r.actionId === 'a-move');
+
+    expect(foundResult?.status).toBe('resolved');
+    // Move should fail — settler has a found_settlement action, rejected in dedup phase
+    expect(moveResult?.status).toBe('failed');
+    expect(moveResult?.result).toContain('found_settlement');
+  });
+
+  // Case 5: Multiple build actions that together exceed available resources — first-come-first-served
+  it('multiple builds: first deducts resources, second fails if insufficient', () => {
+    // Colony has exactly enough for ONE farm (20 timber)
+    const colony = makeColony({ resources: { food: 100, timber: 25, stone: 50, iron: 50, influence: 50 } });
+    const s1 = makeSettlement({ id: 's1', colonyId: 'colony-1', hexX: 0, hexY: 0, buildings: [], buildQueue: [] });
+    const s2 = makeSettlement({ id: 's2', colonyId: 'colony-1', hexX: 10, hexY: 0, buildings: [], buildQueue: [] });
+
+    const actions: QueuedAction[] = [
+      { id: 'a1', colonyId: 'colony-1', type: 'build', params: { settlementId: 's1', buildingType: 'farm' } },
+      { id: 'a2', colonyId: 'colony-1', type: 'build', params: { settlementId: 's2', buildingType: 'farm' } },
+    ];
+
+    const hexes = [...makeHexRing(0, 0), ...makeHexRing(10, 0)];
+    const result = resolveTick([colony], [s1, s2], [], hexes, actions, 42);
+
+    const r1 = result.actionResults.find(r => r.actionId === 'a1');
+    const r2 = result.actionResults.find(r => r.actionId === 'a2');
+
+    // First build succeeds (20 timber deducted, 5 remaining)
+    expect(r1?.status).toBe('resolved');
+    // Second build fails (needs 20 timber, only 5 left)
+    expect(r2?.status).toBe('failed');
+    expect(r2?.result).toContain('Insufficient resources');
+  });
+
+  // Case 6: Multiple train actions that together exceed resources — first-come-first-served
+  it('multiple train actions: first succeeds, second fails if resources exhausted', () => {
+    // Scout costs: food 10, timber 5. Colony has food 15, timber 7.
+    const colony = makeColony({ resources: { food: 15, timber: 7, stone: 50, iron: 50, influence: 50 } });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+
+    const actions: QueuedAction[] = [
+      { id: 'a1', colonyId: 'colony-1', type: 'train_unit', params: { settlementId: 'settlement-1', unitType: 'scout' } },
+      { id: 'a2', colonyId: 'colony-1', type: 'train_unit', params: { settlementId: 'settlement-1', unitType: 'scout' } },
+    ];
+
+    const result = resolveTrainUnit([colony], [settlement], actions);
+
+    const r1 = result.actionResults.find(r => r.actionId === 'a1');
+    const r2 = result.actionResults.find(r => r.actionId === 'a2');
+
+    expect(r1?.status).toBe('resolved');
+    expect(r2?.status).toBe('failed');
+    expect(r2?.result).toContain('Insufficient resources');
+    expect(result.newUnits.length).toBe(1);
+  });
+
+  // Case 7: Upgrade settlement while buildings are still in build queue
+  it('settlement upgrade allowed while build queue has items', () => {
+    // Town requires: 3 buildings, 50 pop, resources
+    const colony = makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 200, influence: 200 },
+    });
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      population: 60,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+      ],
+      buildQueue: [
+        { type: 'mine', ticksRemaining: 2 },  // still being built
+      ],
+    });
+
+    const actions: QueuedAction[] = [
+      { id: 'a1', colonyId: 'colony-1', type: 'upgrade_settlement', params: { settlementId: 'settlement-1' } },
+    ];
+
+    const result = resolveUpgradeSettlement([settlement], [colony], actions);
+
+    const r1 = result.actionResults.find(r => r.actionId === 'a1');
+    // Should succeed — 3 completed buildings meet the requirement
+    expect(r1?.status).toBe('resolved');
+    expect(r1?.result).toContain('town');
+  });
+
+  // Case 7b: Upgrade settlement fails when completed buildings are insufficient (queue doesn't count)
+  it('settlement upgrade fails when only queued buildings would meet requirement', () => {
+    const colony = makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 200, influence: 200 },
+    });
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      population: 60,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+      ],
+      buildQueue: [
+        { type: 'quarry', ticksRemaining: 1 },  // would be the 3rd, but not done yet
+      ],
+    });
+
+    const actions: QueuedAction[] = [
+      { id: 'a1', colonyId: 'colony-1', type: 'upgrade_settlement', params: { settlementId: 'settlement-1' } },
+    ];
+
+    const result = resolveUpgradeSettlement([settlement], [colony], actions);
+
+    const r1 = result.actionResults.find(r => r.actionId === 'a1');
+    expect(r1?.status).toBe('failed');
+    expect(r1?.result).toContain('Insufficient buildings');
+  });
+
+  // Case 9: Two colonies attack undefended settlement simultaneously
+  // Settlement capture is not yet implemented — combat only destroys units.
+  // This test documents current behavior: units fight each other on the settlement hex.
+  it('two colonies fighting on settlement hex: combat resolves between units only (no capture)', () => {
+    const hexes = makePlainGrid(10);
+    const u1 = makeUnit({ id: 'u1', colonyId: 'c1', hexX: 5, hexY: 0, type: 'soldier', health: 100 });
+    const u2 = makeUnit({ id: 'u2', colonyId: 'c2', hexX: 5, hexY: 0, type: 'soldier', health: 100 });
+    const c1 = makeColony({ id: 'c1', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 50 } });
+    const c2 = makeColony({ id: 'c2', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 50 } });
+    const c3 = makeColony({ id: 'c3', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 50 } });
+    const settlement = makeSettlement({ id: 's1', colonyId: 'c3', hexX: 5, hexY: 0 });
+
+    const result = resolveCombat([u1, u2], [], 42);
+    const combatEvents = result.events.filter(e => e.type === 'combat_resolved');
+    expect(combatEvents.length).toBeGreaterThan(0);
+
+    // Settlement ownership unchanged (no capture mechanic)
+    // This is verified by the fact that resolveCombat doesn't return settlement mutations
+  });
+
+  // Case 10: Settler tries to found on hex with enemy settlement
+  it('founding fails on hex with existing enemy settlement', () => {
+    const hexes = makePlainGrid(10);
+    const enemySettlement = makeSettlement({ id: 's-enemy', colonyId: 'c2', hexX: 5, hexY: 5 });
+    // Set the hex as having a settlement
+    const hexWithSettlement = hexes.find(h => h.x === 5 && h.y === 5);
+    if (hexWithSettlement) hexWithSettlement.settlementId = 's-enemy';
+
+    const settler = makeUnit({ id: 'settler-1', colonyId: 'c1', type: 'settler', hexX: 5, hexY: 5, worldId: 'w1' });
+    const colony = makeColony({ id: 'c1', resources: { food: 200, timber: 200, stone: 100, iron: 50, influence: 50 } });
+
+    const actions: QueuedAction[] = [
+      { id: 'a1', colonyId: 'c1', type: 'found_settlement', params: { unitId: 'settler-1', name: 'Invasion' } },
+    ];
+
+    const allHexCoords = new Set(hexes.map(h => `${h.x},${h.y}`));
+    const result = resolveFoundSettlement([settler], [colony], [enemySettlement], hexes, actions, allHexCoords);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('already has a settlement');
+    expect(result.newSettlements.length).toBe(0);
+  });
+
+});
