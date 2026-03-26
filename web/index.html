@@ -322,6 +322,14 @@
       font-size: 0.65rem;
       color: var(--text-dim);
       margin-bottom: 0.15rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .event-time {
+      font-size: 0.6rem;
+      color: var(--text-dim);
+      opacity: 0.7;
     }
 
     .event-text { line-height: 1.4; }
@@ -646,6 +654,25 @@
     });
 
     // --- Event rendering ---
+    function formatEventTime(isoString) {
+      const date = new Date(isoString);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMin = Math.floor(diffMs / 60000);
+      const diffHr = Math.floor(diffMs / 3600000);
+
+      if (diffMin < 1) return 'just now';
+      if (diffMin < 60) return `${diffMin}m ago`;
+      if (diffHr < 24) return `${diffHr}h ago`;
+
+      // Show date for older events
+      const month = date.toLocaleString('en', { month: 'short' });
+      const day = date.getDate();
+      const hours = String(date.getHours()).padStart(2, '0');
+      const mins = String(date.getMinutes()).padStart(2, '0');
+      return `${month} ${day}, ${hours}:${mins}`;
+    }
+
     function formatEvent(event) {
       const d = event.data || {};
       switch (event.type) {
@@ -719,9 +746,13 @@
         const colonyTag = colony && event.type !== '_repeated'
           ? `<span class="event-colony">${escapeHtml(colony)}</span> `
           : '';
+        const timeStr = event.createdAt ? formatEventTime(event.createdAt) : '';
         return `
           <li class="event-item ${event.type}">
-            <div class="event-tick">Tick ${event.tick}</div>
+            <div class="event-tick">
+              <span>Tick ${event.tick}</span>
+              ${timeStr ? `<span class="event-time">${timeStr}</span>` : ''}
+            </div>
             <div class="event-text">${colonyTag}${formatEvent(event)}</div>
           </li>`;
       }).join('');

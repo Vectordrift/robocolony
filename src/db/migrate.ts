@@ -86,6 +86,7 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   { table: 'hexes', column: 'settlement_id', type: 'TEXT', nullable: true },
   { table: 'hexes', column: 'explored_by', type: 'TEXT[]', defaultValue: "ARRAY[]::TEXT[]", nullable: true },
   { table: 'hexes', column: 'poi', type: 'JSONB', nullable: true },
+  { table: 'events', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
 
   // actions
   { table: 'actions', column: 'id', type: 'TEXT' },

@@ -75,6 +75,7 @@ export async function feedRoutes(app: FastifyInstance) {
         data: events.data,
         publicData: events.publicData,
         visibility: events.visibility,
+        createdAt: events.createdAt,
       })
       .from(events)
       .where(and(...conditions))
@@ -88,6 +89,7 @@ export async function feedRoutes(app: FastifyInstance) {
       type: row.type,
       colonyId: (row.visibility as string[] | null)?.[0] ?? null,
       data: row.publicData ?? row.data,
+      ...(row.createdAt ? { createdAt: row.createdAt.toISOString() } : {}),
     }));
 
     // Get colony summaries (public info only)

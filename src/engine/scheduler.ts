@@ -150,7 +150,7 @@ export class TickScheduler {
       .where(eq(schema.worlds.id, this.worldId));
 
     if (!world) throw new Error(`World ${this.worldId} not found`);
-    if (world.status !== 'running') throw new Error(`World ${this.worldId} is not running (status: ${world.status})`);
+    if (world.status !== 'running' && world.status !== 'open') throw new Error(`World ${this.worldId} is not running (status: ${world.status})`);
 
     this.timer = setInterval(() => {
       this.executeTick().catch((err) => {
