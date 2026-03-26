@@ -1,37 +1,13 @@
-"use strict";
 /**
  * Tick engine — resolves one game tick.
  *
  * Pure function: takes world state in, returns updated state + events out.
  * No database access — the scheduler handles persistence.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MARKET_CONVERSION_BASE_RATE = exports.MESSAGE_DELIVERY_DELAY = exports.MAX_MESSAGE_LENGTH = exports.MAX_MESSAGES_PER_TICK = exports.COMBAT_RANDOM_BONUS = exports.COMBAT_MORALE_LOSS = exports.UNIT_DEFENSE = exports.UNIT_ATTACK = exports.DECAY_CHANCE_PER_BUILDING = exports.DEMOLISH_REFUND_RATE = exports.STOCKPILE_HARD_CEILING = exports.STOCKPILE_DECAY_RATE = exports.GRANARY_BONUS_PER_LEVEL = exports.STOCKPILE_CAP = exports.POP_GROWTH_PER_FOOD = exports.BUILDING_SLOTS = exports.MAX_POPULATION = exports.TIER_ORDER = exports.UPGRADE_COSTS = exports.FOUNDING_REVEAL_RADIUS = exports.MIN_SETTLEMENT_DISTANCE = exports.FOUNDING_COST = exports.IDLE_WARNING_TICKS = exports.MORALE_RECOVERY_RATE = exports.SCORE_COMBAT_VICTORY = exports.SCORE_UNIT_TRAINED = exports.SCORE_BUILDING_BUILT = exports.SCORE_UPGRADE_CITY = exports.SCORE_UPGRADE_TOWN = exports.SCORE_SETTLEMENT_FOUNDED = exports.SCORE_PER_TICK = exports.MAX_DEFICIT_MULTIPLIER = exports.MORALE_WARNING_THRESHOLD = exports.DESERTION_CHANCE = exports.DESERTION_THRESHOLD = exports.MORALE_LOSS_RATE = exports.VALID_UNIT_TYPES = exports.UNIT_TRAINING_COSTS = exports.POP_FOOD_CONSUMPTION = exports.UNIT_UPKEEP = exports.VALID_BUILDING_TYPES = exports.BUILD_TIME = exports.UPGRADE_BUILD_TIME = exports.MAX_BUILDING_LEVEL = exports.BUILDING_COSTS = exports.BUILDING_UPKEEP = exports.BUILDING_PRODUCTION = exports.TIER_MULTIPLIER = exports.SCORE_RESEARCH_COMPLETE = exports.TECH_TREE = void 0;
-exports.PROPOSAL_EXPIRY_TICKS = exports.BREAK_COSTS = exports.BREAK_TRADE_COST = exports.MARKET_CONVERSION_MAX_AMOUNT = exports.MARKET_CONVERSION_MIN_RATE = exports.MARKET_CONVERSION_LEVEL_BONUS = void 0;
-exports.buildingUpgradeCost = buildingUpgradeCost;
-exports.resolveBuilding = resolveBuilding;
-exports.resolveUpgradeBuilding = resolveUpgradeBuilding;
-exports.resolveDemolish = resolveDemolish;
-exports.resolveFoundSettlement = resolveFoundSettlement;
-exports.resolveTrainUnit = resolveTrainUnit;
-exports.resolveUpgradeSettlement = resolveUpgradeSettlement;
-exports.resolveMovement = resolveMovement;
-exports.calculateProduction = calculateProduction;
-exports.calculateBuildingUpkeep = calculateBuildingUpkeep;
-exports.calculateUnitUpkeep = calculateUnitUpkeep;
-exports.calculatePopulationConsumption = calculatePopulationConsumption;
-exports.resolveCombat = resolveCombat;
-exports.resolveMessages = resolveMessages;
-exports.resolveConvertResources = resolveConvertResources;
-exports.autoExploreIdleScouts = autoExploreIdleScouts;
-exports.resolveResearch = resolveResearch;
-exports.resolveAgreementActions = resolveAgreementActions;
-exports.resolveTradeTransfers = resolveTradeTransfers;
-exports.resolveTick = resolveTick;
-const hex_js_1 = require("./hex.js");
-const pathfinding_js_1 = require("./pathfinding.js");
-const fog_js_1 = require("./fog.js");
-exports.TECH_TREE = {
+import { hexNeighbors, hexDistance } from './hex.js';
+import { findPath, movementStepsThisTick, createHexLookup } from './pathfinding.js';
+import { computeFogReveals, hexesWithinRadius } from './fog.js';
+export const TECH_TREE = {
     improved_agriculture: {
         id: 'improved_agriculture',
         name: 'Improved Agriculture',
@@ -78,16 +54,16 @@ exports.TECH_TREE = {
         requires: ['steel_weapons'],
     },
 };
-exports.SCORE_RESEARCH_COMPLETE = 75;
+export const SCORE_RESEARCH_COMPLETE = 75;
 // --- Constants ---
 /** Settlement tier multipliers for production */
-exports.TIER_MULTIPLIER = {
+export const TIER_MULTIPLIER = {
     outpost: 1.0,
     town: 1.5,
     city: 2.0,
 };
 /** Building production per level */
-exports.BUILDING_PRODUCTION = {
+export const BUILDING_PRODUCTION = {
     farm: { food: 15 },
     lumberMill: { timber: 3 },
     quarry: { stone: 4 },
@@ -98,7 +74,7 @@ exports.BUILDING_PRODUCTION = {
     workshop: {},
 };
 /** Building upkeep per level (resources consumed per tick) */
-exports.BUILDING_UPKEEP = {
+export const BUILDING_UPKEEP = {
     farm: { timber: 2 },
     lumberMill: { timber: 2, stone: 1 },
     quarry: { timber: 2 },
@@ -109,7 +85,7 @@ exports.BUILDING_UPKEEP = {
     workshop: { food: 2, timber: 1, iron: 1 },
 };
 /** Building construction costs */
-exports.BUILDING_COSTS = {
+export const BUILDING_COSTS = {
     farm: { timber: 20 },
     lumberMill: { timber: 10, stone: 10 },
     quarry: { stone: 20, iron: 10 },
@@ -120,15 +96,15 @@ exports.BUILDING_COSTS = {
     workshop: { stone: 40, timber: 30, iron: 20 },
 };
 /** Maximum building level */
-exports.MAX_BUILDING_LEVEL = 3;
+export const MAX_BUILDING_LEVEL = 3;
 /** Building upgrade time in ticks (same as construction) */
-exports.UPGRADE_BUILD_TIME = 3;
+export const UPGRADE_BUILD_TIME = 3;
 /**
  * Calculate upgrade cost for a building at the given level.
  * Upgrading from level N to N+1 costs: base_cost × N (escalating).
  */
-function buildingUpgradeCost(type, currentLevel) {
-    const base = exports.BUILDING_COSTS[type];
+export function buildingUpgradeCost(type, currentLevel) {
+    const base = BUILDING_COSTS[type];
     const cost = {};
     for (const [key, amount] of Object.entries(base)) {
         cost[key] = amount * (currentLevel + 1);
@@ -136,13 +112,13 @@ function buildingUpgradeCost(type, currentLevel) {
     return cost;
 }
 /** Ticks required to construct any building */
-exports.BUILD_TIME = 3;
+export const BUILD_TIME = 3;
 /** All valid building types */
-exports.VALID_BUILDING_TYPES = [
+export const VALID_BUILDING_TYPES = [
     'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop',
 ];
 /** Unit food upkeep per tick */
-exports.UNIT_UPKEEP = {
+export const UNIT_UPKEEP = {
     scout: 0.5,
     militia: 1.5,
     soldier: 3,
@@ -150,9 +126,9 @@ exports.UNIT_UPKEEP = {
     settler: 3,
 };
 /** Population food consumption per person per tick */
-exports.POP_FOOD_CONSUMPTION = 0.4;
+export const POP_FOOD_CONSUMPTION = 0.4;
 /** Unit training costs (resources needed to recruit) */
-exports.UNIT_TRAINING_COSTS = {
+export const UNIT_TRAINING_COSTS = {
     scout: { food: 10, timber: 5 },
     militia: { food: 15, timber: 10, iron: 5 },
     soldier: { food: 25, timber: 10, iron: 15 },
@@ -160,41 +136,41 @@ exports.UNIT_TRAINING_COSTS = {
     settler: { food: 50, timber: 30 },
 };
 /** All valid unit types for training */
-exports.VALID_UNIT_TYPES = ['scout', 'militia', 'soldier', 'siege', 'settler'];
+export const VALID_UNIT_TYPES = ['scout', 'militia', 'soldier', 'siege', 'settler'];
 /** Base morale loss per tick when food is negative (scaled by deficit severity) */
-exports.MORALE_LOSS_RATE = 0.03;
+export const MORALE_LOSS_RATE = 0.03;
 /** Morale threshold below which a unit may desert */
-exports.DESERTION_THRESHOLD = 0.2;
+export const DESERTION_THRESHOLD = 0.2;
 /** Probability a unit deserts each tick when at or below DESERTION_THRESHOLD */
-exports.DESERTION_CHANCE = 0.3;
+export const DESERTION_CHANCE = 0.3;
 /** Morale level at which a warning event fires (before desertion) */
-exports.MORALE_WARNING_THRESHOLD = 0.4;
+export const MORALE_WARNING_THRESHOLD = 0.4;
 /** Maximum morale loss multiplier from deficit severity */
-exports.MAX_DEFICIT_MULTIPLIER = 3.0;
+export const MAX_DEFICIT_MULTIPLIER = 3.0;
 // --- Legacy Score Awards ---
-exports.SCORE_PER_TICK = 1;
-exports.SCORE_SETTLEMENT_FOUNDED = 50;
-exports.SCORE_UPGRADE_TOWN = 100;
-exports.SCORE_UPGRADE_CITY = 250;
-exports.SCORE_BUILDING_BUILT = 25;
-exports.SCORE_UNIT_TRAINED = 10;
-exports.SCORE_COMBAT_VICTORY = 100;
+export const SCORE_PER_TICK = 1;
+export const SCORE_SETTLEMENT_FOUNDED = 50;
+export const SCORE_UPGRADE_TOWN = 100;
+export const SCORE_UPGRADE_CITY = 250;
+export const SCORE_BUILDING_BUILT = 25;
+export const SCORE_UNIT_TRAINED = 10;
+export const SCORE_COMBAT_VICTORY = 100;
 /** Morale recovery per tick when food is positive */
-exports.MORALE_RECOVERY_RATE = 0.10;
+export const MORALE_RECOVERY_RATE = 0.10;
 /** Ticks of inactivity before emitting idle unit warning */
-exports.IDLE_WARNING_TICKS = 3;
+export const IDLE_WARNING_TICKS = 3;
 /** Resource cost to found a new settlement */
-exports.FOUNDING_COST = {
+export const FOUNDING_COST = {
     food: 100,
     timber: 50,
 };
 /** Minimum hex distance between any two settlements */
-exports.MIN_SETTLEMENT_DISTANCE = 3;
+export const MIN_SETTLEMENT_DISTANCE = 3;
 /** Fog reveal radius for a newly founded settlement */
-exports.FOUNDING_REVEAL_RADIUS = 2;
+export const FOUNDING_REVEAL_RADIUS = 2;
 /** Terrains where settlements cannot be founded */
 /** Settlement upgrade requirements */
-exports.UPGRADE_COSTS = {
+export const UPGRADE_COSTS = {
     town: {
         resources: { food: 200, timber: 150, stone: 100, influence: 25 },
         minPopulation: 50,
@@ -207,40 +183,40 @@ exports.UPGRADE_COSTS = {
     },
 };
 /** Settlement tier progression order */
-exports.TIER_ORDER = ['outpost', 'town', 'city'];
+export const TIER_ORDER = ['outpost', 'town', 'city'];
 /** Maximum population per settlement tier */
-exports.MAX_POPULATION = {
+export const MAX_POPULATION = {
     outpost: 50,
     town: 200,
     city: 1000,
 };
 /** Maximum number of building slots per settlement tier */
-exports.BUILDING_SLOTS = {
+export const BUILDING_SLOTS = {
     outpost: 4,
     town: 6,
     city: 7,
 };
 /** Population growth rate: +1 per this many excess food */
-exports.POP_GROWTH_PER_FOOD = 5;
+export const POP_GROWTH_PER_FOOD = 5;
 /** Stockpile capacity per settlement tier (per resource) */
-exports.STOCKPILE_CAP = {
+export const STOCKPILE_CAP = {
     outpost: 500,
     town: 1000,
     city: 2000,
 };
 /** Additional stockpile capacity per granary level */
-exports.GRANARY_BONUS_PER_LEVEL = 200;
+export const GRANARY_BONUS_PER_LEVEL = 200;
 /** Fraction of excess resources that decay each tick (5%) */
-exports.STOCKPILE_DECAY_RATE = 0.05;
+export const STOCKPILE_DECAY_RATE = 0.05;
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
-exports.STOCKPILE_HARD_CEILING = 2.0;
+export const STOCKPILE_HARD_CEILING = 2.0;
 /** Fraction of building cost refunded on demolish (25%) */
-exports.DEMOLISH_REFUND_RATE = 0.25;
+export const DEMOLISH_REFUND_RATE = 0.25;
 /** Chance per tick per building to decay when colony food is at 0 */
-exports.DECAY_CHANCE_PER_BUILDING = 0.10;
+export const DECAY_CHANCE_PER_BUILDING = 0.10;
 // --- Combat Constants ---
 /** Unit attack power by type */
-exports.UNIT_ATTACK = {
+export const UNIT_ATTACK = {
     scout: 2,
     militia: 4,
     soldier: 8,
@@ -248,7 +224,7 @@ exports.UNIT_ATTACK = {
     settler: 0,
 };
 /** Unit defense power by type */
-exports.UNIT_DEFENSE = {
+export const UNIT_DEFENSE = {
     scout: 1,
     militia: 3,
     soldier: 6,
@@ -256,9 +232,9 @@ exports.UNIT_DEFENSE = {
     settler: 1,
 };
 /** Morale loss for surviving units after combat */
-exports.COMBAT_MORALE_LOSS = 0.1;
+export const COMBAT_MORALE_LOSS = 0.1;
 /** Max random bonus multiplier for attack damage (0 to this value) */
-exports.COMBAT_RANDOM_BONUS = 0.3;
+export const COMBAT_RANDOM_BONUS = 0.3;
 const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 // --- Helpers ---
 function hexKey(x, y) {
@@ -290,7 +266,7 @@ function deductResources(resources, cost) {
  * Then advance all existing build queues (decrement ticksRemaining,
  * move completed buildings to the buildings array).
  */
-function resolveBuilding(settlements, colonies, actions) {
+export function resolveBuilding(settlements, colonies, actions) {
     const events = [];
     const actionResults = [];
     // Build lookups
@@ -327,11 +303,11 @@ function resolveBuilding(settlements, colonies, actions) {
             continue;
         }
         // 3. Valid building type
-        if (!exports.VALID_BUILDING_TYPES.includes(buildingType)) {
+        if (!VALID_BUILDING_TYPES.includes(buildingType)) {
             actionResults.push({
                 actionId: action.id,
                 status: 'failed',
-                result: `Invalid building type: ${buildingType}. Valid types: ${exports.VALID_BUILDING_TYPES.join(', ')}`,
+                result: `Invalid building type: ${buildingType}. Valid types: ${VALID_BUILDING_TYPES.join(', ')}`,
             });
             continue;
         }
@@ -355,7 +331,7 @@ function resolveBuilding(settlements, colonies, actions) {
             continue;
         }
         // 5b. Building slot limit (per settlement tier)
-        const maxSlots = exports.BUILDING_SLOTS[settlement.tier] ?? 4;
+        const maxSlots = BUILDING_SLOTS[settlement.tier] ?? 4;
         const usedSlots = settlement.buildings.length + settlement.buildQueue.length;
         if (usedSlots >= maxSlots) {
             actionResults.push({
@@ -375,7 +351,7 @@ function resolveBuilding(settlements, colonies, actions) {
             });
             continue;
         }
-        const cost = exports.BUILDING_COSTS[bType];
+        const cost = BUILDING_COSTS[bType];
         if (!hasResources(colony.resources, cost)) {
             const costStr = Object.entries(cost)
                 .filter(([, v]) => v > 0)
@@ -392,7 +368,7 @@ function resolveBuilding(settlements, colonies, actions) {
         deductResources(colony.resources, cost);
         settlement.buildQueue.push({
             type: bType,
-            ticksRemaining: exports.BUILD_TIME,
+            ticksRemaining: BUILD_TIME,
         });
         events.push({
             type: 'build_started',
@@ -400,14 +376,14 @@ function resolveBuilding(settlements, colonies, actions) {
             settlementId: settlement.id,
             data: {
                 buildingType: bType,
-                ticksRemaining: exports.BUILD_TIME,
+                ticksRemaining: BUILD_TIME,
                 cost,
             },
         });
         actionResults.push({
             actionId: action.id,
             status: 'resolved',
-            result: `${bType} construction started at ${settlement.name} (${exports.BUILD_TIME} ticks)`,
+            result: `${bType} construction started at ${settlement.name} (${BUILD_TIME} ticks)`,
         });
     }
     // Phase 2: Advance all build queues (decrement ticksRemaining)
@@ -472,7 +448,7 @@ function resolveBuilding(settlements, colonies, actions) {
  * On success: resources deducted, building added to upgrade queue.
  * Upgrade queue entries are processed alongside build queue.
  */
-function resolveUpgradeBuilding(settlements, colonies, actions) {
+export function resolveUpgradeBuilding(settlements, colonies, actions) {
     const events = [];
     const actionResults = [];
     const upgradeActions = actions.filter(a => a.type === 'upgrade_building');
@@ -511,7 +487,7 @@ function resolveUpgradeBuilding(settlements, colonies, actions) {
             continue;
         }
         // 3. Valid building type
-        if (!exports.VALID_BUILDING_TYPES.includes(buildingType)) {
+        if (!VALID_BUILDING_TYPES.includes(buildingType)) {
             actionResults.push({
                 actionId: action.id,
                 status: 'failed',
@@ -531,11 +507,11 @@ function resolveUpgradeBuilding(settlements, colonies, actions) {
             continue;
         }
         // 5. Not already at max level
-        if (building.level >= exports.MAX_BUILDING_LEVEL) {
+        if (building.level >= MAX_BUILDING_LEVEL) {
             actionResults.push({
                 actionId: action.id,
                 status: 'failed',
-                result: `${bType} is already at maximum level (${exports.MAX_BUILDING_LEVEL})`,
+                result: `${bType} is already at maximum level (${MAX_BUILDING_LEVEL})`,
             });
             continue;
         }
@@ -576,7 +552,7 @@ function resolveUpgradeBuilding(settlements, colonies, actions) {
         // Add to build queue — when it completes, the building level will be incremented
         settlement.buildQueue.push({
             type: bType,
-            ticksRemaining: exports.UPGRADE_BUILD_TIME,
+            ticksRemaining: UPGRADE_BUILD_TIME,
         });
         events.push({
             type: 'upgrade_started',
@@ -586,14 +562,14 @@ function resolveUpgradeBuilding(settlements, colonies, actions) {
                 buildingType: bType,
                 fromLevel: building.level,
                 toLevel: building.level + 1,
-                ticksRemaining: exports.UPGRADE_BUILD_TIME,
+                ticksRemaining: UPGRADE_BUILD_TIME,
                 cost,
             },
         });
         actionResults.push({
             actionId: action.id,
             status: 'resolved',
-            result: `${bType} upgrade to level ${building.level + 1} started at ${settlement.name} (${exports.UPGRADE_BUILD_TIME} ticks)`,
+            result: `${bType} upgrade to level ${building.level + 1} started at ${settlement.name} (${UPGRADE_BUILD_TIME} ticks)`,
         });
     }
     return { events, actionResults };
@@ -607,7 +583,7 @@ function resolveUpgradeBuilding(settlements, colonies, actions) {
  *
  * On success: building removed, partial refund credited, event emitted.
  */
-function resolveDemolish(settlements, colonies, actions) {
+export function resolveDemolish(settlements, colonies, actions) {
     const events = [];
     const actionResults = [];
     const demolishActions = actions.filter(a => a.type === 'demolish');
@@ -646,7 +622,7 @@ function resolveDemolish(settlements, colonies, actions) {
             continue;
         }
         // 3. Valid building type
-        if (!exports.VALID_BUILDING_TYPES.includes(buildingType)) {
+        if (!VALID_BUILDING_TYPES.includes(buildingType)) {
             actionResults.push({
                 actionId: action.id,
                 status: 'failed',
@@ -677,11 +653,11 @@ function resolveDemolish(settlements, colonies, actions) {
         }
         // --- All checks passed: remove building and refund ---
         // Calculate refund: 25% of total cost (base cost × level for upgraded buildings)
-        const baseCost = exports.BUILDING_COSTS[bType];
+        const baseCost = BUILDING_COSTS[bType];
         const refund = {};
         for (const [key, amount] of Object.entries(baseCost)) {
             const totalCost = amount * building.level;
-            refund[key] = Math.floor(totalCost * exports.DEMOLISH_REFUND_RATE);
+            refund[key] = Math.floor(totalCost * DEMOLISH_REFUND_RATE);
         }
         // Credit refund
         for (const [key, amount] of Object.entries(refund)) {
@@ -724,7 +700,7 @@ function resolveDemolish(settlements, colonies, actions) {
  *
  * On success: settler consumed, outpost created, resources deducted, fog revealed.
  */
-function resolveFoundSettlement(units, colonies, settlements, hexes, actions, allHexCoords) {
+export function resolveFoundSettlement(units, colonies, settlements, hexes, actions, allHexCoords) {
     const events = [];
     const actionResults = [];
     const newSettlements = [];
@@ -818,12 +794,12 @@ function resolveFoundSettlement(units, colonies, settlements, hexes, actions, al
         }
         // 7. Minimum distance from all other settlements
         const settlerPos = { q: unit.hexX, r: unit.hexY };
-        const tooClose = allSettlementPositions.some(pos => (0, hex_js_1.hexDistance)(settlerPos, pos) < exports.MIN_SETTLEMENT_DISTANCE);
+        const tooClose = allSettlementPositions.some(pos => hexDistance(settlerPos, pos) < MIN_SETTLEMENT_DISTANCE);
         if (tooClose) {
             actionResults.push({
                 actionId: action.id,
                 status: 'failed',
-                result: `Too close to an existing settlement (minimum distance: ${exports.MIN_SETTLEMENT_DISTANCE})`,
+                result: `Too close to an existing settlement (minimum distance: ${MIN_SETTLEMENT_DISTANCE})`,
             });
             continue;
         }
@@ -837,8 +813,8 @@ function resolveFoundSettlement(units, colonies, settlements, hexes, actions, al
             });
             continue;
         }
-        const foodCost = exports.FOUNDING_COST.food ?? 0;
-        const timberCost = exports.FOUNDING_COST.timber ?? 0;
+        const foodCost = FOUNDING_COST.food ?? 0;
+        const timberCost = FOUNDING_COST.timber ?? 0;
         if (colony.resources.food < foodCost || colony.resources.timber < timberCost) {
             actionResults.push({
                 actionId: action.id,
@@ -871,7 +847,7 @@ function resolveFoundSettlement(units, colonies, settlements, hexes, actions, al
         // Mark settler as consumed
         consumedUnitIds.push(unit.id);
         // Fog reveal around new settlement
-        const revealedHexes = (0, fog_js_1.hexesWithinRadius)(settlerPos, exports.FOUNDING_REVEAL_RADIUS, allHexCoords);
+        const revealedHexes = hexesWithinRadius(settlerPos, FOUNDING_REVEAL_RADIUS, allHexCoords);
         for (const rHex of revealedHexes) {
             fogReveals.push({ colonyId: unit.colonyId, hex: rHex });
         }
@@ -911,7 +887,7 @@ function resolveFoundSettlement(units, colonies, settlements, hexes, actions, al
  *
  * On success: resources deducted, new unit created at settlement hex.
  */
-function resolveTrainUnit(colonies, settlements, actions) {
+export function resolveTrainUnit(colonies, settlements, actions) {
     const events = [];
     const actionResults = [];
     const newUnits = [];
@@ -960,11 +936,11 @@ function resolveTrainUnit(colonies, settlements, actions) {
             continue;
         }
         // 4. Valid unit type
-        if (!exports.VALID_UNIT_TYPES.includes(unitType)) {
+        if (!VALID_UNIT_TYPES.includes(unitType)) {
             actionResults.push({
                 actionId: action.id,
                 status: 'failed',
-                result: `Invalid unit type: ${unitType}. Valid types: ${exports.VALID_UNIT_TYPES.join(', ')}`,
+                result: `Invalid unit type: ${unitType}. Valid types: ${VALID_UNIT_TYPES.join(', ')}`,
             });
             continue;
         }
@@ -979,7 +955,7 @@ function resolveTrainUnit(colonies, settlements, actions) {
             });
             continue;
         }
-        const cost = exports.UNIT_TRAINING_COSTS[uType];
+        const cost = UNIT_TRAINING_COSTS[uType];
         if (!hasResources(colony.resources, cost)) {
             const costStr = Object.entries(cost)
                 .filter(([, v]) => v > 0)
@@ -1037,7 +1013,7 @@ function resolveTrainUnit(colonies, settlements, actions) {
  *
  * On success: resources deducted, tier upgraded, events emitted.
  */
-function resolveUpgradeSettlement(settlements, colonies, actions) {
+export function resolveUpgradeSettlement(settlements, colonies, actions) {
     const events = [];
     const actionResults = [];
     const upgradeActions = actions.filter(a => a.type === 'upgrade_settlement');
@@ -1075,8 +1051,8 @@ function resolveUpgradeSettlement(settlements, colonies, actions) {
             continue;
         }
         // 3. Not already max tier
-        const currentTierIndex = exports.TIER_ORDER.indexOf(settlement.tier);
-        if (currentTierIndex === -1 || currentTierIndex >= exports.TIER_ORDER.length - 1) {
+        const currentTierIndex = TIER_ORDER.indexOf(settlement.tier);
+        if (currentTierIndex === -1 || currentTierIndex >= TIER_ORDER.length - 1) {
             actionResults.push({
                 actionId: action.id,
                 status: 'failed',
@@ -1084,8 +1060,8 @@ function resolveUpgradeSettlement(settlements, colonies, actions) {
             });
             continue;
         }
-        const nextTier = exports.TIER_ORDER[currentTierIndex + 1];
-        const requirements = exports.UPGRADE_COSTS[nextTier];
+        const nextTier = TIER_ORDER[currentTierIndex + 1];
+        const requirements = UPGRADE_COSTS[nextTier];
         if (!requirements) {
             actionResults.push({
                 actionId: action.id,
@@ -1162,7 +1138,7 @@ function resolveUpgradeSettlement(settlements, colonies, actions) {
  * Resolve move_unit actions: compute path and set movement queue.
  * Then advance all units with existing movement queues.
  */
-function resolveMovement(units, actions, hexLookup) {
+export function resolveMovement(units, actions, hexLookup) {
     const events = [];
     const actionResults = [];
     // Build unit lookup for ownership/existence checks
@@ -1215,7 +1191,7 @@ function resolveMovement(units, actions, hexLookup) {
             continue;
         }
         // Compute path using A*
-        const path = (0, pathfinding_js_1.findPath)(from, to, hexLookup);
+        const path = findPath(from, to, hexLookup);
         if (!path || path.length === 0) {
             actionResults.push({
                 actionId: action.id,
@@ -1256,7 +1232,7 @@ function resolveMovement(units, actions, hexLookup) {
     for (const unit of units) {
         if (!unit.movementQueue || unit.movementQueue.length === 0)
             continue;
-        const steps = (0, pathfinding_js_1.movementStepsThisTick)(unit.movementQueue, unit.type, hexLookup);
+        const steps = movementStepsThisTick(unit.movementQueue, unit.type, hexLookup);
         if (steps === 0) {
             // Can't move (all remaining hexes impassable?) — clear queue
             unit.movementQueue = [];
@@ -1312,12 +1288,12 @@ function resolveMovement(units, actions, hexLookup) {
  * Calculate resource production for a single settlement.
  * Production = (sum of building output × level × tier multiplier) + (nearby hex yields × 0.5)
  */
-function calculateProduction(settlement, nearbyHexes) {
-    const tierMult = exports.TIER_MULTIPLIER[settlement.tier] ?? 1.0;
+export function calculateProduction(settlement, nearbyHexes) {
+    const tierMult = TIER_MULTIPLIER[settlement.tier] ?? 1.0;
     const production = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
     // Building production
     for (const building of settlement.buildings) {
-        const output = exports.BUILDING_PRODUCTION[building.type];
+        const output = BUILDING_PRODUCTION[building.type];
         if (!output)
             continue;
         for (const [resource, amount] of Object.entries(output)) {
@@ -1336,10 +1312,10 @@ function calculateProduction(settlement, nearbyHexes) {
 /**
  * Calculate building upkeep for a settlement.
  */
-function calculateBuildingUpkeep(settlement) {
+export function calculateBuildingUpkeep(settlement) {
     const upkeep = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
     for (const building of settlement.buildings) {
-        const cost = exports.BUILDING_UPKEEP[building.type];
+        const cost = BUILDING_UPKEEP[building.type];
         if (!cost)
             continue;
         for (const [resource, amount] of Object.entries(cost)) {
@@ -1351,14 +1327,14 @@ function calculateBuildingUpkeep(settlement) {
 /**
  * Calculate total unit upkeep for a colony.
  */
-function calculateUnitUpkeep(units) {
-    return units.reduce((total, unit) => total + (exports.UNIT_UPKEEP[unit.type] ?? 0), 0);
+export function calculateUnitUpkeep(units) {
+    return units.reduce((total, unit) => total + (UNIT_UPKEEP[unit.type] ?? 0), 0);
 }
 /**
  * Calculate population food consumption for a settlement.
  */
-function calculatePopulationConsumption(settlement) {
-    return settlement.population * exports.POP_FOOD_CONSUMPTION;
+export function calculatePopulationConsumption(settlement) {
+    return settlement.population * POP_FOOD_CONSUMPTION;
 }
 /**
  * Simple seeded PRNG (mulberry32). Used for deterministic combat results.
@@ -1384,7 +1360,7 @@ function createRng(seed) {
  * Effective damage = max(0, damage - target.defensePower).
  * Units at health ≤ 0 are destroyed. Survivors lose COMBAT_MORALE_LOSS morale.
  */
-function resolveCombat(units, actions, seed, activeAgreements) {
+export function resolveCombat(units, actions, seed, activeAgreements) {
     const rng = createRng(seed);
     const events = [];
     const actionResults = [];
@@ -1458,7 +1434,7 @@ function resolveCombat(units, actions, seed, activeAgreements) {
         const damageDealt = new Map(); // target unitId → total damage
         const combatLog = [];
         for (const attacker of unitsOnHex) {
-            const attackPower = exports.UNIT_ATTACK[attacker.type];
+            const attackPower = UNIT_ATTACK[attacker.type];
             if (attackPower <= 0)
                 continue; // settlers can't attack
             // Find enemy units (from different colony AND not NAP-protected)
@@ -1468,9 +1444,9 @@ function resolveCombat(units, actions, seed, activeAgreements) {
             // Pick a random enemy target
             const target = enemies[Math.floor(rng() * enemies.length)];
             // Calculate damage with random bonus
-            const bonus = rng() * exports.COMBAT_RANDOM_BONUS;
+            const bonus = rng() * COMBAT_RANDOM_BONUS;
             const rawDamage = attackPower * (1 + bonus);
-            const effectiveDamage = Math.max(0, rawDamage - exports.UNIT_DEFENSE[target.type]);
+            const effectiveDamage = Math.max(0, rawDamage - UNIT_DEFENSE[target.type]);
             const roundedDamage = Math.round(effectiveDamage * 100) / 100;
             const currentDamage = damageDealt.get(target.id) ?? 0;
             damageDealt.set(target.id, currentDamage + roundedDamage);
@@ -1517,7 +1493,7 @@ function resolveCombat(units, actions, seed, activeAgreements) {
         // Surviving units lose morale
         for (const unit of unitsOnHex) {
             if (!destroyedUnitIds.includes(unit.id)) {
-                unit.morale = Math.max(0, Math.round((unit.morale - exports.COMBAT_MORALE_LOSS) * 100) / 100);
+                unit.morale = Math.max(0, Math.round((unit.morale - COMBAT_MORALE_LOSS) * 100) / 100);
             }
         }
         // Emit combat_resolved event (visible to all involved colonies)
@@ -1555,11 +1531,11 @@ function resolveCombat(units, actions, seed, activeAgreements) {
 }
 // --- Message Resolution ---
 /** Maximum messages a colony can send per tick */
-exports.MAX_MESSAGES_PER_TICK = 5;
+export const MAX_MESSAGES_PER_TICK = 5;
 /** Maximum message content length (characters) */
-exports.MAX_MESSAGE_LENGTH = 500;
+export const MAX_MESSAGE_LENGTH = 500;
 /** Delivery delay in ticks (messages arrive 1 tick after sending) */
-exports.MESSAGE_DELIVERY_DELAY = 1;
+export const MESSAGE_DELIVERY_DELAY = 1;
 /**
  * Resolve send_message actions: validate and create message records.
  *
@@ -1571,7 +1547,7 @@ exports.MESSAGE_DELIVERY_DELAY = 1;
  *
  * On success: message record created, event emitted for recipient.
  */
-function resolveMessages(colonies, actions, worldId, currentTick) {
+export function resolveMessages(colonies, actions, worldId, currentTick) {
     const events = [];
     const actionResults = [];
     const newMessages = [];
@@ -1591,11 +1567,11 @@ function resolveMessages(colonies, actions, worldId, currentTick) {
         const content = action.params.message;
         // 1. Check rate limit
         const currentCount = sentCount.get(action.colonyId) ?? 0;
-        if (currentCount >= exports.MAX_MESSAGES_PER_TICK) {
+        if (currentCount >= MAX_MESSAGES_PER_TICK) {
             actionResults.push({
                 actionId: action.id,
                 status: 'failed',
-                result: `Rate limit: max ${exports.MAX_MESSAGES_PER_TICK} messages per tick`,
+                result: `Rate limit: max ${MAX_MESSAGES_PER_TICK} messages per tick`,
             });
             continue;
         }
@@ -1608,11 +1584,11 @@ function resolveMessages(colonies, actions, worldId, currentTick) {
             });
             continue;
         }
-        if (content.length > exports.MAX_MESSAGE_LENGTH) {
+        if (content.length > MAX_MESSAGE_LENGTH) {
             actionResults.push({
                 actionId: action.id,
                 status: 'failed',
-                result: `Message too long: max ${exports.MAX_MESSAGE_LENGTH} characters (got ${content.length})`,
+                result: `Message too long: max ${MAX_MESSAGE_LENGTH} characters (got ${content.length})`,
             });
             continue;
         }
@@ -1656,7 +1632,7 @@ function resolveMessages(colonies, actions, worldId, currentTick) {
         // --- All checks passed: create message ---
         const senderColony = colonyMap.get(action.colonyId);
         const messageId = `msg_${currentTick}_${Math.random().toString(36).slice(2, 10)}`;
-        const deliveredAtTick = currentTick + exports.MESSAGE_DELIVERY_DELAY;
+        const deliveredAtTick = currentTick + MESSAGE_DELIVERY_DELAY;
         const message = {
             id: messageId,
             worldId,
@@ -1705,13 +1681,13 @@ function resolveMessages(colonies, actions, worldId, currentTick) {
 }
 // --- Market Resource Conversion ---
 /** Base conversion rate: spend this many units to get 1 unit of target resource */
-exports.MARKET_CONVERSION_BASE_RATE = 3.0;
+export const MARKET_CONVERSION_BASE_RATE = 3.0;
 /** Conversion rate improvement per market level: rate = base - (level - 1) * this */
-exports.MARKET_CONVERSION_LEVEL_BONUS = 0.5;
+export const MARKET_CONVERSION_LEVEL_BONUS = 0.5;
 /** Minimum conversion rate (best possible) */
-exports.MARKET_CONVERSION_MIN_RATE = 1.5;
+export const MARKET_CONVERSION_MIN_RATE = 1.5;
 /** Maximum amount convertible per action */
-exports.MARKET_CONVERSION_MAX_AMOUNT = 200;
+export const MARKET_CONVERSION_MAX_AMOUNT = 200;
 /** Convertible resource types */
 const CONVERTIBLE_RESOURCES = ['food', 'timber', 'stone', 'iron'];
 /**
@@ -1730,7 +1706,7 @@ const CONVERTIBLE_RESOURCES = ['food', 'timber', 'stone', 'iron'];
  * - Colony has enough of the source resource
  * - Amount is positive and within limits
  */
-function resolveConvertResources(settlements, colonies, actions) {
+export function resolveConvertResources(settlements, colonies, actions) {
     const events = [];
     const actionResults = [];
     const convertActions = actions.filter(a => a.type === 'convert_resources');
@@ -1814,11 +1790,11 @@ function resolveConvertResources(settlements, colonies, actions) {
             });
             continue;
         }
-        if (amount > exports.MARKET_CONVERSION_MAX_AMOUNT) {
+        if (amount > MARKET_CONVERSION_MAX_AMOUNT) {
             actionResults.push({
                 actionId: action.id,
                 status: 'failed',
-                result: `Amount exceeds maximum of ${exports.MARKET_CONVERSION_MAX_AMOUNT} per action`,
+                result: `Amount exceeds maximum of ${MARKET_CONVERSION_MAX_AMOUNT} per action`,
             });
             continue;
         }
@@ -1841,7 +1817,7 @@ function resolveConvertResources(settlements, colonies, actions) {
             continue;
         }
         // --- All checks passed: perform conversion ---
-        const conversionRate = Math.max(exports.MARKET_CONVERSION_MIN_RATE, exports.MARKET_CONVERSION_BASE_RATE - (market.level - 1) * exports.MARKET_CONVERSION_LEVEL_BONUS);
+        const conversionRate = Math.max(MARKET_CONVERSION_MIN_RATE, MARKET_CONVERSION_BASE_RATE - (market.level - 1) * MARKET_CONVERSION_LEVEL_BONUS);
         const received = Math.round((amount / conversionRate) * 100) / 100;
         colony.resources[fromResource] = Math.round((colony.resources[fromResource] - amount) * 100) / 100;
         colony.resources[toResource] = Math.round((colony.resources[toResource] + received) * 100) / 100;
@@ -1882,7 +1858,7 @@ function resolveConvertResources(settlements, colonies, actions) {
  * 4. Pick the nearest candidate and pathfind to it
  * 5. Set the movement queue
  */
-function autoExploreIdleScouts(units, hexes, hexLookup, actionedUnitIds) {
+export function autoExploreIdleScouts(units, hexes, hexLookup, actionedUnitIds) {
     const events = [];
     // Build terrain map for quick lookups
     const terrainMap = new Map();
@@ -1913,16 +1889,17 @@ function autoExploreIdleScouts(units, hexes, hexLookup, actionedUnitIds) {
         (!u.movementQueue || u.movementQueue.length === 0) &&
         !actionedUnitIds.has(u.id));
     for (const scout of idleScouts) {
-        const explored = exploredByColony.get(scout.colonyId);
-        if (!explored)
+        const exploredOrUndefined = exploredByColony.get(scout.colonyId);
+        if (!exploredOrUndefined)
             continue;
+        const explored = exploredOrUndefined;
         // Find frontier: unexplored hexes adjacent to explored territory
         // To be efficient, we check neighbors of explored hexes that are NOT explored
         const frontierCandidates = [];
         const frontierSeen = new Set();
         for (const exploredKey of explored) {
             const [eq, er] = exploredKey.split(',').map(Number);
-            const neighbors = (0, hex_js_1.hexNeighbors)({ q: eq, r: er });
+            const neighbors = hexNeighbors({ q: eq, r: er });
             for (const n of neighbors) {
                 const nKey = `${n.q},${n.r}`;
                 if (frontierSeen.has(nKey))
@@ -1949,7 +1926,7 @@ function autoExploreIdleScouts(units, hexes, hexLookup, actionedUnitIds) {
         // Tie-break: prefer candidates farther from the scout (push outward).
         const scoutPos = { q: scout.hexX, r: scout.hexY };
         function frontierScore(candidate) {
-            const neighbors = (0, hex_js_1.hexNeighbors)(candidate);
+            const neighbors = hexNeighbors(candidate);
             let unexploredCount = 0;
             for (const n of neighbors) {
                 const nk = `${n.q},${n.r}`;
@@ -1959,7 +1936,7 @@ function autoExploreIdleScouts(units, hexes, hexLookup, actionedUnitIds) {
             }
             // Primary: more unexplored neighbors = better (deeper frontier)
             // Secondary: farther from scout = better (push outward, break ties)
-            return unexploredCount * 1000 + (0, hex_js_1.hexDistance)(scoutPos, candidate);
+            return unexploredCount * 1000 + hexDistance(scoutPos, candidate);
         }
         frontierCandidates.sort((a, b) => frontierScore(b) - frontierScore(a));
         // Try pathfinding to top-scored candidates (try up to 15)
@@ -1967,7 +1944,7 @@ function autoExploreIdleScouts(units, hexes, hexLookup, actionedUnitIds) {
         let bestTarget = null;
         for (let i = 0; i < Math.min(frontierCandidates.length, 15); i++) {
             const candidate = frontierCandidates[i];
-            const path = (0, pathfinding_js_1.findPath)(scoutPos, candidate, hexLookup);
+            const path = findPath(scoutPos, candidate, hexLookup);
             // Require path length >= 2 to avoid 1-hop oscillation
             if (path && path.length >= 2) {
                 bestPath = path;
@@ -1979,7 +1956,7 @@ function autoExploreIdleScouts(units, hexes, hexLookup, actionedUnitIds) {
         if (!bestPath) {
             for (let i = 0; i < Math.min(frontierCandidates.length, 15); i++) {
                 const candidate = frontierCandidates[i];
-                const path = (0, pathfinding_js_1.findPath)(scoutPos, candidate, hexLookup);
+                const path = findPath(scoutPos, candidate, hexLookup);
                 if (path && path.length > 0) {
                     bestPath = path;
                     bestTarget = candidate;
@@ -2010,7 +1987,7 @@ function autoExploreIdleScouts(units, hexes, hexLookup, actionedUnitIds) {
  * Phase 1: Process research actions — validate and start research
  * Phase 2: Advance all research queues (decrement ticksRemaining)
  */
-function resolveResearch(colonies, settlements, actions) {
+export function resolveResearch(colonies, settlements, actions) {
     const events = [];
     const actionResults = [];
     const researchActions = actions.filter(a => a.type === 'research');
@@ -2022,11 +1999,11 @@ function resolveResearch(colonies, settlements, actions) {
             continue;
         }
         const techId = action.params.techId;
-        if (!techId || !exports.TECH_TREE[techId]) {
-            actionResults.push({ actionId: action.id, status: 'failed', result: `Unknown tech: ${techId}. Valid techs: ${Object.keys(exports.TECH_TREE).join(', ')}` });
+        if (!techId || !TECH_TREE[techId]) {
+            actionResults.push({ actionId: action.id, status: 'failed', result: `Unknown tech: ${techId}. Valid techs: ${Object.keys(TECH_TREE).join(', ')}` });
             continue;
         }
-        const tech = exports.TECH_TREE[techId];
+        const tech = TECH_TREE[techId];
         // Check colony has a workshop
         const colonySettlements = settlements.filter(s => s.colonyId === colony.id);
         const hasWorkshop = colonySettlements.some(s => s.buildings.some(b => b.type === 'workshop'));
@@ -2044,7 +2021,7 @@ function resolveResearch(colonies, settlements, actions) {
         if (tech.requires) {
             const missing = tech.requires.filter(r => !researched.includes(r));
             if (missing.length > 0) {
-                const names = missing.map(id => exports.TECH_TREE[id]?.name ?? id).join(', ');
+                const names = missing.map(id => TECH_TREE[id]?.name ?? id).join(', ');
                 actionResults.push({ actionId: action.id, status: 'failed', result: `Missing prerequisite tech(s): ${names}` });
                 continue;
             }
@@ -2100,7 +2077,7 @@ function resolveResearch(colonies, settlements, actions) {
             queue[i].ticksRemaining--;
             if (queue[i].ticksRemaining <= 0) {
                 const techId = queue[i].techId;
-                const tech = exports.TECH_TREE[techId];
+                const tech = TECH_TREE[techId];
                 researched.push(techId);
                 completed.push(techId);
                 queue.splice(i, 1);
@@ -2121,17 +2098,17 @@ function resolveResearch(colonies, settlements, actions) {
     }
     return { events, actionResults };
 }
-exports.BREAK_TRADE_COST = 50;
-exports.BREAK_COSTS = {
+export const BREAK_TRADE_COST = 50;
+export const BREAK_COSTS = {
     non_aggression: 30,
     trade: 50,
     alliance: 100,
 };
-exports.PROPOSAL_EXPIRY_TICKS = 50;
+export const PROPOSAL_EXPIRY_TICKS = 50;
 /**
  * Resolve propose/accept/reject/break agreement actions.
  */
-function resolveAgreementActions(colonies, agreements, actions, currentTick) {
+export function resolveAgreementActions(colonies, agreements, actions, currentTick) {
     const events = [];
     const actionResults = [];
     const mutations = [];
@@ -2233,7 +2210,7 @@ function resolveAgreementActions(colonies, agreements, actions, currentTick) {
                 actionResults.push({ actionId: action.id, status: 'failed', result: 'Not party to this agreement' });
                 continue;
             }
-            const influenceCost = exports.BREAK_COSTS[agreement.type] || 50;
+            const influenceCost = BREAK_COSTS[agreement.type] || 50;
             if ((colony.resources?.influence ?? 0) < influenceCost) {
                 actionResults.push({ actionId: action.id, status: 'failed', result: `Need ${influenceCost} influence` });
                 continue;
@@ -2248,7 +2225,7 @@ function resolveAgreementActions(colonies, agreements, actions, currentTick) {
     }
     // Expire old proposals
     for (const agreement of agreements) {
-        if (agreement.status === 'proposed' && (currentTick - agreement.proposedAtTick) >= exports.PROPOSAL_EXPIRY_TICKS) {
+        if (agreement.status === 'proposed' && (currentTick - agreement.proposedAtTick) >= PROPOSAL_EXPIRY_TICKS) {
             agreement.status = 'rejected';
             mutations.push({ type: 'update', agreement: { ...agreement } });
             events.push({ type: 'agreement_expired', colonyId: agreement.proposedBy, data: { agreementId: agreement.id, agreementType: agreement.type, visibility: [agreement.proposedBy, agreement.proposedTo] } });
@@ -2259,7 +2236,7 @@ function resolveAgreementActions(colonies, agreements, actions, currentTick) {
 /**
  * Transfer resources between colonies with active trade agreements.
  */
-function resolveTradeTransfers(colonies, agreements) {
+export function resolveTradeTransfers(colonies, agreements) {
     const events = [];
     const activeTradeAgreements = agreements.filter(a => a.type === 'trade' && a.status === 'active');
     for (const agreement of activeTradeAgreements) {
@@ -2301,7 +2278,7 @@ function resolveTradeTransfers(colonies, agreements) {
     }
     return { colonies, events };
 }
-function resolveTick(colonies, settlements, units, hexes, actions = [], combatSeed, worldId, currentTick, agreements) {
+export function resolveTick(colonies, settlements, units, hexes, actions = [], combatSeed, worldId, currentTick, agreements) {
     const events = [];
     const desertedUnitIds = [];
     let actionResults = [];
@@ -2393,7 +2370,7 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
         unitPositionsBefore.set(u.id, { x: u.hexX, y: u.hexY });
     }
     // --- Phase 0: Resolve movement actions + advance movement queues ---
-    const hexLookup = (0, pathfinding_js_1.createHexLookup)(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
     const hasMovingUnits = updatedUnits.some(u => u.movementQueue && u.movementQueue.length > 0);
     const nonFoundActions = actions.filter(a => a.type !== 'found_settlement');
     if (nonFoundActions.length > 0 || hasMovingUnits) {
@@ -2423,7 +2400,7 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
                     // Scout didn't move in Phase 0 — check if it has a new queue from auto-explore
                     const isAutoExplore = exploreResult.events.some(e => e.type === 'auto_explore' && e.unitId === unit.id);
                     if (isAutoExplore) {
-                        const steps = (0, pathfinding_js_1.movementStepsThisTick)(unit.movementQueue, unit.type, hexLookup);
+                        const steps = movementStepsThisTick(unit.movementQueue, unit.type, hexLookup);
                         if (steps > 0) {
                             const moved = unit.movementQueue.slice(0, steps);
                             const destination = moved[moved.length - 1];
@@ -2488,7 +2465,7 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
                 unitHexes.set(key, []);
             unitHexes.get(key).push({ colonyId: u.colonyId, type: u.type });
         }
-        const fogResult = (0, fog_js_1.computeFogReveals)(movedUnits, allHexCoords, alreadyExplored, { settlementHexes, unitHexes });
+        const fogResult = computeFogReveals(movedUnits, allHexCoords, alreadyExplored, { settlementHexes, unitHexes });
         fogReveals.push(...fogResult.reveals);
         events.push(...fogResult.events);
     }
@@ -2580,7 +2557,7 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
         const totalUpkeep = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
         for (const settlement of mySettlements) {
             // Get neighboring hexes for this settlement
-            const neighbors = (0, hex_js_1.hexNeighbors)({ q: settlement.hexX, r: settlement.hexY });
+            const neighbors = hexNeighbors({ q: settlement.hexX, r: settlement.hexY });
             const nearbyHexes = [
                 hexMap.get(hexKey(settlement.hexX, settlement.hexY)),
                 ...neighbors.map(n => hexMap.get(hexKey(n.q, n.r))),
@@ -2635,7 +2612,7 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
                 for (let i = settlement.buildings.length - 1; i >= 0; i--) {
                     const building = settlement.buildings[i];
                     const roll = Math.random();
-                    if (roll < exports.DECAY_CHANCE_PER_BUILDING) {
+                    if (roll < DECAY_CHANCE_PER_BUILDING) {
                         if (building.level <= 1) {
                             // Destroy the building
                             settlement.buildings.splice(i, 1);
@@ -2680,8 +2657,8 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
         let highestTier = 'outpost';
         let totalGranaryLevels = 0;
         for (const s of mySettlements) {
-            const tierIdx = exports.TIER_ORDER.indexOf(s.tier);
-            if (tierIdx > exports.TIER_ORDER.indexOf(highestTier)) {
+            const tierIdx = TIER_ORDER.indexOf(s.tier);
+            if (tierIdx > TIER_ORDER.indexOf(highestTier)) {
                 highestTier = s.tier;
             }
             for (const b of s.buildings) {
@@ -2689,12 +2666,12 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
                     totalGranaryLevels += b.level;
             }
         }
-        const baseCap = exports.STOCKPILE_CAP[highestTier] ?? 500;
-        const effectiveCap = baseCap + totalGranaryLevels * exports.GRANARY_BONUS_PER_LEVEL;
+        const baseCap = STOCKPILE_CAP[highestTier] ?? 500;
+        const effectiveCap = baseCap + totalGranaryLevels * GRANARY_BONUS_PER_LEVEL;
         for (const key of ['food', 'timber', 'stone', 'iron']) {
             if (colony.resources[key] > effectiveCap) {
                 // Hard ceiling: immediately clamp to cap × STOCKPILE_HARD_CEILING
-                const hardCeiling = Math.round(effectiveCap * exports.STOCKPILE_HARD_CEILING);
+                const hardCeiling = Math.round(effectiveCap * STOCKPILE_HARD_CEILING);
                 let clamped = 0;
                 if (colony.resources[key] > hardCeiling) {
                     clamped = Math.round((colony.resources[key] - hardCeiling) * 100) / 100;
@@ -2702,7 +2679,7 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
                 }
                 // Then apply percentage decay on remaining excess
                 const excess = colony.resources[key] - effectiveCap;
-                const decayed = Math.round(excess * exports.STOCKPILE_DECAY_RATE * 100) / 100;
+                const decayed = Math.round(excess * STOCKPILE_DECAY_RATE * 100) / 100;
                 colony.resources[key] = Math.round((colony.resources[key] - decayed) * 100) / 100;
                 const totalDecayed = Math.round((clamped + decayed) * 100) / 100;
                 events.push({
@@ -2732,9 +2709,9 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
                     id: s.id,
                     name: s.name,
                     tier: s.tier,
-                    buildingSlots: { used: s.buildings.length + s.buildQueue.length, max: exports.BUILDING_SLOTS[s.tier] ?? 4 },
+                    buildingSlots: { used: s.buildings.length + s.buildQueue.length, max: BUILDING_SLOTS[s.tier] ?? 4 },
                     population: s.population,
-                    maxPopulation: exports.MAX_POPULATION[s.tier] ?? 50,
+                    maxPopulation: MAX_POPULATION[s.tier] ?? 50,
                 })),
                 resources: { ...colony.resources },
             },
@@ -2743,9 +2720,9 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
         // +1 population per POP_GROWTH_PER_FOOD excess food, capped by tier max
         if (net.food > 0) {
             for (const settlement of mySettlements) {
-                const maxPop = exports.MAX_POPULATION[settlement.tier] ?? 50;
+                const maxPop = MAX_POPULATION[settlement.tier] ?? 50;
                 if (settlement.population < maxPop) {
-                    const growth = Math.floor(net.food / exports.POP_GROWTH_PER_FOOD);
+                    const growth = Math.floor(net.food / POP_GROWTH_PER_FOOD);
                     if (growth > 0) {
                         const oldPop = settlement.population;
                         settlement.population = Math.min(maxPop, settlement.population + growth);
@@ -2776,13 +2753,13 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
             // Calculate deficit severity: how bad is the shortfall relative to consumption?
             const totalConsumption = totalUpkeep.food > 0 ? totalUpkeep.food : 1;
             const deficitRatio = Math.abs(net.food) / totalConsumption;
-            const severityMultiplier = Math.min(deficitRatio * 2, exports.MAX_DEFICIT_MULTIPLIER);
+            const severityMultiplier = Math.min(deficitRatio * 2, MAX_DEFICIT_MULTIPLIER);
             // Only apply morale loss when the stockpile has actually hit 0
             // (i.e., colony truly can't feed its people, not just running a small deficit
             // that's still covered by reserves)
             const stockpileDepleted = colony.resources.food <= 0;
             const effectiveMoraleLoss = stockpileDepleted
-                ? exports.MORALE_LOSS_RATE * Math.max(severityMultiplier, 1)
+                ? MORALE_LOSS_RATE * Math.max(severityMultiplier, 1)
                 : 0;
             events.push({
                 type: 'famine',
@@ -2806,14 +2783,14 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
                 for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
                     unit.morale = Math.max(0, unit.morale - effectiveMoraleLoss);
                     // Probabilistic desertion: each unit at/below threshold has DESERTION_CHANCE to desert
-                    if (unit.morale <= exports.DESERTION_THRESHOLD) {
+                    if (unit.morale <= DESERTION_THRESHOLD) {
                         const roll = Math.random();
-                        if (roll < exports.DESERTION_CHANCE) {
+                        if (roll < DESERTION_CHANCE) {
                             desertedUnitIds.push(unit.id);
                             tickDesertions.push({ type: unit.type, id: unit.id, morale: unit.morale });
                         }
                     }
-                    else if (unit.morale <= exports.MORALE_WARNING_THRESHOLD) {
+                    else if (unit.morale <= MORALE_WARNING_THRESHOLD) {
                         moraleWarnings.push({ type: unit.type, id: unit.id, morale: unit.morale });
                     }
                 }
@@ -2852,7 +2829,7 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
         if (net.food >= 0 || colony.resources.food > 0) {
             for (const unit of updatedUnits.filter(u => u.colonyId === colony.id)) {
                 if (unit.morale < 1.0) {
-                    unit.morale = Math.min(1.0, unit.morale + exports.MORALE_RECOVERY_RATE);
+                    unit.morale = Math.min(1.0, unit.morale + MORALE_RECOVERY_RATE);
                 }
             }
         }
@@ -2883,7 +2860,7 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
         }
         else {
             unit.idleTicks = (unit.idleTicks ?? 0) + 1;
-            if (unit.idleTicks === exports.IDLE_WARNING_TICKS) {
+            if (unit.idleTicks === IDLE_WARNING_TICKS) {
                 events.push({
                     type: 'unit_idle',
                     colonyId: unit.colonyId,
@@ -2925,33 +2902,33 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
         if (colony.status !== 'active')
             continue;
         // +1 per tick alive
-        colony.legacyScore = (colony.legacyScore ?? 0) + exports.SCORE_PER_TICK;
+        colony.legacyScore = (colony.legacyScore ?? 0) + SCORE_PER_TICK;
         // Score from events
         for (const event of events) {
             if (!('colonyId' in event) || event.colonyId !== colony.id)
                 continue;
             switch (event.type) {
                 case 'settlement_founded':
-                    colony.legacyScore += exports.SCORE_SETTLEMENT_FOUNDED;
+                    colony.legacyScore += SCORE_SETTLEMENT_FOUNDED;
                     break;
                 case 'settlement_upgraded':
                     if (event.data?.newTier === 'town')
-                        colony.legacyScore += exports.SCORE_UPGRADE_TOWN;
+                        colony.legacyScore += SCORE_UPGRADE_TOWN;
                     if (event.data?.newTier === 'city')
-                        colony.legacyScore += exports.SCORE_UPGRADE_CITY;
+                        colony.legacyScore += SCORE_UPGRADE_CITY;
                     break;
                 case 'building_complete':
-                    colony.legacyScore += exports.SCORE_BUILDING_BUILT;
+                    colony.legacyScore += SCORE_BUILDING_BUILT;
                     break;
                 case 'unit_trained':
-                    colony.legacyScore += exports.SCORE_UNIT_TRAINED;
+                    colony.legacyScore += SCORE_UNIT_TRAINED;
                     break;
                 case 'combat_resolved':
                     if (event.data?.winner === colony.id)
-                        colony.legacyScore += exports.SCORE_COMBAT_VICTORY;
+                        colony.legacyScore += SCORE_COMBAT_VICTORY;
                     break;
                 case 'research_complete':
-                    colony.legacyScore += exports.SCORE_RESEARCH_COMPLETE;
+                    colony.legacyScore += SCORE_RESEARCH_COMPLETE;
                     break;
             }
         }
@@ -2968,3 +2945,4 @@ function resolveTick(colonies, settlements, units, hexes, actions = [], combatSe
         agreementMutations,
     };
 }
+//# sourceMappingURL=tick.js.map

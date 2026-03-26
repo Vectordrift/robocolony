@@ -1,17 +1,14 @@
-"use strict";
 /**
  * Action submission endpoints.
  *
  * POST /api/worlds/:id/actions — submit actions for next tick
  * GET  /api/worlds/:id/actions — list queued and recent resolved actions
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.actionRoutes = actionRoutes;
-const drizzle_orm_1 = require("drizzle-orm");
-const nanoid_1 = require("nanoid");
-const index_js_1 = require("../db/index.js");
-const index_js_2 = require("../db/schema/index.js");
-const index_js_3 = require("../middleware/index.js");
+import { eq, and, desc, sql } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
+import { db } from '../db/index.js';
+import { worlds, actions, units, settlements } from '../db/schema/index.js';
+import { requireAuth } from '../middleware/index.js';
 // --- Valid action types and their required params ---
 const VALID_ACTION_TYPES = {
     'move_unit': ['unitId', 'targetX', 'targetY'],
@@ -240,10 +237,10 @@ async function validateOwnership(colonyId, worldId, action) {
     const params = action.params;
     // Check unit ownership + type constraints
     if (params.unitId && typeof params.unitId === 'string') {
-        const unit = await index_js_1.db
-            .select({ colonyId: index_js_2.units.colonyId, type: index_js_2.units.type })
-            .from(index_js_2.units)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(index_js_2.units.id, params.unitId), (0, drizzle_orm_1.eq)(index_js_2.units.worldId, worldId)))
+        const unit = await db
+            .select({ colonyId: units.colonyId, type: units.type })
+            .from(units)
+            .where(and(eq(units.id, params.unitId), eq(units.worldId, worldId)))
             .limit(1);
         if (unit.length === 0) {
             return { valid: false, error: `Unit ${params.unitId} not found` };
@@ -264,10 +261,10 @@ async function validateOwnership(colonyId, worldId, action) {
     }
     // Check settlement ownership
     if (params.settlementId && typeof params.settlementId === 'string') {
-        const settlement = await index_js_1.db
-            .select({ colonyId: index_js_2.settlements.colonyId })
-            .from(index_js_2.settlements)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(index_js_2.settlements.id, params.settlementId), (0, drizzle_orm_1.eq)(index_js_2.settlements.worldId, worldId)))
+        const settlement = await db
+            .select({ colonyId: settlements.colonyId })
+            .from(settlements)
+            .where(and(eq(settlements.id, params.settlementId), eq(settlements.worldId, worldId)))
             .limit(1);
         if (settlement.length === 0) {
             return { valid: false, error: `Settlement ${params.settlementId} not found` };
@@ -279,10 +276,10 @@ async function validateOwnership(colonyId, worldId, action) {
     return { valid: true };
 }
 // --- Routes ---
-async function actionRoutes(app) {
+export async function actionRoutes(app) {
     // Submit actions
     app.post('/api/worlds/:id/actions', {
-        preHandler: index_js_3.requireAuth,
+        preHandler: requireAuth,
     }, async (request, reply) => {
         const colony = request.colony;
         const worldId = colony.worldId;
@@ -300,10 +297,10 @@ async function actionRoutes(app) {
             });
         }
         // Get world for current tick and map radius
-        const world = await index_js_1.db
-            .select({ currentTick: index_js_2.worlds.currentTick, status: index_js_2.worlds.status, mapRadius: index_js_2.worlds.mapRadius })
-            .from(index_js_2.worlds)
-            .where((0, drizzle_orm_1.eq)(index_js_2.worlds.id, worldId))
+        const world = await db
+            .select({ currentTick: worlds.currentTick, status: worlds.status, mapRadius: worlds.mapRadius })
+            .from(worlds)
+            .where(eq(worlds.id, worldId))
             .limit(1);
         if (world.length === 0) {
             return reply.code(404).send({ error: 'not_found', message: 'World not found' });
@@ -338,10 +335,10 @@ async function actionRoutes(app) {
             });
         }
         // Rate limit: count existing queued actions for next tick
-        const existingCount = await index_js_1.db
-            .select({ count: (0, drizzle_orm_1.sql) `count(*)` })
-            .from(index_js_2.actions)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(index_js_2.actions.worldId, worldId), (0, drizzle_orm_1.eq)(index_js_2.actions.colonyId, colony.id), (0, drizzle_orm_1.eq)(index_js_2.actions.tick, nextTick), (0, drizzle_orm_1.eq)(index_js_2.actions.status, 'queued')));
+        const existingCount = await db
+            .select({ count: sql `count(*)` })
+            .from(actions)
+            .where(and(eq(actions.worldId, worldId), eq(actions.colonyId, colony.id), eq(actions.tick, nextTick), eq(actions.status, 'queued')));
         const currentQueuedCount = Number(existingCount[0]?.count ?? 0);
         const remainingSlots = MAX_ACTIONS_PER_TICK - currentQueuedCount;
         // Truncate batch to fit remaining slots (partial accept)
@@ -359,8 +356,8 @@ async function actionRoutes(app) {
         // Insert all actions
         const inserted = [];
         for (const action of body.actions) {
-            const actionId = `act_${(0, nanoid_1.nanoid)(12)}`;
-            await index_js_1.db.insert(index_js_2.actions).values({
+            const actionId = `act_${nanoid(12)}`;
+            await db.insert(actions).values({
                 id: actionId,
                 worldId,
                 colonyId: colony.id,
@@ -388,47 +385,47 @@ async function actionRoutes(app) {
     });
     // List actions (queued + recent resolved)
     app.get('/api/worlds/:id/actions', {
-        preHandler: index_js_3.requireAuth,
+        preHandler: requireAuth,
     }, async (request, reply) => {
         const colony = request.colony;
         const worldId = colony.worldId;
         // Get world for current tick
-        const world = await index_js_1.db
-            .select({ currentTick: index_js_2.worlds.currentTick })
-            .from(index_js_2.worlds)
-            .where((0, drizzle_orm_1.eq)(index_js_2.worlds.id, worldId))
+        const world = await db
+            .select({ currentTick: worlds.currentTick })
+            .from(worlds)
+            .where(eq(worlds.id, worldId))
             .limit(1);
         if (world.length === 0) {
             return reply.code(404).send({ error: 'not_found', message: 'World not found' });
         }
         const currentTick = world[0].currentTick;
         // Get queued actions (next tick)
-        const queued = await index_js_1.db
+        const queued = await db
             .select({
-            id: index_js_2.actions.id,
-            type: index_js_2.actions.type,
-            params: index_js_2.actions.params,
-            tick: index_js_2.actions.tick,
-            status: index_js_2.actions.status,
-            result: index_js_2.actions.result,
-            createdAt: index_js_2.actions.createdAt,
+            id: actions.id,
+            type: actions.type,
+            params: actions.params,
+            tick: actions.tick,
+            status: actions.status,
+            result: actions.result,
+            createdAt: actions.createdAt,
         })
-            .from(index_js_2.actions)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(index_js_2.actions.worldId, worldId), (0, drizzle_orm_1.eq)(index_js_2.actions.colonyId, colony.id), (0, drizzle_orm_1.eq)(index_js_2.actions.status, 'queued')));
+            .from(actions)
+            .where(and(eq(actions.worldId, worldId), eq(actions.colonyId, colony.id), eq(actions.status, 'queued')));
         // Get recent resolved/failed actions (last 5 ticks)
-        const recent = await index_js_1.db
+        const recent = await db
             .select({
-            id: index_js_2.actions.id,
-            type: index_js_2.actions.type,
-            params: index_js_2.actions.params,
-            tick: index_js_2.actions.tick,
-            status: index_js_2.actions.status,
-            result: index_js_2.actions.result,
-            createdAt: index_js_2.actions.createdAt,
+            id: actions.id,
+            type: actions.type,
+            params: actions.params,
+            tick: actions.tick,
+            status: actions.status,
+            result: actions.result,
+            createdAt: actions.createdAt,
         })
-            .from(index_js_2.actions)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(index_js_2.actions.worldId, worldId), (0, drizzle_orm_1.eq)(index_js_2.actions.colonyId, colony.id), (0, drizzle_orm_1.sql) `${index_js_2.actions.status} IN ('resolved', 'failed')`, (0, drizzle_orm_1.sql) `${index_js_2.actions.tick} >= ${currentTick - 5}`))
-            .orderBy((0, drizzle_orm_1.desc)(index_js_2.actions.tick));
+            .from(actions)
+            .where(and(eq(actions.worldId, worldId), eq(actions.colonyId, colony.id), sql `${actions.status} IN ('resolved', 'failed')`, sql `${actions.tick} >= ${currentTick - 5}`))
+            .orderBy(desc(actions.tick));
         return {
             tick: currentTick,
             queued: {
@@ -441,22 +438,22 @@ async function actionRoutes(app) {
     });
     // Single action lookup
     app.get('/api/worlds/:id/actions/:actionId', {
-        preHandler: index_js_3.requireAuth,
+        preHandler: requireAuth,
     }, async (request, reply) => {
         const colony = request.colony;
         const { actionId } = request.params;
-        const rows = await index_js_1.db
+        const rows = await db
             .select({
-            id: index_js_2.actions.id,
-            type: index_js_2.actions.type,
-            params: index_js_2.actions.params,
-            tick: index_js_2.actions.tick,
-            status: index_js_2.actions.status,
-            result: index_js_2.actions.result,
-            createdAt: index_js_2.actions.createdAt,
+            id: actions.id,
+            type: actions.type,
+            params: actions.params,
+            tick: actions.tick,
+            status: actions.status,
+            result: actions.result,
+            createdAt: actions.createdAt,
         })
-            .from(index_js_2.actions)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(index_js_2.actions.id, actionId), (0, drizzle_orm_1.eq)(index_js_2.actions.colonyId, colony.id)))
+            .from(actions)
+            .where(and(eq(actions.id, actionId), eq(actions.colonyId, colony.id)))
             .limit(1);
         if (rows.length === 0) {
             return reply.code(404).send({ error: 'not_found', message: 'Action not found' });
@@ -464,3 +461,4 @@ async function actionRoutes(app) {
         return rows[0];
     });
 }
+//# sourceMappingURL=actions.js.map

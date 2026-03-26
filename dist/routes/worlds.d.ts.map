@@ -1,1 +1,1 @@
-{"version":3,"file":"worlds.d.ts","sourceRoot":"","sources":["../../src/routes/worlds.ts"],"names":[],"mappings":"AAAA;;;;;;;GAOG;AAEH,OAAO,KAAK,EAAE,eAAe,EAAgC,MAAM,SAAS,CAAC;AA+E7E,wBAAsB,WAAW,CAAC,GAAG,EAAE,eAAe,iBA+ZrD"}
+{"version":3,"file":"worlds.d.ts","sourceRoot":"","sources":["../../src/routes/worlds.ts"],"names":[],"mappings":"AAAA;;;;;;;;GAQG;AAEH,OAAO,KAAK,EAAE,eAAe,EAAgC,MAAM,SAAS,CAAC;AA4D7E,wBAAsB,WAAW,CAAC,GAAG,EAAE,eAAe,iBA6SrD"}
