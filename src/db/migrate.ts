@@ -60,6 +60,9 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   { table: 'units', column: 'morale', type: 'REAL', defaultValue: '1.0' },
   { table: 'units', column: 'movement_queue', type: 'JSONB', defaultValue: "'[]'" },
   { table: 'units', column: 'idle_ticks', type: 'INTEGER', defaultValue: '0' },
+  { table: 'colonies', column: 'last_action_tick', type: 'INTEGER', defaultValue: '0' },
+  { table: 'colonies', column: 'died_at_tick', type: 'INTEGER', defaultValue: null },
+  { table: 'colonies', column: 'death_reason', type: 'TEXT', defaultValue: null },
 
   // settlements
   { table: 'settlements', column: 'id', type: 'TEXT' },

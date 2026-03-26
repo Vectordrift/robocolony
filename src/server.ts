@@ -21,18 +21,20 @@ import { dirname, join } from 'path';
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
 const RATE_LIMIT_MAX = 60; // 60 requests per minute per IP
-const RATE_LIMIT_JOIN_MAX = 3; // 3 joins per minute per IP
+const RATE_LIMIT_JOIN_MAX = 1; // 1 join per hour per IP
+const RATE_LIMIT_JOIN_WINDOW_MS = 3_600_000; // 1 hour
 const joinRateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
 function checkRateLimit(
   store: Map<string, { count: number; resetAt: number }>,
   key: string,
   max: number,
+  windowMs: number = RATE_LIMIT_WINDOW_MS,
 ): { allowed: boolean; remaining: number; resetAt: number } {
   const now = Date.now();
   let entry = store.get(key);
   if (!entry || now >= entry.resetAt) {
-    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    entry = { count: 0, resetAt: now + windowMs };
   }
   entry.count++;
   store.set(key, entry);
@@ -73,20 +75,20 @@ export function buildApp() {
 
     // Stricter limit for join endpoint
     if (request.url.endsWith('/join') && request.method === 'POST') {
-      const result = checkRateLimit(joinRateLimitStore, ipKey, RATE_LIMIT_JOIN_MAX);
+      const result = checkRateLimit(joinRateLimitStore, ipKey, RATE_LIMIT_JOIN_MAX, RATE_LIMIT_JOIN_WINDOW_MS);
       reply.header('X-RateLimit-Limit', RATE_LIMIT_JOIN_MAX);
       reply.header('X-RateLimit-Remaining', result.remaining);
       if (!result.allowed) {
         return reply.code(429).send({
           error: 'rate_limit',
-          message: `Too many join requests. Max ${RATE_LIMIT_JOIN_MAX} per minute.`,
+          message: `Too many join requests. Try again in 1 hour.`,
         });
       }
     }
 
     // Global rate limit (skip health checks)
     if (request.url !== '/health') {
-      const result = checkRateLimit(rateLimitStore, ipKey, RATE_LIMIT_MAX);
+      const result = checkRateLimit(rateLimitStore, ipKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
       reply.header('X-RateLimit-Limit', RATE_LIMIT_MAX);
       reply.header('X-RateLimit-Remaining', result.remaining);
       if (!result.allowed) {

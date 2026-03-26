@@ -477,6 +477,9 @@ export async function actionRoutes(app: FastifyInstance) {
       });
     }
 
+    // Update last_action_tick for colony neglect tracking
+    await db.update(colonies).set({ lastActionTick: nextTick } as any).where(eq(colonies.id, colony.id));
+
     return reply.code(201).send({
       submitted: inserted.length,
       tick: nextTick,
