@@ -467,6 +467,13 @@ export class TickScheduler {
             .where(eq(schema.units.id, unitId));
         }
 
+        // Delete disbanded units
+        for (const unitId of result.disbandedUnitIds) {
+          await tx
+            .delete(schema.units)
+            .where(eq(schema.units.id, unitId));
+        }
+
         // --- Persist fog reveals (update explored_by arrays) ---
         if (result.fogReveals && result.fogReveals.length > 0) {
           // Group reveals by colony for batch updates
