@@ -117,6 +117,7 @@ export interface TickResult {
     units: Unit[];
     events: TickEvent[];
     desertedUnitIds: string[];
+    disbandedUnitIds: string[];
     deadColonyIds: string[];
     actionResults: ActionResult[];
     fogReveals: HexExploration[];
@@ -298,6 +299,21 @@ export interface FoundSettlementResult {
     /** Fog reveals from newly founded settlements */
     fogReveals: HexExploration[];
 }
+/**
+ * Resolve disband actions.
+ *
+ * Validates:
+ * - Unit exists and belongs to the colony
+ * - Unit is not on a hex with enemy units (cannot disband in combat)
+ *
+ * On success: unit is removed from the game. No resource refund.
+ */
+export declare function resolveDisband(units: Unit[], actions: QueuedAction[]): {
+    units: Unit[];
+    events: TickEvent[];
+    actionResults: ActionResult[];
+    disbandedUnitIds: string[];
+};
 /**
  * Resolve found_settlement actions.
  *
