@@ -47,7 +47,7 @@ export interface BuildQueueEntry {
     type: BuildingType;
     ticksRemaining: number;
 }
-export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market' | 'workshop';
+export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market' | 'workshop' | 'warehouse';
 export interface Unit {
     id: string;
     colonyId: string;
@@ -207,8 +207,10 @@ export declare const POP_GROWTH_PER_FOOD = 5;
 export declare const STOCKPILE_CAP: Record<string, number>;
 /** Additional stockpile capacity per granary level */
 export declare const GRANARY_BONUS_PER_LEVEL = 200;
+/** Additional stockpile capacity per warehouse level (all resources) */
+export declare const WAREHOUSE_BONUS_PER_LEVEL = 150;
 /** Fraction of excess resources that decay each tick (5%) */
-export declare const STOCKPILE_DECAY_RATE = 0.05;
+export declare const STOCKPILE_DECAY_RATE = 0.03;
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
 export declare const STOCKPILE_HARD_CEILING = 2;
 /** Fraction of building cost refunded on demolish (25%) */

@@ -1,1 +1,1 @@
-{"sha":"30762e918eafdcc3d8f35f936c4d58662bcf2b50","short":"30762e9","timestamp":"2026-03-26T09:09:30Z","message":"feat: CI-green gate in deploy script — blocks deploy if CI is red (ClawControlDev-Leader)"}
+{"sha":"9107d4f9a630d04c9f6ac15b9e5f23901179ecec","short":"9107d4f","timestamp":"2026-03-26T09:12:14Z","message":"Balance: reduce stockpile decay + add warehouse building (#108)"}
