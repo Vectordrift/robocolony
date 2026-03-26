@@ -66,6 +66,7 @@ export const BUILDING_PRODUCTION = {
     market: { influence: 2 },
     workshop: {},
     warehouse: {},
+    walls: {},
 };
 /** Building upkeep per level (resources consumed per tick) */
 export const BUILDING_UPKEEP = {
@@ -78,6 +79,7 @@ export const BUILDING_UPKEEP = {
     market: { food: 1, timber: 1 },
     workshop: { food: 2, timber: 1, iron: 1 },
     warehouse: { timber: 1, stone: 1 },
+    walls: { stone: 1 },
 };
 /** Building construction costs */
 export const BUILDING_COSTS = {
@@ -90,6 +92,7 @@ export const BUILDING_COSTS = {
     market: { stone: 30, timber: 15, iron: 5 },
     workshop: { stone: 40, timber: 30, iron: 20 },
     warehouse: { stone: 30, timber: 20, iron: 10 },
+    walls: { stone: 30, timber: 20 },
 };
 /** Maximum building level */
 export const MAX_BUILDING_LEVEL = 3;
@@ -111,7 +114,7 @@ export function buildingUpgradeCost(type, currentLevel) {
 export const BUILD_TIME = 3;
 /** All valid building types */
 export const VALID_BUILDING_TYPES = [
-    'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop', 'warehouse',
+    'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop', 'warehouse', 'walls',
 ];
 /** Unit food upkeep per tick */
 export const UNIT_UPKEEP = {
@@ -262,11 +265,15 @@ export const COMBAT_MORALE_WIN = 0.15;
 /** Morale penalty for units on the losing side of combat */
 export const COMBAT_MORALE_LOSE = 0.15;
 /** Maximum morale a unit can reach from combat victories */
-export const COMBAT_MORALE_CAP = 1.5;
+export const COMBAT_MORALE_CAP = 1.0;
 /** Range in hexes from own settlement for homeland defense morale bonus */
 export const HOMELAND_DEFENSE_RANGE = 5;
 /** Morale bonus for defending within HOMELAND_DEFENSE_RANGE of own settlement */
 export const HOMELAND_MORALE_BONUS = 0.1;
+/** Defense multiplier for units defending on a hex with a settlement that has walls */
+export const WALLS_DEFENSE_MULTIPLIER = 1.5;
+/** Legacy score awarded for capturing an enemy settlement */
+export const SETTLEMENT_CAPTURE_SCORE = 50;
 const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 // --- Helpers ---
 /** Truncate user-supplied IDs in error messages to prevent log bloat */
@@ -1567,7 +1574,14 @@ export function resolveCombat(units, actions, seed, activeAgreements, settlement
             // Calculate damage with random bonus
             const bonus = rng() * COMBAT_RANDOM_BONUS;
             const rawDamage = attackPower * (1 + bonus);
-            const effectiveDamage = Math.max(0, rawDamage - UNIT_DEFENSE[target.type]);
+            let effectiveDamage = Math.max(0, rawDamage - UNIT_DEFENSE[target.type]);
+            // Walls defense bonus: defending units on a settlement hex with walls take reduced damage
+            if (settlements) {
+                const defenderSettlement = settlements.find(s => s.colonyId === target.colonyId && s.hexX === target.hexX && s.hexY === target.hexY);
+                if (defenderSettlement && defenderSettlement.buildings.some(b => b.type === 'walls')) {
+                    effectiveDamage = effectiveDamage / WALLS_DEFENSE_MULTIPLIER;
+                }
+            }
             const roundedDamage = Math.round(effectiveDamage * 100) / 100;
             const currentDamage = damageDealt.get(target.id) ?? 0;
             damageDealt.set(target.id, currentDamage + roundedDamage);
@@ -1690,11 +1704,71 @@ export function resolveCombat(units, actions, seed, activeAgreements, settlement
     }
     // Remove destroyed units
     const survivingUnits = units.filter(u => !destroyedUnitIds.includes(u.id));
+    // --- Settlement capture: transfer settlements when defenders are eliminated ---
+    const capturedSettlements = [];
+    if (settlements) {
+        for (const settlement of settlements) {
+            // Check if any combat happened on this settlement's hex
+            const settleKey = hexKey(settlement.hexX, settlement.hexY);
+            const combatHex = hexUnits.get(settleKey);
+            if (!combatHex || combatHex.length < 2)
+                continue;
+            // Check if the settlement's colony still has surviving units on this hex
+            const defenderAlive = survivingUnits.some(u => u.colonyId === settlement.colonyId && u.hexX === settlement.hexX && u.hexY === settlement.hexY);
+            if (defenderAlive)
+                continue;
+            // Check if any enemy units survived on this hex
+            const attackerUnits = survivingUnits.filter(u => u.colonyId !== settlement.colonyId && u.hexX === settlement.hexX && u.hexY === settlement.hexY);
+            if (attackerUnits.length === 0)
+                continue;
+            // Find which colony has the most surviving units on the hex (the capturer)
+            const unitsByColony = new Map();
+            for (const u of attackerUnits) {
+                unitsByColony.set(u.colonyId, (unitsByColony.get(u.colonyId) ?? 0) + 1);
+            }
+            let capturerColony = '';
+            let maxUnits = 0;
+            for (const [colId, count] of unitsByColony) {
+                if (count > maxUnits) {
+                    maxUnits = count;
+                    capturerColony = colId;
+                }
+            }
+            // Transfer settlement
+            const oldColonyId = settlement.colonyId;
+            settlement.colonyId = capturerColony;
+            settlement.loyalty = 50; // Captured settlements start at 50 loyalty
+            capturedSettlements.push({
+                settlementId: settlement.id,
+                fromColony: oldColonyId,
+                toColony: capturerColony,
+            });
+            // Public event: settlement captured
+            const involvedColonies = new Set([oldColonyId, capturerColony]);
+            for (const colId of involvedColonies) {
+                events.push({
+                    type: 'settlement_captured',
+                    colonyId: colId,
+                    data: {
+                        settlementId: settlement.id,
+                        settlementName: settlement.name,
+                        hexX: settlement.hexX,
+                        hexY: settlement.hexY,
+                        fromColony: oldColonyId,
+                        toColony: capturerColony,
+                        tier: settlement.tier,
+                        buildings: settlement.buildings.length,
+                    },
+                });
+            }
+        }
+    }
     return {
         units: survivingUnits,
         destroyedUnitIds,
         events,
         actionResults,
+        capturedSettlements,
     };
 }
 // --- Message Resolution ---
@@ -2648,6 +2722,37 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
             events.push(...combatResult.events);
             actionResults.push(...combatResult.actionResults);
         }
+        // Handle settlement captures: award legacy score, check for colony elimination
+        if (combatResult.capturedSettlements.length > 0) {
+            for (const capture of combatResult.capturedSettlements) {
+                // Award legacy score to capturer
+                const capturer = updatedColonies.find(c => c.id === capture.toColony);
+                if (capturer) {
+                    capturer.legacyScore = (capturer.legacyScore ?? 0) + SETTLEMENT_CAPTURE_SCORE;
+                }
+                // Check if the losing colony has any settlements left
+                const loser = updatedColonies.find(c => c.id === capture.fromColony);
+                if (loser) {
+                    const remainingSettlements = updatedSettlements.filter(s => s.colonyId === loser.id);
+                    if (remainingSettlements.length === 0) {
+                        // Colony eliminated!
+                        loser.status = 'eliminated';
+                        loser.diedAtTick = currentTick;
+                        loser.deathReason = 'All settlements captured';
+                        events.push({
+                            type: 'colony_eliminated',
+                            colonyId: loser.id,
+                            data: {
+                                colonyName: loser.name,
+                                eliminatedBy: capture.toColony,
+                                reason: 'All settlements captured',
+                                tick: currentTick,
+                            },
+                        });
+                    }
+                }
+            }
+        }
     }
     // --- Phase 0.5: Fog of war reveals for units that moved ---
     const movedUnits = updatedUnits.filter(u => {
@@ -3357,4 +3462,3 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         agreementMutations,
     };
 }
-//# sourceMappingURL=tick.js.map
