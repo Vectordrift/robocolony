@@ -1,9 +1,10 @@
 /**
  * World and colony endpoints.
  *
- * POST /api/worlds/:id/join — Public: join a world (creates colony, returns API key)
- * GET  /api/worlds           — Public: list worlds
- * GET  /api/worlds/:id       — Public: world info
+ * POST   /api/worlds/:id/join   — Public: join a world (creates colony, returns API key)
+ * DELETE /api/worlds/:id/colony — Auth: delete own colony (resets join rate limit)
+ * GET    /api/worlds            — Public: list worlds
+ * GET    /api/worlds/:id        — Public: world info
  *
  * World creation is not exposed via API — create worlds via DB/CLI.
  */
@@ -16,7 +17,8 @@ import { worlds, hexes, colonies, settlements, units } from '../db/schema/index.
 import { generateWorld, findStartingPositions, recommendedRadius, recommendedMinSpacing } from '../engine/mapgen.js';
 import { hexDistance } from '../engine/hex.js';
 import { generateApiKey, hashApiKey } from '../lib/auth.js';
-
+import { requireAuth } from '../middleware/index.js';
+import { clearJoinRateLimit } from '../lib/ratelimit.js';
 // --- Input Sanitization ---
 
 /** Only allow alphanumeric, spaces, hyphens, underscores, apostrophes */
@@ -367,6 +369,114 @@ export async function worldRoutes(app: FastifyInstance) {
         tier: 'outpost',
       },
       units: unitRows.map((u) => ({ id: u.id, type: u.type })),
+    });
+  });
+}
+
+
+  // Delete own colony (resets join rate limit so player can rejoin)
+  app.delete('/api/worlds/:id/colony', {
+    preHandler: requireAuth,
+  }, async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply,
+  ) => {
+    const colony = request.colony!;
+    const worldId = request.params.id;
+
+    if (colony.worldId !== worldId) {
+      return reply.code(403).send({
+        error: 'forbidden',
+        message: 'API key does not belong to this world',
+      });
+    }
+
+    // Don't allow deleting eliminated colonies (already gone)
+    if (colony.status === 'eliminated') {
+      return reply.code(409).send({
+        error: 'already_eliminated',
+        message: 'This colony is already eliminated',
+      });
+    }
+
+    const colonyId = colony.id;
+
+    // Delete in dependency order:
+    // 1. Units
+    await db.delete(units).where(eq(units.colonyId, colonyId));
+
+    // 2. Clear settlement references on hexes
+    await db
+      .update(hexes)
+      .set({ settlementId: null })
+      .where(
+        and(
+          eq(hexes.worldId, worldId),
+          sql`settlement_id IN (SELECT id FROM settlements WHERE colony_id = ${colonyId})`,
+        ),
+      );
+
+    // 3. Settlements
+    await db.delete(settlements).where(eq(settlements.colonyId, colonyId));
+
+    // 4. Actions (queued and historical)
+    await db.execute(sql`DELETE FROM actions WHERE colony_id = ${colonyId}`);
+
+    // 5. Messages (sent by this colony)
+    await db.execute(sql`DELETE FROM messages WHERE from_colony = ${colonyId} OR to_colony = ${colonyId}`);
+
+    // 6. Agreements involving this colony
+    await db.execute(sql`
+      DELETE FROM agreements
+      WHERE proposed_by = ${colonyId} OR proposed_to = ${colonyId}
+    `);
+
+    // 7. Remove colony from explored_by arrays on hexes
+    await db.execute(sql`
+      UPDATE hexes
+      SET explored_by = array_remove(explored_by, ${colonyId})
+      WHERE world_id = ${worldId}
+        AND ${colonyId} = ANY(explored_by)
+    `);
+
+    // 8. Clear POI discoveries by this colony
+    await db.execute(sql`
+      UPDATE hexes
+      SET poi = jsonb_set(poi, '{discovered_by}', 'null'::jsonb)
+      WHERE world_id = ${worldId}
+        AND poi IS NOT NULL
+        AND poi->>'discovered_by' = ${colonyId}
+    `);
+
+    // 9. Delete the colony itself
+    await db.delete(colonies).where(eq(colonies.id, colonyId));
+
+    // 10. Clear join rate limit for this IP so they can rejoin immediately
+    const ip = request.ip || request.headers['x-forwarded-for'] || 'unknown';
+    const ipKey = Array.isArray(ip) ? ip[0] : ip;
+    clearJoinRateLimit(ipKey);
+
+    // Generate a public event
+    await db.execute(sql`
+      INSERT INTO events (id, world_id, tick, type, public, visibility, data, public_data)
+      SELECT
+        ${'evt_' + nanoid(10)},
+        ${worldId},
+        current_tick,
+        'colony_departed',
+        true,
+        ARRAY[]::text[],
+        jsonb_build_object('colonyId', ${colonyId}, 'colonyName', ${colony.name}),
+        jsonb_build_object('colony', ${colony.name})
+      FROM worlds WHERE id = ${worldId}
+    `);
+
+    request.log.info(`Colony ${colony.name} (${colonyId}) deleted from world ${worldId}`);
+
+    return reply.code(200).send({
+      message: `Colony "${colony.name}" has been deleted. You may rejoin immediately.`,
+      colonyId,
+      worldId,
     });
   });
 }
