@@ -72,18 +72,13 @@ function buildPublicData(event) {
                 resource: event.data.resource,
                 deficit: event.data.deficit,
             };
-        case 'combat_resolved': {
-            // Extract participant colony IDs and casualty summary from full combat data
-            const participants = (event.data.participants ?? []);
-            const colonyIds = [...new Set(participants.map(p => p.colonyId))];
+        case 'combat_resolved':
             return {
-                hexX: event.data.hexX,
-                hexY: event.data.hexY,
-                involvedColonies: colonyIds,
-                casualties: event.data.casualties ?? 0,
-                unitsDestroyed: participants.filter(p => p.destroyed).length,
+                attackerColonyId: event.data.attackerColonyId,
+                defenderColonyId: event.data.defenderColonyId,
+                attackerLosses: event.data.attackerLosses,
+                defenderLosses: event.data.defenderLosses,
             };
-        }
         case 'unit_destroyed':
             return {
                 unitType: event.data.unitType,
@@ -348,6 +343,10 @@ export class TickScheduler {
                             loyalty: settlement.loyalty,
                             population: settlement.population,
                         });
+                        // Link the hex to the new settlement
+                        await tx.update(schema.hexes)
+                            .set({ settlementId: settlement.id })
+                            .where(and(eq(schema.hexes.worldId, settlement.worldId), eq(schema.hexes.x, settlement.hexX), eq(schema.hexes.y, settlement.hexY)));
                     }
                 }
                 // Update existing units and insert newly trained units
