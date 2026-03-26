@@ -615,6 +615,18 @@
     let allEvents = [];
     let activeFilter = 'all';
 
+    // --- HTML escaping for XSS prevention ---
+    function escapeHtml(str) {
+      if (typeof str !== 'string') return '';
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
+    }
+
+
     // --- Filter logic ---
     const FILTER_MAP = {
       all: () => true,
@@ -661,7 +673,7 @@
         case 'build_complete':
           return `✅ Building complete: <span class="resource">${d.buildingType}</span> (level ${d.level})`;
         case 'settlement_founded':
-          return `🏗️ Settlement founded: <span class="colony-ref">${d.name}</span>`;
+          return `🏗️ Settlement founded: <span class="colony-ref">${escapeHtml(d.name)}</span>`;
         case 'unit_trained':
           return `⚔️ <span class="resource">${d.unitType}</span> trained`;
         case 'famine':
@@ -705,7 +717,7 @@
         const typeClass = event.type.replace(/_/g, '-');
         const colony = event.colonyId ? colonyNames[event.colonyId] || event.colonyId.slice(0,8) : '';
         const colonyTag = colony && event.type !== '_repeated'
-          ? `<span class="event-colony">${colony}</span> `
+          ? `<span class="event-colony">${escapeHtml(colony)}</span> `
           : '';
         return `
           <li class="event-item ${event.type}">
@@ -744,7 +756,7 @@
           <tr>
             <td class="rank ${rankClass}">${medal}</td>
             <td>
-              <span class="lb-colony-name">${c.name}</span>
+              <span class="lb-colony-name">${escapeHtml(c.name)}</span>
               <span class="lb-colony-status ${c.status}">${c.status}</span>
             </td>
             <td>${c.settlements}</td>
@@ -785,7 +797,7 @@
       container.innerHTML = colonies.map((c) => `
         <div class="colony-card">
           <div class="colony-name">
-            ${c.name}
+            ${escapeHtml(c.name)}
             <span class="colony-status ${c.status}">${c.status}</span>
           </div>
           <div class="colony-stats">
@@ -805,7 +817,7 @@
       const tickRateMin = Math.round((world.tickRate || 300000) / 60000);
 
       container.innerHTML = `
-        <div class="world-stat"><span class="label">Name</span> <span class="value">${world.name}</span></div>
+        <div class="world-stat"><span class="label">Name</span> <span class="value">${escapeHtml(world.name)}</span></div>
         <div class="world-stat"><span class="label">Status</span> <span class="value">${world.status}</span></div>
         <div class="world-stat"><span class="label">Tick</span> <span class="value">${world.currentTick}</span></div>
         <div class="world-stat"><span class="label">Tick Rate</span> <span class="value">${tickRateMin} min</span></div>
