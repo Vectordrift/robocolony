@@ -216,7 +216,7 @@ export const TIER_MULTIPLIER: Record<string, number> = {
 /** Building production per level */
 export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
   farm:       { food: 15 },
-  lumberMill: { timber: 3 },
+  lumberMill: { timber: 5 },
   quarry:     { stone: 4 },
   mine:       { iron: 3 },
   barracks:   {},
@@ -228,10 +228,10 @@ export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
 
 /** Building upkeep per level (resources consumed per tick) */
 export const BUILDING_UPKEEP: Record<BuildingType, Partial<Resources>> = {
-  farm:       { timber: 2 },
-  lumberMill: { timber: 2, stone: 1 },
-  quarry:     { timber: 2 },
-  mine:       { timber: 2, food: 1 },
+  farm:       { timber: 1 },
+  lumberMill: { timber: 1, stone: 1 },
+  quarry:     { timber: 1 },
+  mine:       { timber: 1, food: 1 },
   barracks:   { food: 2, iron: 2, timber: 1 },
   granary:    { timber: 1 },
   market:     { food: 1, timber: 1 },
