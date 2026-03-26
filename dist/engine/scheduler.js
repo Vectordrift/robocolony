@@ -72,13 +72,16 @@ function buildPublicData(event) {
                 resource: event.data.resource,
                 deficit: event.data.deficit,
             };
-        case 'combat_resolved':
+        case 'combat_resolved': {
+            const participants = event.data.participants;
+            const colonyIds = participants ? [...new Set(participants.map(p => p.colonyId))] : [];
             return {
-                attackerColonyId: event.data.attackerColonyId,
-                defenderColonyId: event.data.defenderColonyId,
-                attackerLosses: event.data.attackerLosses,
-                defenderLosses: event.data.defenderLosses,
+                hexX: event.data.hexX,
+                hexY: event.data.hexY,
+                colonies: colonyIds,
+                casualties: event.data.casualties,
             };
+        }
         case 'unit_destroyed':
             return {
                 unitType: event.data.unitType,
@@ -357,6 +360,7 @@ export class TickScheduler {
                         await tx
                             .update(schema.units)
                             .set({
+                            health: unit.health,
                             morale: unit.morale,
                             hexX: unit.hexX,
                             hexY: unit.hexY,
