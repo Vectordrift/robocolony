@@ -189,6 +189,7 @@ export interface TickResult {
   units: Unit[];
   events: TickEvent[];
   desertedUnitIds: string[];
+  disbandedUnitIds: string[];
   deadColonyIds: string[];
   actionResults: ActionResult[];
   fogReveals: HexExploration[];
@@ -1046,6 +1047,87 @@ export interface FoundSettlementResult {
   actionResults: ActionResult[];
   /** Fog reveals from newly founded settlements */
   fogReveals: HexExploration[];
+}
+
+/**
+ * Resolve disband actions.
+ *
+ * Validates:
+ * - Unit exists and belongs to the colony
+ * - Unit is not on a hex with enemy units (cannot disband in combat)
+ *
+ * On success: unit is removed from the game. No resource refund.
+ */
+export function resolveDisband(
+  units: Unit[],
+  actions: QueuedAction[],
+): { units: Unit[]; events: TickEvent[]; actionResults: ActionResult[]; disbandedUnitIds: string[] } {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+  const disbandedUnitIds = new Set<string>();
+
+  // Build a map of hex -> set of colonyIds (to detect enemy presence)
+  const hexColonies = new Map<string, Set<string>>();
+  for (const u of units) {
+    const key = hexKey(u.hexX, u.hexY);
+    const set = hexColonies.get(key) ?? new Set<string>();
+    set.add(u.colonyId);
+    hexColonies.set(key, set);
+  }
+
+  const disbandActions = actions.filter(a => a.type === 'disband');
+
+  for (const action of disbandActions) {
+    const unitId = action.params?.unitId as string;
+    if (!unitId) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Missing unitId' });
+      continue;
+    }
+
+    const unit = units.find(u => u.id === unitId);
+    if (!unit) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Unit ${unitId} not found` });
+      continue;
+    }
+
+    if (unit.colonyId !== action.colonyId) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Unit ${unitId} does not belong to your colony` });
+      continue;
+    }
+
+    // Cannot disband in combat — check if enemy units share this hex
+    const key = hexKey(unit.hexX, unit.hexY);
+    const coloniesOnHex = hexColonies.get(key);
+    if (coloniesOnHex && coloniesOnHex.size > 1) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Cannot disband unit in combat — enemy units present at (${unit.hexX}, ${unit.hexY})` });
+      continue;
+    }
+
+    // Already being disbanded this tick (duplicate action)
+    if (disbandedUnitIds.has(unitId)) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Unit ${unitId} already disbanded` });
+      continue;
+    }
+
+    // Disband the unit
+    disbandedUnitIds.add(unitId);
+    actionResults.push({ actionId: action.id, status: 'resolved', result: `Disbanded ${unit.type} at (${unit.hexX}, ${unit.hexY})` });
+    events.push({
+      type: 'unit_disbanded',
+      colonyId: unit.colonyId,
+      unitId: unit.id,
+      data: {
+        unitType: unit.type,
+        hexX: unit.hexX,
+        hexY: unit.hexY,
+      },
+    });
+  }
+
+  // Remove disbanded units
+  const remainingUnits = units.filter(u => !disbandedUnitIds.has(u.id));
+
+  return { units: remainingUnits, events, actionResults, disbandedUnitIds: [...disbandedUnitIds] };
 }
 
 /**
@@ -3079,12 +3161,12 @@ export function resolveTick(
   //    within each phase — first-come-first-served. If multiple actions exceed available
   //    resources, the first one(s) succeed and later ones fail with "Insufficient resources".
   {
-    // Collect units that have found_settlement actions (these settlers will be consumed)
-    const foundSettlerIds = new Set<string>();
+    // Collect units that have found_settlement or disband actions (these units will be consumed/removed)
+    const consumedUnitIds = new Set<string>();
     for (const a of actions) {
-      if (a.type === 'found_settlement') {
+      if (a.type === 'found_settlement' || a.type === 'disband') {
         const unitId = (a.params?.unitId as string) || null;
-        if (unitId) foundSettlerIds.add(unitId);
+        if (unitId) consumedUnitIds.add(unitId);
       }
     }
 
@@ -3101,12 +3183,13 @@ export function resolveTick(
       const a = actions[i];
       const unitId = (a.params?.unitId as string) || null;
       if (unitId && (a.type === 'move_unit' || a.type === 'attack' || a.type === 'explore')) {
-        // Reject movement for settlers that are being consumed by found_settlement
-        if (foundSettlerIds.has(unitId)) {
+        // Reject movement for units that are being consumed by found_settlement or disband
+        if (consumedUnitIds.has(unitId)) {
+          const reason = actions.find(x => (x.type === 'found_settlement' || x.type === 'disband') && x.params?.unitId === unitId)?.type;
           actionResults.push({
             actionId: a.id,
             status: 'failed',
-            result: `Unit ${unitId} has a found_settlement action — movement rejected (settler will be consumed)`,
+            result: `Unit ${unitId} has a ${reason} action — movement rejected`,
           });
           continue;
         }
@@ -3174,6 +3257,20 @@ export function resolveTick(
     events.push(...foundResult.events);
     actionResults.push(...foundResult.actionResults);
     fogReveals.push(...foundResult.fogReveals);
+  }
+
+  // --- Phase -0.5: Resolve disband actions (before movement — disbanded units don't move) ---
+  const tickDisbandedUnitIds: string[] = [];
+  const disbandActions = actions.filter(a => a.type === 'disband');
+  if (disbandActions.length > 0) {
+    const disbandResult = resolveDisband(updatedUnits, actions);
+    updatedUnits = disbandResult.units.map(u => ({
+      ...u,
+      movementQueue: u.movementQueue ? [...u.movementQueue] : [],
+    }));
+    events.push(...disbandResult.events);
+    actionResults.push(...disbandResult.actionResults);
+    tickDisbandedUnitIds.push(...disbandResult.disbandedUnitIds);
   }
 
   // Track unit positions before movement for fog-of-war
@@ -4010,6 +4107,7 @@ export function resolveTick(
     units: survivingUnits,
     events,
     desertedUnitIds,
+    disbandedUnitIds: tickDisbandedUnitIds,
     deadColonyIds,
     actionResults,
     fogReveals,
