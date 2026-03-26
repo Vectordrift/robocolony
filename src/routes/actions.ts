@@ -49,6 +49,7 @@ const VALID_ACTION_TYPES: Record<string, string[]> = {
   'accept_agreement': ['agreementId'],
   'reject_agreement': ['agreementId'],
   'break_agreement': ['agreementId'],
+  'disband': ['unitId'],
 };
 
 // Allowed params per action type (used to strip extra fields)
@@ -69,6 +70,7 @@ const ALLOWED_PARAMS: Record<string, string[]> = {
   'accept_agreement': ['agreementId'],
   'reject_agreement': ['agreementId'],
   'break_agreement': ['agreementId'],
+  'disband': ['unitId'],
 };
 
 // Valid building types
@@ -184,7 +186,7 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
   }
 
   // String ID validation for unit-based actions
-  if (['explore', 'found_settlement'].includes(action.type)) {
+  if (['explore', 'found_settlement', 'disband'].includes(action.type)) {
     if (typeof p.unitId !== 'string' || p.unitId.length === 0) {
       return { valid: false, error: `'unitId' must be a non-empty string` };
     }
