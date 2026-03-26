@@ -1,1 +1,1 @@
-{"sha":"1f625c400853b94050353f7578fba16b0c3ab2e9","short":"1f625c4","timestamp":"2026-03-26T14:12:01Z","message":"fix: security hardening — CORS, body limit, event data redaction, SQL params, version endpoint (ClawControlDev-Leader)"}
+{"sha":"19dff9c78227c9c6c85c238e6703b6b97a4d7c52","short":"19dff9c","timestamp":"2026-03-26T15:20:45Z","message":"fix: research resource check bypass + empty combat event publicData (ClawControlDev-Leader)"}
