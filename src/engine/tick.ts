@@ -59,7 +59,7 @@ export interface BuildQueueEntry {
   ticksRemaining: number;
 }
 
-export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market' | 'workshop';
+export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market' | 'workshop' | 'warehouse';
 
 export interface Unit {
   id: string;
@@ -216,6 +216,7 @@ export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
   granary:    {},
   market:     { influence: 2 },
   workshop:   {},
+  warehouse:  {},
 };
 
 /** Building upkeep per level (resources consumed per tick) */
@@ -228,6 +229,7 @@ export const BUILDING_UPKEEP: Record<BuildingType, Partial<Resources>> = {
   granary:    { timber: 1 },
   market:     { food: 1, timber: 1 },
   workshop:   { food: 2, timber: 1, iron: 1 },
+  warehouse:  { timber: 1, stone: 1 },
 };
 
 /** Building construction costs */
@@ -240,6 +242,7 @@ export const BUILDING_COSTS: Record<BuildingType, Partial<Resources>> = {
   granary:    { timber: 25, stone: 10 },
   market:     { stone: 30, timber: 15, iron: 5 },
   workshop:   { stone: 40, timber: 30, iron: 20 },
+  warehouse:  { stone: 30, timber: 20, iron: 10 },
 };
 
 /** Maximum building level */
@@ -266,7 +269,7 @@ export const BUILD_TIME = 3;
 
 /** All valid building types */
 export const VALID_BUILDING_TYPES: BuildingType[] = [
-  'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop',
+  'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop', 'warehouse',
 ];
 
 /** Unit food upkeep per tick */
@@ -391,8 +394,11 @@ export const STOCKPILE_CAP: Record<string, number> = {
 /** Additional stockpile capacity per granary level */
 export const GRANARY_BONUS_PER_LEVEL = 200;
 
+/** Additional stockpile capacity per warehouse level (all resources) */
+export const WAREHOUSE_BONUS_PER_LEVEL = 150;
+
 /** Fraction of excess resources that decay each tick (5%) */
-export const STOCKPILE_DECAY_RATE = 0.05;
+export const STOCKPILE_DECAY_RATE = 0.03;
 
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
 export const STOCKPILE_HARD_CEILING = 2.0;
@@ -3366,6 +3372,7 @@ export function resolveTick(
     // Granary buildings add bonus capacity.
     let highestTier = 'outpost';
     let totalGranaryLevels = 0;
+    let totalWarehouseLevels = 0;
     for (const s of mySettlements) {
       const tierIdx = TIER_ORDER.indexOf(s.tier);
       if (tierIdx > TIER_ORDER.indexOf(highestTier)) {
@@ -3373,10 +3380,11 @@ export function resolveTick(
       }
       for (const b of s.buildings) {
         if (b.type === 'granary') totalGranaryLevels += b.level;
+        if (b.type === 'warehouse') totalWarehouseLevels += b.level;
       }
     }
     const baseCap = STOCKPILE_CAP[highestTier] ?? 500;
-    const effectiveCap = baseCap + totalGranaryLevels * GRANARY_BONUS_PER_LEVEL;
+    const effectiveCap = baseCap + totalGranaryLevels * GRANARY_BONUS_PER_LEVEL + totalWarehouseLevels * WAREHOUSE_BONUS_PER_LEVEL;
 
     for (const key of ['food', 'timber', 'stone', 'iron'] as (keyof Resources)[]) {
       if (colony.resources[key] > effectiveCap) {
