@@ -53,6 +53,7 @@ export async function feedRoutes(app) {
             data: events.data,
             publicData: events.publicData,
             visibility: events.visibility,
+            createdAt: events.createdAt,
         })
             .from(events)
             .where(and(...conditions))
@@ -65,6 +66,7 @@ export async function feedRoutes(app) {
             type: row.type,
             colonyId: row.visibility?.[0] ?? null,
             data: row.publicData ?? row.data,
+            ...(row.createdAt ? { createdAt: row.createdAt.toISOString() } : {}),
         }));
         // Get colony summaries (public info only)
         const colonyRows = await db

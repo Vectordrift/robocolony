@@ -11,7 +11,7 @@ import { messageRoutes } from './routes/messages.js';
 import { diplomacyRoutes } from './routes/diplomacy.js';
 import { db } from './db/index.js';
 import { worlds, settlements, colonies } from './db/schema/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, or } from 'drizzle-orm';
 import { TickScheduler } from './engine/scheduler.js';
 import { ensureSchema } from './db/migrate.js';
 import { fileURLToPath } from 'url';
@@ -107,12 +107,12 @@ export function buildApp() {
 }
 /** Active schedulers keyed by worldId */
 const schedulers = new Map();
-/** Start tick schedulers for all running worlds */
+/** Start tick schedulers for all active worlds (status: running or open) */
 async function startSchedulers(logger) {
     const runningWorlds = await db
         .select()
         .from(worlds)
-        .where(eq(worlds.status, 'running'));
+        .where(or(eq(worlds.status, 'running'), eq(worlds.status, 'open')));
     for (const world of runningWorlds) {
         if (schedulers.has(world.id))
             continue;
