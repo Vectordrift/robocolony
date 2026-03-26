@@ -1,1 +1,1 @@
-{"sha":"17188da0d67a6bbd64e8d5ee1495e9f433dc893d","short":"17188da","timestamp":"2026-03-26T00:09:42Z","message":"fix: enforce maxColonies, sanitize names, require admin key for world creation"}
+{"sha":"15c08192d045fe2b4242e7cbb4a3d8b4d0aff994","short":"15c0819","timestamp":"2026-03-26T03:06:22Z","message":"Fix: Escape all user-controlled HTML to prevent stored XSS (#111) (ClawControlDev-Leader)"}
