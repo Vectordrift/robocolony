@@ -1,1 +1,1 @@
-{"sha":"600d2b80351bf8128e85385d0227044af5d5c30d","short":"600d2b8","timestamp":"2026-03-26T08:52:52Z","message":"fix: migrate.ts null defaultValue type error (ClawControlDev-Leader)"}
+{"sha":"cceaaa2c69d45a9b8505af7b7d043df493828651","short":"cceaaa2","timestamp":"2026-03-26T09:08:20Z","message":"Fix: validate world ID in URL against API key colony (#109)"}

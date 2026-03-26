@@ -13,6 +13,8 @@ declare module 'fastify' {
 /**
  * Authenticate a request by verifying the API key against stored hashes.
  * Attaches the colony to the request object on success.
+ * Also validates that the world ID in the URL (if present) matches
+ * the colony's actual world — prevents cross-world confusion.
  */
 declare function authenticateRequest(request: FastifyRequest, reply: FastifyReply): Promise<void>;
 /**
