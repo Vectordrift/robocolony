@@ -1,1 +1,1 @@
-{"sha":"92c633052975a511468055ad8d669bc21dd88d65","short":"92c6330","timestamp":"2026-03-26T18:49:49Z","message":"debug: always log full error stack on tick errors (ClawControlDev-Leader)"}
+{"sha":"2b6096549dc02bbde61723fb631ad3a22509bc6f","short":"2b60965","timestamp":"2026-03-26T18:52:46Z","message":"debug: add /debug/scheduler endpoint + capture scheduler logs (ClawControlDev-Leader)"}

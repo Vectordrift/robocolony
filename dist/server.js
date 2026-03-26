@@ -77,6 +77,16 @@ export function buildApp() {
             }
         }
     });
+    // Debug endpoint — shows scheduler state and recent logs
+    app.get('/debug/scheduler', async () => {
+        return {
+            schedulerCount: schedulers.size,
+            schedulerWorldIds: [...schedulers.keys()],
+            debugLog: debugLog.slice(-100),
+            uptime: process.uptime(),
+            memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+        };
+    });
     app.register(healthRoutes);
     app.register(worldRoutes);
     app.register(stateRoutes);
@@ -96,6 +106,30 @@ export function buildApp() {
 }
 /** Active schedulers keyed by worldId */
 const schedulers = new Map();
+/** Debug log buffer — captures scheduler debug output */
+const debugLog = [];
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+console.log = (...args) => {
+    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+    if (msg.includes('[SCHEDULER]') || msg.includes('[TICK]')) {
+        debugLog.push(`${new Date().toISOString()} ${msg}`);
+        if (debugLog.length > 200)
+            debugLog.shift();
+    }
+    originalConsoleLog(...args);
+};
+console.error = (...args) => {
+    const msg = args.map(a => {
+        if (a instanceof Error)
+            return `${a.message}\n${a.stack}`;
+        return typeof a === 'string' ? a : JSON.stringify(a);
+    }).join(' ');
+    debugLog.push(`${new Date().toISOString()} ERROR: ${msg}`);
+    if (debugLog.length > 200)
+        debugLog.shift();
+    originalConsoleError(...args);
+};
 /** Start tick schedulers for all active worlds (status: running or open) */
 async function startSchedulers(logger) {
     const runningWorlds = await db
