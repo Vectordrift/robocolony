@@ -7,7 +7,7 @@
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db } from '../db/index.js';
-import { worlds, actions, units, settlements } from '../db/schema/index.js';
+import { worlds, actions, colonies, units, settlements } from '../db/schema/index.js';
 import { requireAuth } from '../middleware/index.js';
 // --- Valid action types and their required params ---
 const VALID_ACTION_TYPES = {
@@ -373,6 +373,8 @@ export async function actionRoutes(app) {
                 status: 'queued',
             });
         }
+        // Update last_action_tick for colony neglect tracking
+        await db.update(colonies).set({ lastActionTick: nextTick }).where(eq(colonies.id, colony.id));
         return reply.code(201).send({
             submitted: inserted.length,
             tick: nextTick,

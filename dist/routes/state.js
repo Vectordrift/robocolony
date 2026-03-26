@@ -215,6 +215,10 @@ export async function stateRoutes(app) {
                 status: colonyData[0]?.status ?? 'active',
                 resources: colonyData[0]?.resources ?? {},
                 legacyScore: colonyData[0]?.legacyScore ?? 0,
+                ...(colonyData[0]?.diedAtTick ? {
+                    diedAtTick: colonyData[0].diedAtTick,
+                    deathReason: colonyData[0].deathReason,
+                } : {}),
             },
             research: {
                 researched: colonyData[0]?.researchedTechs ?? [],

@@ -1,1 +1,1 @@
-{"sha":"e7aaf39b2f4c03f8b304ac4fdc0db508279b651e","short":"e7aaf39","timestamp":"2026-03-26T08:20:36Z","message":"fix: resolve TS strict explored possibly-undefined in tick.ts (ClawControlDev-Leader)"}
+{"sha":"600d2b80351bf8128e85385d0227044af5d5c30d","short":"600d2b8","timestamp":"2026-03-26T08:52:52Z","message":"fix: migrate.ts null defaultValue type error (ClawControlDev-Leader)"}

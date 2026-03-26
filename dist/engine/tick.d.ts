@@ -15,6 +15,9 @@ export interface Colony {
     resources: Resources;
     legacyScore: number;
     status: string;
+    lastActionTick?: number;
+    diedAtTick?: number;
+    deathReason?: string;
 }
 export interface Resources {
     food: number;
@@ -115,6 +118,7 @@ export interface TickResult {
     units: Unit[];
     events: TickEvent[];
     desertedUnitIds: string[];
+    deadColonyIds: string[];
     actionResults: ActionResult[];
     fogReveals: HexExploration[];
     newMessages: MessageRecord[];
@@ -170,6 +174,14 @@ export declare const SCORE_COMBAT_VICTORY = 100;
 export declare const MORALE_RECOVERY_RATE = 0.1;
 /** Ticks of inactivity before emitting idle unit warning */
 export declare const IDLE_WARNING_TICKS = 3;
+/** Ticks of colony inactivity before warning event */
+export declare const COLONY_NEGLECT_WARNING_TICKS = 100;
+/** Ticks of inactivity before accelerated decay begins */
+export declare const COLONY_NEGLECT_DECAY_TICKS = 200;
+/** Extra morale loss per tick for neglected colonies */
+export declare const COLONY_NEGLECT_MORALE_PENALTY = 0.02;
+/** Ticks after colony death before history is purged */
+export declare const COLONY_DEATH_HISTORY_TICKS = 500;
 /** Resource cost to found a new settlement */
 export declare const FOUNDING_COST: Partial<Resources>;
 /** Minimum hex distance between any two settlements */

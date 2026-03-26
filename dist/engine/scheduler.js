@@ -4,7 +4,7 @@
  * Loads world state from the database, runs resolveTick, writes results back.
  * One scheduler instance per running world.
  */
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import * as schema from '../db/schema/index.js';
 import { resolveTick } from './tick.js';
 import { hexDistance } from './hex.js';
@@ -209,6 +209,7 @@ export class TickScheduler {
                     status: c.status,
                     researchedTechs: (c.researchedTechs ?? []),
                     researchQueue: (c.researchQueue ?? []),
+                    lastActionTick: c.lastActionTick ?? 0,
                 };
                 return col;
             });
@@ -278,17 +279,39 @@ export class TickScheduler {
                     .update(schema.worlds)
                     .set({ currentTick: newTick })
                     .where(eq(schema.worlds.id, this.worldId));
-                // Update colony resources
+                // Update colony resources + status
                 for (const colony of result.colonies) {
                     await tx
                         .update(schema.colonies)
                         .set({
                         resources: colony.resources,
                         legacyScore: colony.legacyScore ?? 0,
+                        status: colony.status,
                         ...(colony.researchedTechs !== undefined ? { researchedTechs: colony.researchedTechs } : {}),
                         ...(colony.researchQueue !== undefined ? { researchQueue: colony.researchQueue } : {}),
+                        ...(colony.lastActionTick !== undefined ? { lastActionTick: colony.lastActionTick } : {}),
+                        ...(colony.diedAtTick !== undefined ? { diedAtTick: colony.diedAtTick } : {}),
+                        ...(colony.deathReason !== undefined ? { deathReason: colony.deathReason } : {}),
                     })
                         .where(eq(schema.colonies.id, colony.id));
+                }
+                // Handle dead colonies — clean up their settlements and units
+                if (result.deadColonyIds && result.deadColonyIds.length > 0) {
+                    for (const deadId of result.deadColonyIds) {
+                        // Delete units belonging to dead colony
+                        await tx.delete(schema.units).where(eq(schema.units.colonyId, deadId));
+                        // Delete settlements and free hexes
+                        const deadSettlements = await tx.select({ id: schema.settlements.id, hexX: schema.settlements.hexX, hexY: schema.settlements.hexY })
+                            .from(schema.settlements)
+                            .where(eq(schema.settlements.colonyId, deadId));
+                        for (const s of deadSettlements) {
+                            await tx.update(schema.hexes).set({ settlementId: null })
+                                .where(and(eq(schema.hexes.worldId, world.id), eq(schema.hexes.x, s.hexX), eq(schema.hexes.y, s.hexY)));
+                        }
+                        await tx.delete(schema.settlements).where(eq(schema.settlements.colonyId, deadId));
+                        // Remove colony from explored_by arrays (fog cleanup)
+                        await tx.execute(sql `UPDATE hexes SET explored_by = array_remove(explored_by, ${deadId}) WHERE world_id = ${world.id} AND ${deadId} = ANY(explored_by)`);
+                    }
                 }
                 // Update existing settlements and insert newly founded ones
                 const existingSettlementIds = new Set(dbSettlements.map(s => s.id));

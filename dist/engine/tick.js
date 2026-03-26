@@ -159,6 +159,14 @@ export const SCORE_COMBAT_VICTORY = 100;
 export const MORALE_RECOVERY_RATE = 0.10;
 /** Ticks of inactivity before emitting idle unit warning */
 export const IDLE_WARNING_TICKS = 3;
+/** Ticks of colony inactivity before warning event */
+export const COLONY_NEGLECT_WARNING_TICKS = 100; // ~8 hours
+/** Ticks of inactivity before accelerated decay begins */
+export const COLONY_NEGLECT_DECAY_TICKS = 200; // ~16 hours
+/** Extra morale loss per tick for neglected colonies */
+export const COLONY_NEGLECT_MORALE_PENALTY = 0.02;
+/** Ticks after colony death before history is purged */
+export const COLONY_DEATH_HISTORY_TICKS = 500; // ~42 hours
 /** Resource cost to found a new settlement */
 export const FOUNDING_COST = {
     food: 100,
@@ -2933,12 +2941,83 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
             }
         }
     }
+    // --- Colony Neglect & Death ---
+    const deadColonyIds = [];
+    if (currentTick) {
+        for (const colony of updatedColonies) {
+            if (colony.status !== 'active')
+                continue;
+            const colonyUnits = survivingUnits.filter(u => u.colonyId === colony.id);
+            const colonySettlements = updatedSettlements.filter(s => s.colonyId === colony.id);
+            // Check for colony death: no units AND no settlements
+            if (colonyUnits.length === 0 && colonySettlements.length === 0) {
+                colony.status = 'dead';
+                colony.diedAtTick = currentTick;
+                colony.deathReason = 'All units lost and all settlements destroyed.';
+                deadColonyIds.push(colony.id);
+                events.push({
+                    type: 'colony_dead',
+                    colonyId: colony.id,
+                    data: { reason: 'abandoned', tick: currentTick, message: colony.name + ' has fallen. All units deserted and settlements crumbled.' },
+                });
+                continue;
+            }
+            // Check for no units (but has settlements) — colony still dies, settlements decay
+            if (colonyUnits.length === 0) {
+                colony.status = 'dead';
+                colony.diedAtTick = currentTick;
+                colony.deathReason = 'All units lost. Settlements abandoned.';
+                deadColonyIds.push(colony.id);
+                events.push({
+                    type: 'colony_dead',
+                    colonyId: colony.id,
+                    data: { reason: 'no_units', tick: currentTick, message: colony.name + ' has collapsed. No units remain to maintain the colony.' },
+                });
+                continue;
+            }
+            // Neglect checks (only if lastActionTick is tracked)
+            const lastAction = colony.lastActionTick ?? 0;
+            const ticksSinceAction = currentTick - lastAction;
+            if (ticksSinceAction >= COLONY_NEGLECT_DECAY_TICKS) {
+                // Accelerated morale decay for neglected colonies
+                for (const unit of colonyUnits) {
+                    unit.morale = Math.max(0, Math.round((unit.morale - COLONY_NEGLECT_MORALE_PENALTY) * 100) / 100);
+                }
+                // Emit decay event once per 50-tick interval
+                if (ticksSinceAction % 50 === 0) {
+                    events.push({
+                        type: 'colony_neglected',
+                        colonyId: colony.id,
+                        data: {
+                            ticksSinceAction,
+                            message: colony.name + ' is deteriorating from neglect. Units are losing morale.',
+                            unitsRemaining: colonyUnits.length,
+                        },
+                    });
+                }
+            }
+            else if (ticksSinceAction >= COLONY_NEGLECT_WARNING_TICKS) {
+                // Warning event (once when threshold is first crossed)
+                if (ticksSinceAction === COLONY_NEGLECT_WARNING_TICKS) {
+                    events.push({
+                        type: 'colony_neglect_warning',
+                        colonyId: colony.id,
+                        data: {
+                            ticksSinceAction,
+                            message: colony.name + ' has been unattended for ' + Math.round(ticksSinceAction * 5 / 60) + ' hours. Decay will begin soon.',
+                        },
+                    });
+                }
+            }
+        }
+    }
     return {
         colonies: updatedColonies,
         settlements: updatedSettlements,
         units: survivingUnits,
         events,
         desertedUnitIds,
+        deadColonyIds,
         actionResults,
         fogReveals,
         newMessages,
