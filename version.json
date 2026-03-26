@@ -1,1 +1,1 @@
-{"sha":"1832cb6790a3e8349e3ed54fbdc86877ee66d832","short":"1832cb6","timestamp":"2026-03-26T10:29:19Z","message":"fix: executeTick must also accept world status 'open' (ClawControlDev-Leader)"}
+{"sha":"b7569104f0d4a30e26ce4977bb25460030c34bdb","short":"b756910","timestamp":"2026-03-26T10:44:06Z","message":"fix: scout auto-explore oscillation + truncate user input in errors (#118, #120) (ClawControlDev-Leader)"}

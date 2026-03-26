@@ -66,6 +66,12 @@ const VALID_AGREEMENT_TYPES = new Set([
 const MAX_ACTIONS_PER_TICK = 10;
 const MAX_SETTLEMENT_NAME_LENGTH = 40;
 const MAX_MESSAGE_LENGTH = 500;
+/** Truncate user-supplied IDs in error messages to prevent log bloat */
+function truncId(id, maxLen = 50) {
+    if (id.length <= maxLen)
+        return id;
+    return id.substring(0, maxLen) + '…[truncated]';
+}
 // --- Sanitization ---
 /** Strip HTML tags from a string */
 function stripHtml(input) {
@@ -243,20 +249,20 @@ async function validateOwnership(colonyId, worldId, action) {
             .where(and(eq(units.id, params.unitId), eq(units.worldId, worldId)))
             .limit(1);
         if (unit.length === 0) {
-            return { valid: false, error: `Unit ${params.unitId} not found` };
+            return { valid: false, error: `Unit ${truncId(params.unitId)} not found` };
         }
         if (unit[0].colonyId !== colonyId) {
-            return { valid: false, error: `Unit ${params.unitId} does not belong to your colony` };
+            return { valid: false, error: `Unit ${truncId(params.unitId)} does not belong to your colony` };
         }
         // Type-specific checks
         if (action.type === 'found_settlement' && unit[0].type !== 'settler') {
-            return { valid: false, error: `Unit ${params.unitId} is a ${unit[0].type}, not a settler. Only settlers can found settlements.` };
+            return { valid: false, error: `Unit ${truncId(params.unitId)} is a ${unit[0].type}, not a settler. Only settlers can found settlements.` };
         }
         if (action.type === 'attack' && unit[0].type === 'settler') {
             return { valid: false, error: `Settlers cannot attack. Use military units (scout, militia, soldier, siege).` };
         }
         if (action.type === 'explore' && unit[0].type !== 'scout') {
-            return { valid: false, error: `Unit ${params.unitId} is a ${unit[0].type}, not a scout. Only scouts can use the explore action.` };
+            return { valid: false, error: `Unit ${truncId(params.unitId)} is a ${unit[0].type}, not a scout. Only scouts can use the explore action.` };
         }
     }
     // Check settlement ownership
@@ -267,10 +273,10 @@ async function validateOwnership(colonyId, worldId, action) {
             .where(and(eq(settlements.id, params.settlementId), eq(settlements.worldId, worldId)))
             .limit(1);
         if (settlement.length === 0) {
-            return { valid: false, error: `Settlement ${params.settlementId} not found` };
+            return { valid: false, error: `Settlement ${truncId(params.settlementId)} not found` };
         }
         if (settlement[0].colonyId !== colonyId) {
-            return { valid: false, error: `Settlement ${params.settlementId} does not belong to your colony` };
+            return { valid: false, error: `Settlement ${truncId(params.settlementId)} does not belong to your colony` };
         }
     }
     return { valid: true };
