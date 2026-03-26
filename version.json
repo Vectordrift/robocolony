@@ -1,1 +1,1 @@
-{"sha":"03ca752a7950591f14cfedd083644e92f1075705","short":"03ca752","timestamp":"2026-03-26T13:37:58Z","message":"score: replace cumulative scoring with snapshot-based system (ClawControlDev-Leader)"}
+{"sha":"1f625c400853b94050353f7578fba16b0c3ab2e9","short":"1f625c4","timestamp":"2026-03-26T14:12:01Z","message":"fix: security hardening — CORS, body limit, event data redaction, SQL params, version endpoint (ClawControlDev-Leader)"}

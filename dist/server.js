@@ -19,13 +19,33 @@ import { dirname, join } from 'path';
 import { rateLimitStore, joinRateLimitStore, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_JOIN_MAX, RATE_LIMIT_JOIN_WINDOW_MS, checkRateLimit, startRateLimitCleanup, } from './lib/ratelimit.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+/** Allowed CORS origins */
+const ALLOWED_ORIGINS = [
+    'https://robocolony.vectordrift.ai',
+    'https://robocolony.fly.dev',
+    'http://localhost:3000',
+    'http://localhost:8080',
+];
 export function buildApp() {
     const app = Fastify({
         logger: {
             level: process.env.LOG_LEVEL || 'info',
         },
+        bodyLimit: 256 * 1024, // 256KB max request body
     });
-    app.register(cors);
+    app.register(cors, {
+        origin: (origin, cb) => {
+            // Allow requests with no origin (curl, server-to-server, mobile apps)
+            if (!origin)
+                return cb(null, true);
+            if (ALLOWED_ORIGINS.includes(origin))
+                return cb(null, true);
+            cb(new Error('CORS: origin not allowed'), false);
+        },
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+        credentials: false,
+    });
     // Start periodic cleanup of stale rate limit entries
     startRateLimitCleanup();
     // Global rate limiting

@@ -192,24 +192,24 @@ function hexDist(x1, y1, x2, y2) {
  */
 async function seedPoisForExistingWorlds(db, logger) {
     // Check if any hex already has a POI
-    const poiCheck = await db.execute(sql.raw(`SELECT COUNT(*) as cnt FROM hexes WHERE poi IS NOT NULL LIMIT 1`));
+    const poiCheck = await db.execute(sql `SELECT COUNT(*) as cnt FROM hexes WHERE poi IS NOT NULL LIMIT 1`);
     const poiCount = Number(poiCheck[0]?.cnt ?? 0);
     if (poiCount > 0) {
         logger.info('[migrate] POIs already seeded, skipping');
         return;
     }
     // Get all worlds
-    const worlds = await db.execute(sql.raw(`SELECT id FROM worlds`));
-    if (!worlds || worlds.length === 0)
+    const worldRows = await db.execute(sql `SELECT id FROM worlds`);
+    if (!worldRows || worldRows.length === 0)
         return;
-    for (const world of worlds) {
+    for (const world of worldRows) {
         const worldId = world.id;
         logger.info(`[migrate] Seeding POIs for world ${worldId}...`);
-        // Get all land hexes (excluding ocean, coast)
-        const allHexes = await db.execute(sql.raw(`SELECT x, y, terrain, settlement_id FROM hexes WHERE world_id = '${worldId}' AND terrain NOT IN ('ocean', 'coast') ORDER BY x, y`));
+        // Get all land hexes (excluding ocean, coast) — parameterized query
+        const allHexes = await db.execute(sql `SELECT x, y, terrain, settlement_id FROM hexes WHERE world_id = ${worldId} AND terrain NOT IN ('ocean', 'coast') ORDER BY x, y`);
         // Get settlement positions to avoid placing POIs too close
-        const settlements = await db.execute(sql.raw(`SELECT hex_x, hex_y FROM settlements WHERE world_id = '${worldId}'`));
-        const settlementCoords = settlements.map((s) => ({ x: s.hex_x, y: s.hex_y }));
+        const settlementRows = await db.execute(sql `SELECT hex_x, hex_y FROM settlements WHERE world_id = ${worldId}`);
+        const settlementCoords = settlementRows.map((s) => ({ x: s.hex_x, y: s.hex_y }));
         const seed = simpleHash(worldId);
         const rng = createSeededRng(seed + 80000);
         // Shuffle hexes deterministically
@@ -234,8 +234,9 @@ async function seedPoisForExistingWorlds(db, logger) {
             const poiType = pickPoi(rng, hex.terrain);
             if (!poiType)
                 continue;
-            const poiJson = JSON.stringify({ type: poiType });
-            await db.execute(sql.raw(`UPDATE hexes SET poi = '${poiJson}'::jsonb WHERE world_id = '${worldId}' AND x = ${hex.x} AND y = ${hex.y}`));
+            // Parameterized POI update — no string interpolation
+            const poiData = { type: poiType };
+            await db.execute(sql `UPDATE hexes SET poi = ${JSON.stringify(poiData)}::jsonb WHERE world_id = ${worldId} AND x = ${hex.x} AND y = ${hex.y}`);
             placedCoords.push({ x: hex.x, y: hex.y });
             placed++;
         }
