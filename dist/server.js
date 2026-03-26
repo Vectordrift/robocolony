@@ -16,39 +16,7 @@ import { TickScheduler } from './engine/scheduler.js';
 import { ensureSchema } from './db/migrate.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-// --- In-memory rate limiter ---
-const rateLimitStore = new Map();
-const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-const RATE_LIMIT_MAX = 60; // 60 requests per minute per IP
-const RATE_LIMIT_JOIN_MAX = 1; // 1 join per hour per IP
-const RATE_LIMIT_JOIN_WINDOW_MS = 3_600_000; // 1 hour
-const joinRateLimitStore = new Map();
-function checkRateLimit(store, key, max, windowMs = RATE_LIMIT_WINDOW_MS) {
-    const now = Date.now();
-    let entry = store.get(key);
-    if (!entry || now >= entry.resetAt) {
-        entry = { count: 0, resetAt: now + windowMs };
-    }
-    entry.count++;
-    store.set(key, entry);
-    return {
-        allowed: entry.count <= max,
-        remaining: Math.max(0, max - entry.count),
-        resetAt: entry.resetAt,
-    };
-}
-// Clean up stale entries every 5 minutes
-setInterval(() => {
-    const now = Date.now();
-    for (const [key, entry] of rateLimitStore) {
-        if (now >= entry.resetAt)
-            rateLimitStore.delete(key);
-    }
-    for (const [key, entry] of joinRateLimitStore) {
-        if (now >= entry.resetAt)
-            joinRateLimitStore.delete(key);
-    }
-}, 300_000);
+import { rateLimitStore, joinRateLimitStore, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_JOIN_MAX, RATE_LIMIT_JOIN_WINDOW_MS, checkRateLimit, startRateLimitCleanup, } from './lib/ratelimit.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 export function buildApp() {
@@ -58,6 +26,8 @@ export function buildApp() {
         },
     });
     app.register(cors);
+    // Start periodic cleanup of stale rate limit entries
+    startRateLimitCleanup();
     // Global rate limiting
     app.addHook('onRequest', async (request, reply) => {
         const ip = request.ip || request.headers['x-forwarded-for'] || 'unknown';
@@ -96,7 +66,6 @@ export function buildApp() {
     app.register(messageRoutes);
     app.register(diplomacyRoutes);
     // Serve static website from web/ directory
-    // In dist/, the web/ folder is at ../web relative to compiled JS
     const webRoot = join(__dirname, '..', 'web');
     app.register(fastifyStatic, {
         root: webRoot,
@@ -124,7 +93,6 @@ async function startSchedulers(logger) {
             },
             onError: (err) => {
                 logger.error(`[${world.id}] Tick error: ${err.message}`);
-                // Log the full stack trace for DB column errors
                 if (err.message.includes('column') || err.message.includes('relation') || err.message.includes('undefined')) {
                     logger.error(`[${world.id}] Full error stack: ${err.stack}`);
                     logger.error(`[${world.id}] HINT: This may be a missing DB column. Run ensureSchema() or check src/db/migrate.ts`);
@@ -143,13 +111,9 @@ async function startSchedulers(logger) {
 }
 /**
  * One-time data normalization on startup.
- * Fixes known data issues from earlier code versions:
- * - Buildings with completedAtTick instead of level (#40)
- * - Colony resources with null values (#47)
  */
 async function normalizeData(logger) {
     try {
-        // Fix buildings: ensure every building has { type, level } format
         const allSettlements = await db.select().from(settlements);
         let fixedBuildings = 0;
         for (const s of allSettlements) {
@@ -160,7 +124,6 @@ async function normalizeData(logger) {
                     needsFix = true;
                     return { type: b.type, level: 1 };
                 }
-                // Strip any extra properties (e.g. completedAtTick)
                 const keys = Object.keys(b);
                 if (keys.length !== 2 || !keys.includes('type') || !keys.includes('level')) {
                     needsFix = true;
@@ -179,7 +142,6 @@ async function normalizeData(logger) {
         if (fixedBuildings > 0) {
             logger.info(`[normalize] Fixed buildings in ${fixedBuildings} settlement(s)`);
         }
-        // Fix colony resources: replace null/NaN values with 0
         const allColonies = await db.select().from(colonies);
         let fixedResources = 0;
         for (const c of allColonies) {
@@ -209,7 +171,6 @@ async function normalizeData(logger) {
     }
     catch (err) {
         logger.error(`[normalize] Data normalization failed: ${err}`);
-        // Non-fatal — server can still start
     }
 }
 async function start() {
@@ -220,11 +181,8 @@ async function start() {
         await app.listen({ host, port });
         const logger = app.log;
         logger.info(`RoboColony server running on ${host}:${port}`);
-        // Run schema migration FIRST — ensures all columns exist before any queries
         await ensureSchema(db, logger);
-        // Normalize data before starting schedulers
         await normalizeData(logger);
-        // Start tick schedulers after server is listening
         await startSchedulers(logger);
         logger.info(`Tick schedulers initialized (${schedulers.size} world(s))`);
     }
@@ -233,7 +191,6 @@ async function start() {
         process.exit(1);
     }
 }
-// Only start when run directly, not when imported by tests
 const isMainModule = process.argv[1]?.endsWith('server.js') || process.argv[1]?.endsWith('server.ts');
 if (isMainModule) {
     start();

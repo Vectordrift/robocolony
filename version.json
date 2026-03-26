@@ -1,1 +1,1 @@
-{"sha":"fd17099c4ceff6b60477e1b4261987d39653b70b","short":"fd17099","timestamp":"2026-03-26T12:17:14Z","message":"Balance: edge case handling for simultaneous actions (#123)"}
+{"sha":"b270e97f1aeee71c84dfc9573063daf2f8f20014","short":"b270e97","timestamp":"2026-03-26T12:26:19Z","message":"fix: use Fastify generic pattern for delete colony route (ClawControlDev-Leader)"}
