@@ -424,8 +424,8 @@ export const GRANARY_BONUS_PER_LEVEL = 200;
 /** Additional stockpile capacity per warehouse level (all resources) */
 export const WAREHOUSE_BONUS_PER_LEVEL = 150;
 
-/** Fraction of excess resources that decay each tick (2%) */
-export const STOCKPILE_DECAY_RATE = 0.02;
+/** Fraction of excess resources that decay each tick (1%) */
+export const STOCKPILE_DECAY_RATE = 0.01;
 
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
 export const STOCKPILE_HARD_CEILING = 2.0;
@@ -476,6 +476,9 @@ export const HOMELAND_DEFENSE_RANGE = 5;
 
 /** Morale bonus for defending within HOMELAND_DEFENSE_RANGE of own settlement */
 export const HOMELAND_MORALE_BONUS = 0.1;
+
+/** Minimum morale for units defending within their own settlement (homeland morale floor) */
+export const GARRISON_MORALE_FLOOR = 0.6;
 
 /** Defense multiplier for units defending on a hex with a settlement that has walls */
 export const WALLS_DEFENSE_MULTIPLIER = 1.5;
@@ -2190,6 +2193,11 @@ export function resolveCombat(
       }
 
       unit.morale = Math.round(Math.min(COMBAT_MORALE_CAP, Math.max(0, unit.morale + moraleChange)) * 100) / 100;
+
+      // Garrison morale floor: units defending near their own settlement never drop below GARRISON_MORALE_FLOOR
+      if (homelandColonies.has(unit.colonyId) && unit.morale < GARRISON_MORALE_FLOOR) {
+        unit.morale = GARRISON_MORALE_FLOOR;
+      }
     }
 
     // Emit combat_resolved event (visible to all involved colonies)
@@ -4256,4 +4264,5 @@ export function resolveTick(
     agreementMutations,
   };
 }
+
 

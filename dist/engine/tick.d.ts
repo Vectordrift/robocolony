@@ -224,8 +224,8 @@ export declare const STOCKPILE_CAP: Record<string, number>;
 export declare const GRANARY_BONUS_PER_LEVEL = 200;
 /** Additional stockpile capacity per warehouse level (all resources) */
 export declare const WAREHOUSE_BONUS_PER_LEVEL = 150;
-/** Fraction of excess resources that decay each tick (2%) */
-export declare const STOCKPILE_DECAY_RATE = 0.02;
+/** Fraction of excess resources that decay each tick (1%) */
+export declare const STOCKPILE_DECAY_RATE = 0.01;
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
 export declare const STOCKPILE_HARD_CEILING = 2;
 /** Fraction of building cost refunded on demolish (25%) */
@@ -250,6 +250,8 @@ export declare const COMBAT_MORALE_CAP = 1;
 export declare const HOMELAND_DEFENSE_RANGE = 5;
 /** Morale bonus for defending within HOMELAND_DEFENSE_RANGE of own settlement */
 export declare const HOMELAND_MORALE_BONUS = 0.1;
+/** Minimum morale for units defending within their own settlement (homeland morale floor) */
+export declare const GARRISON_MORALE_FLOOR = 0.6;
 /** Defense multiplier for units defending on a hex with a settlement that has walls */
 export declare const WALLS_DEFENSE_MULTIPLIER = 1.5;
 /** Legacy score awarded for capturing an enemy settlement */
@@ -556,4 +558,3 @@ export declare function resolveAgreementActions(colonies: Colony[], agreements: 
 export declare function resolveTradeTransfers(colonies: Colony[], agreements: Agreement[]): TradeTransferResult;
 export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number, agreements?: Agreement[]): TickResult;
 export {};
-//# sourceMappingURL=tick.d.ts.map
