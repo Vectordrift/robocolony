@@ -2468,23 +2468,55 @@ export function autoExploreIdleScouts(
 
     if (frontierCandidates.length === 0) continue;
 
-    // Sort by distance to scout (prefer closer targets)
+    // Score frontier candidates to prevent oscillation.
+    // Each candidate is scored by how many of its own neighbors are unexplored
+    // ("frontier depth"). Deeper frontier hexes have more unexplored neighbors,
+    // while hexes adjacent to well-explored territory score low. This prevents
+    // scouts from bouncing between two adjacent explored-edge hexes.
+    // Tie-break: prefer candidates farther from the scout (push outward).
     const scoutPos: HexCoord = { q: scout.hexX, r: scout.hexY };
-    frontierCandidates.sort((a, b) =>
-      hexDistance(scoutPos, a) - hexDistance(scoutPos, b)
-    );
 
-    // Try pathfinding to nearest candidates (try up to 10)
+    function frontierScore(candidate: HexCoord): number {
+      const neighbors = hexNeighbors(candidate);
+      let unexploredCount = 0;
+      for (const n of neighbors) {
+        const nk = `${n.q},${n.r}`;
+        if (allHexKeys.has(nk) && !explored.has(nk)) {
+          unexploredCount++;
+        }
+      }
+      // Primary: more unexplored neighbors = better (deeper frontier)
+      // Secondary: farther from scout = better (push outward, break ties)
+      return unexploredCount * 1000 + hexDistance(scoutPos, candidate);
+    }
+
+    frontierCandidates.sort((a, b) => frontierScore(b) - frontierScore(a));
+
+    // Try pathfinding to top-scored candidates (try up to 15)
     let bestPath: HexCoord[] | null = null;
     let bestTarget: HexCoord | null = null;
 
-    for (let i = 0; i < Math.min(frontierCandidates.length, 10); i++) {
+    for (let i = 0; i < Math.min(frontierCandidates.length, 15); i++) {
       const candidate = frontierCandidates[i];
       const path = findPath(scoutPos, candidate, hexLookup);
-      if (path && path.length > 0) {
+      // Require path length >= 2 to avoid 1-hop oscillation
+      if (path && path.length >= 2) {
         bestPath = path;
         bestTarget = candidate;
         break;
+      }
+    }
+
+    // Fallback: if no path with length >= 2, accept any valid path
+    if (!bestPath) {
+      for (let i = 0; i < Math.min(frontierCandidates.length, 15); i++) {
+        const candidate = frontierCandidates[i];
+        const path = findPath(scoutPos, candidate, hexLookup);
+        if (path && path.length > 0) {
+          bestPath = path;
+          bestTarget = candidate;
+          break;
+        }
       }
     }
 
