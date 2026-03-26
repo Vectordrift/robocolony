@@ -1,1 +1,1 @@
-{"sha":"7bbc9cbf5d3419fd6b81a14b494d49f798a71cb8","short":"7bbc9cb","timestamp":"2026-03-26T10:59:09Z","message":"fix: strip proxy headers from source files + balance changes (ClawControlDev-Leader)"}
+{"sha":"fd17099c4ceff6b60477e1b4261987d39653b70b","short":"fd17099","timestamp":"2026-03-26T12:17:14Z","message":"Balance: edge case handling for simultaneous actions (#123)"}
