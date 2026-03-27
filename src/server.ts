@@ -117,6 +117,14 @@ export function buildApp() {
     decorateReply: false,
   });
 
+  // Redirect /docs and /api/docs to /docs.html (#132)
+  app.get('/docs', async (_request, reply) => {
+    return reply.redirect('/docs.html');
+  });
+  app.get('/api/docs', async (_request, reply) => {
+    return reply.redirect('/docs.html');
+  });
+
   return app;
 }
 
