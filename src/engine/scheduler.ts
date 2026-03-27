@@ -37,6 +37,7 @@ const PUBLIC_EVENT_TYPES = new Set([
   'agreement_accepted',
   'agreement_broken',
   'nap_blocked_combat',
+  'poi_surveyed',
 ]);
 
 /**
@@ -114,6 +115,13 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
         hexX: event.data.hexX,
         hexY: event.data.hexY,
         reason: event.data.reason,
+      };
+    case 'poi_surveyed':
+      return {
+        poiType: event.data.poiType,
+        x: event.data.x,
+        y: event.data.y,
+        summary: event.data.summary,
       };
     default:
       return null;
@@ -788,7 +796,6 @@ export class TickScheduler {
     }
   }
 }
-
 
 
 

@@ -26,6 +26,8 @@ export interface PoiData {
   type: PoiType;
   discoveredBy?: string;     // colony ID that first explored this hex
   discoveredAtTick?: number; // tick when discovered
+  surveyedBy?: string;       // colony ID that completed the POI interaction
+  surveyedAtTick?: number;   // tick when the POI interaction was completed
 }
 
 export interface HexTile {

@@ -7,6 +7,7 @@ const VALID_ACTION_TYPES: Record<string, string[]> = {
   'build': ['settlementId', 'buildingType'],
   'train_unit': ['settlementId', 'unitType'],
   'found_settlement': ['unitId', 'name'],
+  'survey_poi': ['unitId'],
   'demolish': ['settlementId', 'buildingType'],
   'upgrade_settlement': ['settlementId'],
 };
@@ -65,6 +66,14 @@ describe('Action validation', () => {
       const result = validateActionType({
         type: 'found_settlement',
         params: { unitId: 'unit_abc', name: 'New Town' },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts valid survey_poi action', () => {
+      const result = validateActionType({
+        type: 'survey_poi',
+        params: { unitId: 'unit_abc' },
       });
       expect(result.valid).toBe(true);
     });
@@ -132,7 +141,7 @@ describe('Action validation', () => {
   describe('all action types have validation rules', () => {
     const expectedTypes = [
       'move_unit', 'build', 'train_unit',
-      'found_settlement', 'demolish', 'upgrade_settlement',
+      'found_settlement', 'survey_poi', 'demolish', 'upgrade_settlement',
     ];
 
     for (const type of expectedTypes) {
