@@ -3118,7 +3118,7 @@ export function resolveAgreementActions(
       }
       const newAgreement: Agreement = {
         id: `agr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-        worldId: '',
+        worldId: worldId || '',
         type: agreementType,
         proposedBy: colony.id,
         proposedTo: targetColonyId,
