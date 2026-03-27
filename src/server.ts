@@ -273,12 +273,11 @@ async function start() {
   const port = parseInt(process.env.PORT || '3000', 10);
 
   try {
-    await app.listen({ host, port });
     const logger = app.log as any;
-    logger.info(`RoboColony server running on ${host}:${port}`);
-
     await ensureSchema(db as any, logger);
     await normalizeData(logger);
+    await app.listen({ host, port });
+    logger.info(`RoboColony server running on ${host}:${port}`);
     await startSchedulers(logger);
     logger.info(`Tick schedulers initialized (${schedulers.size} world(s))`);
   } catch (err) {
