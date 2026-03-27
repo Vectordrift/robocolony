@@ -102,6 +102,13 @@ export function buildApp() {
         prefix: '/',
         decorateReply: false,
     });
+    // Redirect /docs and /api/docs to /docs.html (#132)
+    app.get('/docs', async (_request, reply) => {
+        return reply.redirect('/docs.html');
+    });
+    app.get('/api/docs', async (_request, reply) => {
+        return reply.redirect('/docs.html');
+    });
     return app;
 }
 /** Active schedulers keyed by worldId */
@@ -249,3 +256,4 @@ const isMainModule = process.argv[1]?.endsWith('server.js') || process.argv[1]?.
 if (isMainModule) {
     start();
 }
+//# sourceMappingURL=server.js.map
