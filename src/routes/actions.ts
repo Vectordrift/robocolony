@@ -45,6 +45,7 @@ const VALID_ACTION_TYPES: Record<string, string[]> = {
   'attack': ['unitId', 'targetX', 'targetY'],
   'send_message': ['toColonyId', 'message'],
   'explore': ['unitId'],
+  'survey_poi': ['unitId'],
   'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
   'research': ['techId'],
   'propose_agreement': ['targetColonyId', 'agreementType'],
@@ -66,6 +67,7 @@ const ALLOWED_PARAMS: Record<string, string[]> = {
   'attack': ['unitId', 'targetX', 'targetY'],
   'send_message': ['toColonyId', 'message'],
   'explore': ['unitId'],
+  'survey_poi': ['unitId'],
   'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
   'research': ['techId'],
   'propose_agreement': ['targetColonyId', 'agreementType', 'terms'],
@@ -211,7 +213,7 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
   }
 
   // String ID validation for unit-based actions
-  if (['explore', 'found_settlement', 'disband'].includes(action.type)) {
+  if (['explore', 'survey_poi', 'found_settlement', 'disband'].includes(action.type)) {
     if (typeof p.unitId !== 'string' || p.unitId.length === 0) {
       return { valid: false, error: `'unitId' must be a non-empty string` };
     }
@@ -359,8 +361,8 @@ async function validateOwnership(
     if (action.type === 'attack' && unit[0].type === 'settler') {
       return { valid: false, error: `Settlers cannot attack. Use military units (scout, militia, soldier, siege).` };
     }
-    if (action.type === 'explore' && unit[0].type !== 'scout') {
-      return { valid: false, error: `Unit ${truncId(params.unitId as string)} is a ${unit[0].type}, not a scout. Only scouts can use the explore action.` };
+    if ((action.type === 'explore' || action.type === 'survey_poi') && unit[0].type !== 'scout') {
+      return { valid: false, error: `Unit ${truncId(params.unitId as string)} is a ${unit[0].type}, not a scout. Only scouts can use the ${action.type} action.` };
     }
   }
 
@@ -765,5 +767,4 @@ export async function actionRoutes(app: FastifyInstance) {
     return { cancelled: true, count: cancelledCount };
   });
 }
-
 

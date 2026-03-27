@@ -9,6 +9,7 @@ import {
   resolveUpgradeSettlement,
   resolveUpgradeBuilding,
   resolveDemolish,
+  resolvePoiSurvey,
   resolveCombat,
   buildingUpgradeCost,
   calculateProduction,
@@ -53,6 +54,9 @@ import {
   HEALING_PER_TICK,
   BARRACKS_HEALING_BONUS,
   NEWCOMER_PROTECTION_TICKS,
+  POI_SURVEY_INFLUENCE,
+  WATCHTOWER_SURVEY_REVEAL_RADIUS,
+  SACRED_GROVE_SURVEY_MORALE_BONUS,
   IDLE_WARNING_TICKS,
   DEMOLISH_REFUND_RATE,
   DECAY_CHANCE_PER_BUILDING,
@@ -289,6 +293,83 @@ describe('calculateProduction', () => {
     expect(production.food).toBe(0);
   });
 
+});
+
+describe('resolvePoiSurvey', () => {
+  it('surveys a watchtower, grants influence, and reveals nearby hexes', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 0 } });
+    const scout = makeUnit({ type: 'scout', hexX: 0, hexY: 0 });
+    const hexes = makePlainGrid(WATCHTOWER_SURVEY_REVEAL_RADIUS + 1).map((hex) =>
+      hex.x === 0 && hex.y === 0
+        ? makeHex(0, 0, { poi: { type: 'watchtower', discoveredBy: colony.id, discoveredAtTick: 5 }, exploredBy: [colony.id] })
+        : makeHex(hex.x, hex.y),
+    );
+    const action = makeAction({
+      id: 'action-survey-1',
+      type: 'survey_poi',
+      params: { unitId: scout.id },
+    });
+
+    const result = resolvePoiSurvey([colony], [scout], hexes, [action], 6);
+    const centerHex = hexes.find((hex) => hex.x === 0 && hex.y === 0)!;
+    const revealedCount = hexes.filter((hex) => hex.exploredBy?.includes(colony.id)).length;
+
+    expect(result.actionResults).toContainEqual({
+      actionId: 'action-survey-1',
+      status: 'resolved',
+      result: 'Surveyed a watchtower and charted 18 nearby hexes.',
+    });
+    expect(colony.resources.influence).toBe(POI_SURVEY_INFLUENCE.watchtower);
+    expect(centerHex.poi?.surveyedBy).toBe(colony.id);
+    expect(centerHex.poi?.surveyedAtTick).toBe(6);
+    expect(revealedCount).toBeGreaterThan(1);
+    expect(result.events[0]?.type).toBe('poi_surveyed');
+  });
+
+  it('surveys a sacred grove and boosts nearby morale', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 0 } });
+    const scout = makeUnit({ id: 'unit-scout', type: 'scout', hexX: 2, hexY: -1, morale: 0.6 });
+    const ally = makeUnit({ id: 'unit-ally', type: 'militia', hexX: 3, hexY: -1, morale: 0.7 });
+    const farAlly = makeUnit({ id: 'unit-far', type: 'soldier', hexX: 8, hexY: 0, morale: 0.4 });
+    const hexes = [
+      makeHex(2, -1, { poi: { type: 'sacred_grove', discoveredBy: colony.id, discoveredAtTick: 3 }, exploredBy: [colony.id] }),
+      makeHex(3, -1),
+      makeHex(8, 0),
+    ];
+    const action = makeAction({
+      id: 'action-survey-2',
+      type: 'survey_poi',
+      params: { unitId: scout.id },
+    });
+
+    const result = resolvePoiSurvey([colony], [scout, ally, farAlly], hexes, [action], 7);
+
+    expect(colony.resources.influence).toBe(POI_SURVEY_INFLUENCE.sacred_grove);
+    expect(scout.morale).toBeCloseTo(Math.min(1, 0.6 + SACRED_GROVE_SURVEY_MORALE_BONUS));
+    expect(ally.morale).toBeCloseTo(Math.min(1, 0.7 + SACRED_GROVE_SURVEY_MORALE_BONUS));
+    expect(farAlly.morale).toBe(0.4);
+    expect(result.events[0]?.data.affectedUnits).toBe(2);
+  });
+
+  it('fails if the colony has not discovered the poi yet', () => {
+    const colony = makeColony();
+    const scout = makeUnit({ type: 'scout' });
+    const hexes = [makeHex(0, 0, { poi: { type: 'ancient_ruins' } })];
+    const action = makeAction({
+      id: 'action-survey-3',
+      type: 'survey_poi',
+      params: { unitId: scout.id },
+    });
+
+    const result = resolvePoiSurvey([colony], [scout], hexes, [action], 10);
+
+    expect(result.actionResults).toContainEqual({
+      actionId: 'action-survey-3',
+      status: 'failed',
+      result: 'Your colony must discover a POI before surveying it',
+    });
+    expect(result.events).toHaveLength(0);
+  });
 });
 
 // --- calculateBuildingUpkeep ---

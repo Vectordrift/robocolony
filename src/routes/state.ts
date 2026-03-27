@@ -21,7 +21,7 @@ export interface VisibleHex {
   terrain: string;
   resources: Record<string, number>;
   settlementId: string | null;
-  poi?: { type: string; discoveredBy?: string; discoveredAtTick?: number } | null;
+  poi?: { type: string; discoveredBy?: string; discoveredAtTick?: number; surveyedBy?: string; surveyedAtTick?: number } | null;
 }
 
 /**

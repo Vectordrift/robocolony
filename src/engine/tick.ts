@@ -74,6 +74,8 @@ export interface PoiState {
   type: string;
   discoveredBy?: string;
   discoveredAtTick?: number;
+  surveyedBy?: string;
+  surveyedAtTick?: number;
 }
 
 export interface HexTileState {
@@ -197,6 +199,21 @@ export interface TickResult {
   newMessages: MessageRecord[];
   agreementMutations: AgreementMutation[];
 }
+
+export const POI_SURVEY_INFLUENCE: Record<string, number> = {
+  mineral_deposit: 10,
+  fertile_valley: 10,
+  ancient_forest: 10,
+  ancient_ruins: 15,
+  abandoned_cache: 12,
+  crystal_cavern: 15,
+  watchtower: 12,
+  sacred_grove: 12,
+};
+
+export const WATCHTOWER_SURVEY_REVEAL_RADIUS = 2;
+export const SACRED_GROVE_SURVEY_RANGE = 3;
+export const SACRED_GROVE_SURVEY_MORALE_BONUS = 0.1;
 
 // --- Constants ---
 
@@ -1169,6 +1186,156 @@ export function resolveDisband(
   const remainingUnits = units.filter(u => !disbandedUnitIds.has(u.id));
 
   return { units: remainingUnits, events, actionResults, disbandedUnitIds: [...disbandedUnitIds] };
+}
+
+export function resolvePoiSurvey(
+  colonies: Colony[],
+  units: Unit[],
+  hexes: HexTileState[],
+  actions: QueuedAction[],
+  currentTick: number,
+): { events: TickEvent[]; actionResults: ActionResult[] } {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+  const colonyById = new Map(colonies.map(colony => [colony.id, colony]));
+  const unitById = new Map(units.map(unit => [unit.id, unit]));
+  const hexMap = new Map(hexes.map(hex => [hexKey(hex.x, hex.y), hex]));
+  const surveyedHexes = new Set<string>();
+
+  for (const action of actions.filter(a => a.type === 'survey_poi')) {
+    const unitId = action.params.unitId as string | undefined;
+    if (!unitId) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Missing unitId' });
+      continue;
+    }
+
+    const unit = unitById.get(unitId);
+    if (!unit) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Unit ${unitId} not found` });
+      continue;
+    }
+    if (unit.type !== 'scout') {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Only scouts can survey POIs' });
+      continue;
+    }
+
+    const hex = hexMap.get(hexKey(unit.hexX, unit.hexY));
+    if (!hex?.poi) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `No POI at (${unit.hexX}, ${unit.hexY})` });
+      continue;
+    }
+    if (hex.poi.discoveredBy !== unit.colonyId) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: 'Your colony must discover a POI before surveying it',
+      });
+      continue;
+    }
+
+    const surveyKey = `${unit.hexX},${unit.hexY}`;
+    if (hex.poi.surveyedBy || surveyedHexes.has(surveyKey)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `POI at (${unit.hexX}, ${unit.hexY}) has already been surveyed`,
+      });
+      continue;
+    }
+
+    hex.poi = {
+      ...hex.poi,
+      surveyedBy: unit.colonyId,
+      surveyedAtTick: currentTick,
+    };
+    surveyedHexes.add(surveyKey);
+
+    const colony = colonyById.get(unit.colonyId);
+    const influenceBonus = POI_SURVEY_INFLUENCE[hex.poi.type] ?? 10;
+    if (colony) {
+      colony.resources.influence += influenceBonus;
+    }
+
+    const eventData: Record<string, unknown> = {
+      poiType: hex.poi.type,
+      x: unit.hexX,
+      y: unit.hexY,
+      influenceBonus,
+      summary: '',
+    };
+
+    switch (hex.poi.type) {
+      case 'watchtower': {
+        const revealTargets = hexesWithinRadius(
+          { q: unit.hexX, r: unit.hexY },
+          WATCHTOWER_SURVEY_REVEAL_RADIUS,
+          new Set(hexMap.keys()),
+        );
+        let revealedCount = 0;
+        for (const coord of revealTargets) {
+          const targetHex = hexMap.get(hexKey(coord.q, coord.r));
+          if (!targetHex) continue;
+          const exploredBy = targetHex.exploredBy ?? [];
+          if (!exploredBy.includes(unit.colonyId)) {
+            targetHex.exploredBy = [...exploredBy, unit.colonyId];
+            revealedCount++;
+          }
+        }
+        eventData.revealedHexes = revealedCount;
+        eventData.summary = `Surveyed a watchtower and charted ${revealedCount} nearby hexes.`;
+        break;
+      }
+      case 'sacred_grove': {
+        let affectedUnits = 0;
+        for (const otherUnit of units) {
+          if (otherUnit.colonyId !== unit.colonyId) continue;
+          if (hexDistance({ q: unit.hexX, r: unit.hexY }, { q: otherUnit.hexX, r: otherUnit.hexY }) > SACRED_GROVE_SURVEY_RANGE) continue;
+          const before = otherUnit.morale;
+          otherUnit.morale = Math.min(1, otherUnit.morale + SACRED_GROVE_SURVEY_MORALE_BONUS);
+          if (otherUnit.morale > before) affectedUnits++;
+        }
+        eventData.moraleBonus = SACRED_GROVE_SURVEY_MORALE_BONUS;
+        eventData.affectedUnits = affectedUnits;
+        eventData.summary = `Surveyed a sacred grove and steadied ${affectedUnits} nearby units.`;
+        break;
+      }
+      case 'ancient_ruins':
+        eventData.summary = 'Surveyed ancient ruins and recovered strategic lore from the frontier.';
+        break;
+      case 'abandoned_cache':
+        eventData.summary = 'Surveyed an abandoned cache and mapped a reliable frontier resupply site.';
+        break;
+      case 'crystal_cavern':
+        eventData.summary = 'Surveyed a crystal cavern and recorded a rare mineral landmark.';
+        break;
+      case 'mineral_deposit':
+        eventData.summary = 'Surveyed a mineral deposit and marked it as a strategic extraction site.';
+        break;
+      case 'fertile_valley':
+        eventData.summary = 'Surveyed a fertile valley and charted a valuable frontier breadbasket.';
+        break;
+      case 'ancient_forest':
+        eventData.summary = 'Surveyed an ancient forest and logged a prime frontier timber reserve.';
+        break;
+      default:
+        eventData.summary = 'Surveyed a point of interest.';
+        break;
+    }
+
+    events.push({
+      type: 'poi_surveyed',
+      colonyId: unit.colonyId,
+      unitId: unit.id,
+      data: eventData,
+    });
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: eventData.summary as string,
+    });
+  }
+
+  return { events, actionResults };
 }
 
 /**
@@ -3620,21 +3787,21 @@ export function resolveTick(
     for (let i = 0; i < actions.length; i++) {
       const a = actions[i];
       const unitId = (a.params?.unitId as string) || null;
-      if (unitId && (a.type === 'move_unit' || a.type === 'attack' || a.type === 'explore')) {
+      if (unitId && (a.type === 'move_unit' || a.type === 'attack' || a.type === 'explore' || a.type === 'survey_poi')) {
         unitActions.set(unitId, i);
       }
     }
     for (let i = 0; i < actions.length; i++) {
       const a = actions[i];
       const unitId = (a.params?.unitId as string) || null;
-      if (unitId && (a.type === 'move_unit' || a.type === 'attack' || a.type === 'explore')) {
+      if (unitId && (a.type === 'move_unit' || a.type === 'attack' || a.type === 'explore' || a.type === 'survey_poi')) {
         // Reject movement for units that are being consumed by found_settlement or disband
         if (consumedUnitIds.has(unitId)) {
           const reason = actions.find(x => (x.type === 'found_settlement' || x.type === 'disband') && x.params?.unitId === unitId)?.type;
           actionResults.push({
             actionId: a.id,
             status: 'failed',
-            result: `Unit ${unitId} has a ${reason} action — movement rejected`,
+            result: `Unit ${unitId} has a ${reason} action — unit action rejected`,
           });
           continue;
         }
@@ -4072,6 +4239,14 @@ export function resolveTick(
     const convertResult = resolveConvertResources(updatedSettlements, updatedColonies, actions);
     events.push(...convertResult.events);
     actionResults.push(...convertResult.actionResults);
+  }
+
+  // --- Phase 1.96: Resolve POI survey actions ---
+  const surveyActions = actions.filter(a => a.type === 'survey_poi');
+  if (surveyActions.length > 0 && currentTick !== undefined) {
+    const surveyResult = resolvePoiSurvey(updatedColonies, updatedUnits, hexes, actions, currentTick);
+    events.push(...surveyResult.events);
+    actionResults.push(...surveyResult.actionResults);
   }
 
 

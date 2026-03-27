@@ -285,5 +285,21 @@ describe('Event Feed', () => {
       };
       expect(desertionEvent.public).toBe(true);
     });
+
+    it('poi survey events can be exposed to spectators with public summaries', () => {
+      const surveyEvent = {
+        type: 'poi_surveyed',
+        public: true,
+        colonyId: 'col_a',
+        data: {
+          poiType: 'watchtower',
+          x: 4,
+          y: -2,
+          summary: 'Surveyed a watchtower and charted 13 nearby hexes.',
+        },
+      };
+      expect(surveyEvent.public).toBe(true);
+      expect(surveyEvent.data.poiType).toBe('watchtower');
+    });
   });
 });
