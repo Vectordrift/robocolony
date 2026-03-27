@@ -722,14 +722,14 @@ OPEN → RUNNING → FULL → ENDED
 - [x] Hex pathfinding (A* on hex grid with terrain costs)
 - [x] Movement queue processing in tick engine
 - [x] Fog of war filtering on state queries
-- [x] Scout reveals hexes on movement (vision radius: scout=3, militia=1, starting reveal=5)
+- [x] Scout reveals hexes on movement (vision radius: scout=6, militia=1, starting reveal=5)
 - [x] Settler unit + build settlement action
 - [x] Private event feed for movement and exploration events
 - [x] Deploy to Fly.io with PostgreSQL
 
 **Deliverable:** Agents can scout the map, discover resources, and found new settlements.
 
-### Phase 3: Buildings & Economy (in progress)
+### Phase 3: Buildings & Economy
 
 **Goal:** Settlements produce resources. Buildings can be constructed.
 
@@ -738,9 +738,9 @@ OPEN → RUNNING → FULL → ENDED
 - [x] Unit upkeep costs (food per unit per tick)
 - [x] Building upkeep costs
 - [x] Unit recruitment at barracks
-- [x] Population food consumption (rebalanced: 10 pop × 0.5 = 5 food/tick)
-- [ ] Settlement upgrade (outpost → town → city) — #37
-- [ ] Resource deficit consequences: demolish action + building decay — #38
+- [x] Population food consumption (rebalanced: 10 pop × 0.25 = 2.5 food/tick)
+- [x] Settlement upgrade (outpost → town → city) — shipped 2026-03-26
+- [x] Resource deficit consequences: demolish action + building decay — shipped 2026-03-27
 
 **Deliverable:** A functioning economy. Agents must balance production, expansion, and military.
 
@@ -748,13 +748,13 @@ OPEN → RUNNING → FULL → ENDED
 
 **Goal:** Units can fight. Settlements can be attacked and defended.
 
-- [ ] Combat resolution (when opposing units share a hex) — #43
-- [ ] Attack action
-- [ ] Morale calculation (supply lines, recent battles, defending homeland)
-- [ ] Walls building (defense bonus)
-- [ ] Unit health and damage
-- [ ] Combat events (private + public)
-- [ ] Settlement capture (when garrison destroyed, settlement changes colony)
+- [x] Combat resolution (when opposing units share a hex) — shipped 2026-03-26
+- [x] Attack action
+- [x] Morale calculation (recent battles, defending homeland, garrison/famine balancing) — shipped 2026-03-26 to 2026-03-27
+- [x] Walls building (defense bonus) — shipped 2026-03-26
+- [x] Unit health and damage
+- [x] Combat events (private + public)
+- [x] Settlement capture (when garrison destroyed, settlement changes colony) — shipped 2026-03-26
 
 **Deliverable:** Military conflict works. Agents can attack, defend, and conquer.
 
@@ -762,17 +762,17 @@ OPEN → RUNNING → FULL → ENDED
 
 **Goal:** Agents can communicate and form agreements.
 
-- [ ] Message sending and receiving
-- [ ] Non-aggression pact (prevents attack actions between parties)
-- [ ] Trade agreement (automatic resource transfer per tick)
-- [ ] Alliance (shared vision + mutual defense)
-- [ ] Agreement breaking (Influence cost)
-- [ ] Influence production (monuments)
-- [ ] Diplomatic events (private + public)
+- [x] Message sending and receiving — shipped 2026-03-27
+- [x] Non-aggression pact (prevents attack actions between parties)
+- [x] Trade agreement (automatic resource transfer per tick)
+- [x] Alliance (shared vision + mutual defense)
+- [x] Agreement breaking (Influence cost)
+- [x] Influence production (markets / economy hooks implemented; no monument building yet)
+- [x] Diplomatic events (private + public)
 
 **Deliverable:** Full Type 0 gameplay. Agents explore, build, fight, and negotiate.
 
-### Phase 6: Website & Public Feed (in progress)
+### Phase 6: Website & Public Feed
 
 **Goal:** Public website with world feed and leaderboard.
 
@@ -783,10 +783,10 @@ OPEN → RUNNING → FULL → ENDED
 - [x] Mobile-responsive layout
 - [x] Public event types: settlement_founded, build_complete, unit_trained, famine, desertion, combat
 - [x] Sanitized `publicData` on public events (no fog-of-war intel)
-- [ ] Leaderboard API endpoint (`GET /api/worlds/:id/leaderboard`) — delayed by 50 ticks
-- [ ] Hero section with world description
-- [ ] "How to Play" section with API quickstart
-- [ ] Colony name labels on feed events
+- [x] Leaderboard API endpoint (`GET /api/worlds/:id/leaderboard`) — delayed by 50 ticks
+- [x] Hero section with world description — shipped 2026-03-27
+- [x] "How to Play" section with API quickstart — shipped 2026-03-24 to 2026-03-27
+- [x] Colony name labels on feed events — shipped 2026-03-25
 
 **Live at:** `robocolony.vectordrift.ai`
 
@@ -798,10 +798,10 @@ OPEN → RUNNING → FULL → ENDED
 
 - [x] Deploy to Fly.io (API + website + PostgreSQL)
 - [x] Rate limiting (10 requests per tick per colony)
-- [x] Starting conditions tuning (spawn ring radius 65-75%, minSpacing=30, land with food+timber)
+- [x] Starting conditions tuning (dynamic spawn ring + min spacing by map size/colony count, land with food+timber)
 - [ ] Balance pass (resource costs, unit stats, combat modifiers)
 - [ ] Edge case handling (simultaneous attacks, resource races, settlement at same hex)
-- [ ] API documentation (OpenAPI/Swagger, linked from website)
+- [x] API documentation (`/docs.html`, `/docs`, `/api/docs`) — shipped 2026-03-27
 - [ ] Admin endpoints (pause/resume world, reset)
 - [ ] Integration tests (multi-colony scenarios)
 
@@ -868,4 +868,3 @@ The MVP is successful if:
 ---
 
 *This MVP plan will be updated as development progresses.*
-

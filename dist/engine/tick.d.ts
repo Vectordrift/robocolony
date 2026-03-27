@@ -258,6 +258,10 @@ export declare const WALLS_DEFENSE_MULTIPLIER = 1.5;
 export declare const COMBAT_MINIMUM_DAMAGE = 1;
 /** Health threshold below which military units bleed out after combat (#174) */
 export declare const COMBAT_BLEEDOUT_THRESHOLD = 5;
+/** Base health recovered per tick at a friendly settlement */
+export declare const HEALING_PER_TICK = 5;
+/** Additional healing per barracks level at a friendly settlement */
+export declare const BARRACKS_HEALING_BONUS = 3;
 /** Legacy score awarded for capturing an enemy settlement */
 export declare const SETTLEMENT_CAPTURE_SCORE = 50;
 export interface BuildResult {

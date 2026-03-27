@@ -50,6 +50,8 @@ import {
   STOCKPILE_HARD_CEILING,
   GRANARY_BONUS_PER_LEVEL,
   STOCKPILE_DECAY_RATE,
+  HEALING_PER_TICK,
+  BARRACKS_HEALING_BONUS,
   IDLE_WARNING_TICKS,
   DEMOLISH_REFUND_RATE,
   DECAY_CHANCE_PER_BUILDING,
@@ -1238,6 +1240,73 @@ describe('resolveTick', () => {
     const result = resolveTick([colony], [settlement], units, hexes);
 
     expect(result.units[0].morale).toBe(1.0);
+  });
+
+  it('heals units at friendly settlements each tick and emits a private healing event', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ population: 0 });
+    const unit = makeUnit({ type: 'soldier', health: 60, morale: 0.7 });
+
+    const result = resolveTick([colony], [settlement], [unit], makeHexRing(0, 0));
+
+    expect(result.units[0].health).toBe(60 + HEALING_PER_TICK);
+    const healEvent = result.events.find(e => e.type === 'garrison_heal');
+    expect(healEvent).toBeDefined();
+    expect(healEvent?.colonyId).toBe(colony.id);
+    expect(healEvent?.unitId).toBe(unit.id);
+    expect(healEvent?.data.healthBefore).toBe(60);
+    expect(healEvent?.data.healthAfter).toBe(60 + HEALING_PER_TICK);
+  });
+
+  it('adds barracks healing bonus scaled by level', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      population: 0,
+      buildings: [{ type: 'barracks', level: 2 }],
+    });
+    const unit = makeUnit({ type: 'soldier', health: 70, morale: 0.6 });
+
+    const result = resolveTick([colony], [settlement], [unit], makeHexRing(0, 0));
+
+    expect(result.units[0].health).toBe(70 + HEALING_PER_TICK + (BARRACKS_HEALING_BONUS * 2));
+    const healEvent = result.events.find(e => e.type === 'garrison_heal');
+    expect(healEvent?.data.barracksBonus).toBe(BARRACKS_HEALING_BONUS * 2);
+  });
+
+  it('caps settlement healing at 100 health', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({
+      population: 0,
+      buildings: [{ type: 'barracks', level: 3 }],
+    });
+    const unit = makeUnit({ type: 'soldier', health: 96, morale: 0.5 });
+
+    const result = resolveTick([colony], [settlement], [unit], makeHexRing(0, 0));
+
+    expect(result.units[0].health).toBe(100);
+  });
+
+  it('does not heal units on friendly settlements if combat happened on that hex this tick', () => {
+    const friendlyColony = makeColony({ id: 'c1' });
+    const enemyColony = makeColony({ id: 'c2' });
+    const settlement = makeSettlement({ colonyId: 'c1', population: 0 });
+    const friendlyUnit = makeUnit({ id: 'u1', colonyId: 'c1', type: 'soldier', health: 25, morale: 0.7 });
+    const enemyUnit = makeUnit({ id: 'u2', colonyId: 'c2', type: 'settler', health: 10, morale: 1.0 });
+
+    const result = resolveTick(
+      [friendlyColony, enemyColony],
+      [settlement],
+      [friendlyUnit, enemyUnit],
+      makeHexRing(0, 0),
+      [],
+      42,
+    );
+
+    const healedUnit = result.units.find(u => u.id === 'u1');
+    expect(healedUnit).toBeDefined();
+    expect(healedUnit?.health).toBeLessThanOrEqual(25);
+    expect(result.events.some(e => e.type === 'garrison_heal' && e.unitId === 'u1')).toBe(false);
+    expect(result.events.some(e => e.type === 'combat_resolved')).toBe(true);
   });
 
   it('returns immutable results (does not mutate inputs)', () => {

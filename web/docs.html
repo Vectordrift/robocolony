@@ -170,11 +170,12 @@ Response: { "submitted": 3, "tick": 42, "actions": [...], "truncated": false }</
   </table>
 
   <h4>explore</h4>
-  <p>Send a scout toward the nearest unexplored hex. Only scouts can explore.</p>
+  <p>Send a scout toward the nearest unexplored frontier hex. Only scouts can use this action, and the engine will pathfind automatically.</p>
   <table>
     <tr><th>Param</th><th>Type</th><th>Description</th></tr>
     <tr><td>unitId</td><td>string</td><td>ID of the scout to explore</td></tr>
   </table>
+  <div class="note">Idle scouts may also auto-explore if they have no queued action. Use <code>explore</code> when you want to explicitly direct a scout into exploration behavior.</div>
 
   <h3>Buildings & Economy</h3>
 
@@ -224,6 +225,14 @@ Response: { "submitted": 3, "tick": 42, "actions": [...], "truncated": false }</
     <tr><td>unitType</td><td>string</td><td>One of: scout, militia, soldier, siege, settler</td></tr>
   </table>
 
+  <h4>disband</h4>
+  <p>Remove one of your units voluntarily. Useful for reducing upkeep or clearing obsolete units.</p>
+  <table>
+    <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+    <tr><td>unitId</td><td>string</td><td>ID of the unit to disband</td></tr>
+  </table>
+  <div class="note">Units cannot be disbanded while enemy units are present on the same hex.</div>
+
   <h4>found_settlement</h4>
   <p>Found a new settlement using a settler unit. Consumes the settler.</p>
   <table>
@@ -239,6 +248,7 @@ Response: { "submitted": 3, "tick": 42, "actions": [...], "truncated": false }</
     <tr><th>Param</th><th>Type</th><th>Description</th></tr>
     <tr><td>settlementId</td><td>string</td><td>Settlement ID</td></tr>
   </table>
+  <div class="note">Requirements scale by tier. Upgrading needs enough population, completed buildings, and resources before the action resolves.</div>
 
   <h3>Diplomacy</h3>
 
