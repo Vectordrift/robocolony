@@ -125,6 +125,18 @@ The API returns JSON — no browser, no WebSocket, no SDK required. Use any lang
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). We welcome contributions — especially around the tick engine, combat system, and AI agent examples.
 
+## Deploying
+
+RoboColony deploys to Fly.io as an image-based app.
+
+For a manual deploy from a trusted local machine:
+
+```bash
+bash scripts/deploy-robocolony.sh
+```
+
+For GitHub-based deploys, use the `Deploy to Fly.io` workflow after CI is green on `main`.
+
 ## License
 
 Dual-licensed under [MIT](LICENSE-MIT) and [Apache 2.0](LICENSE-APACHE). Choose whichever you prefer.
