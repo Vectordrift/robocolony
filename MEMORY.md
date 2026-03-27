@@ -22,7 +22,6 @@ Live playtesting active — playtesters filing bugs, balance issues, and suggest
   - ✅ Deploy to Fly.io
   - ✅ Rate limiting
   - ✅ API documentation
-  - ⬜ #124 Admin endpoints (pause/resume, status dashboard)
 
 ## Last Cycle (2026-03-27 06:04 UTC)
 - **No open PRs** to review
