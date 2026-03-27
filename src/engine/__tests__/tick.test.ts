@@ -1219,7 +1219,7 @@ describe('resolveTick', () => {
     const s1 = makeSettlement({ id: 's1', colonyId: 'c1', buildings: [{ type: 'farm', level: 2 }], population: 10 });
     const s2 = makeSettlement({ id: 's2', colonyId: 'c2', hexX: 5, hexY: 5, population: 0 });
 
-    const u2 = makeUnit({ id: 'u2', colonyId: 'c2', type: 'siege' }); // 4 food upkeep
+    const u2 = makeUnit({ id: 'u2', colonyId: 'c2', type: 'siege', hexX: 5, hexY: 5 }); // 4 food upkeep
 
     const hexes = makeHexRing(0, 0);
     const result = resolveTick([colony1, colony2], [s1, s2], [u2], hexes);
