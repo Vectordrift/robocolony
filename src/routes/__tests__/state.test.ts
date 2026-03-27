@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { analyzeSettlementSites, type VisibleHex } from '../state.js';
 
 // --- Fog of War unit tests ---
 
@@ -127,6 +128,37 @@ describe('State response shape', () => {
     };
 
     expect(mockMapResponse.hexCount).toBe(mockMapResponse.hexes.length);
+  });
+});
+
+describe('Settlement site analysis', () => {
+  it('ranks explored founding candidates and skips invalid nearby hexes', () => {
+    const visibleHexes: VisibleHex[] = [
+      { x: 0, y: 0, terrain: 'plains', resources: { food: 3, timber: 1, stone: 0, iron: 0 }, settlementId: 'set-home' },
+      { x: 1, y: 0, terrain: 'plains', resources: { food: 5, timber: 0, stone: 0, iron: 0 }, settlementId: null },
+      { x: 1, y: -1, terrain: 'forest', resources: { food: 2, timber: 4, stone: 0, iron: 0 }, settlementId: null },
+      { x: 2, y: -1, terrain: 'mountains', resources: { food: 0, timber: 0, stone: 4, iron: 2 }, settlementId: null },
+      { x: 2, y: 0, terrain: 'plains', resources: { food: 4, timber: 1, stone: 0, iron: 0 }, settlementId: null, poi: { type: 'watchtower' } },
+      { x: 2, y: 1, terrain: 'coast', resources: { food: 3, timber: 0, stone: 0, iron: 0 }, settlementId: null },
+      { x: 3, y: 0, terrain: 'plains', resources: { food: 4, timber: 1, stone: 0, iron: 0 }, settlementId: null },
+      { x: 3, y: -1, terrain: 'forest', resources: { food: 1, timber: 3, stone: 0, iron: 0 }, settlementId: null },
+      { x: 4, y: -1, terrain: 'mountains', resources: { food: 0, timber: 0, stone: 3, iron: 3 }, settlementId: null },
+      { x: 4, y: 0, terrain: 'plains', resources: { food: 5, timber: 0, stone: 0, iron: 0 }, settlementId: null, poi: { type: 'sacred_grove' } },
+      { x: 3, y: 1, terrain: 'plains', resources: { food: 4, timber: 0, stone: 0, iron: 0 }, settlementId: null },
+      { x: 5, y: 0, terrain: 'ocean', resources: { food: 0, timber: 0, stone: 0, iron: 0 }, settlementId: null },
+    ];
+
+    const candidates = analyzeSettlementSites(visibleHexes, 3);
+
+    expect(candidates).toHaveLength(3);
+    expect(candidates[0]).toMatchObject({
+      x: 3,
+      y: 0,
+    });
+    expect(candidates[0].score).toBeGreaterThan(candidates[1].score);
+    expect(candidates.some(candidate => candidate.x === 1 && candidate.y === 0)).toBe(false);
+    expect(candidates.every(candidate => candidate.distanceToNearestSettlement === null || candidate.distanceToNearestSettlement >= 3)).toBe(true);
+    expect(candidates[0].reasons.some(reason => reason.includes('POI'))).toBe(true);
   });
 });
 

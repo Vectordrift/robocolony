@@ -784,6 +784,34 @@ describe('resolveMovement', () => {
     expect(units[0].hexY).toBe(2);
   });
 
+  it('spreads same-colony scouts across nearby destinations when they share a target', () => {
+    const hexes = makePlainGrid(4);
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [
+      makeUnit({ id: 'scout-1', hexX: 0, hexY: 0, type: 'scout' }),
+      makeUnit({ id: 'scout-2', hexX: 0, hexY: 1, type: 'scout' }),
+    ];
+    const actions = [
+      makeAction({ id: 'action-1', params: { unitId: 'scout-1', targetX: 3, targetY: 0 } }),
+      makeAction({ id: 'action-2', params: { unitId: 'scout-2', targetX: 3, targetY: 0 } }),
+    ];
+
+    const result = resolveMovement(units, actions, hexLookup);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.actionResults[0].result).toBe('Path computed: 3 steps');
+    expect(result.actionResults[1].status).toBe('resolved');
+    expect(result.actionResults[1].result).toContain('destination adjusted');
+
+    const moveEvents = result.events.filter(e => e.type === 'movement_queued');
+    expect(moveEvents).toHaveLength(2);
+    expect(moveEvents[0].data.to).toEqual({ x: 3, y: 0 });
+    expect(moveEvents[1].data.to).not.toEqual({ x: 3, y: 0 });
+
+    const finalPositions = units.map(unit => `${unit.hexX},${unit.hexY}`);
+    expect(new Set(finalPositions).size).toBe(2);
+  });
+
   it('cancels movement when target is current position', () => {
     const hexes = makePlainLine(3);
     const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
