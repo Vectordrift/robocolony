@@ -242,16 +242,16 @@ export declare const COMBAT_MORALE_LOSS = 0.1;
 export declare const COMBAT_RANDOM_BONUS = 0.3;
 /** Morale boost for units on the winning side of combat */
 export declare const COMBAT_MORALE_WIN = 0.15;
-/** Morale penalty for units on the losing side of combat */
-export declare const COMBAT_MORALE_LOSE = 0.15;
+/** Morale penalty for units on the losing side of combat (reduced from 0.15 to prevent death spirals #171) */
+export declare const COMBAT_MORALE_LOSE = 0.1;
 /** Maximum morale a unit can reach from combat victories */
 export declare const COMBAT_MORALE_CAP = 1;
 /** Range in hexes from own settlement for homeland defense morale bonus */
 export declare const HOMELAND_DEFENSE_RANGE = 5;
-/** Morale bonus for defending within HOMELAND_DEFENSE_RANGE of own settlement */
-export declare const HOMELAND_MORALE_BONUS = 0.1;
-/** Minimum morale for units defending within their own settlement (homeland morale floor) */
-export declare const GARRISON_MORALE_FLOOR = 0.6;
+/** Morale bonus for defending within HOMELAND_DEFENSE_RANGE of own settlement (buffed from 0.1 #171) */
+export declare const HOMELAND_MORALE_BONUS = 0.15;
+/** Minimum morale for units defending within their own settlement (homeland morale floor, raised from 0.6 #171) */
+export declare const GARRISON_MORALE_FLOOR = 0.7;
 /** Defense multiplier for units defending on a hex with a settlement that has walls */
 export declare const WALLS_DEFENSE_MULTIPLIER = 1.5;
 /** Legacy score awarded for capturing an enemy settlement */
@@ -552,6 +552,28 @@ export declare const PROPOSAL_EXPIRY_TICKS = 50;
  * Resolve propose/accept/reject/break agreement actions.
  */
 export declare function resolveAgreementActions(colonies: Colony[], agreements: Agreement[], actions: QueuedAction[], currentTick: number, worldId?: string): AgreementActionResult;
+/**
+ * Auto-diplomacy: colonies automatically respond to pending agreement proposals (#167).
+ *
+ * After PROPOSAL_AUTO_RESPOND_TICKS, if the recipient colony hasn't manually responded,
+ * the system auto-evaluates the proposal:
+ * - Non-aggression pacts: auto-accept (generally beneficial for both sides)
+ * - Alliances: auto-accept if not currently at war with proposer
+ * - Trade agreements: auto-reject (AI can't evaluate fairness of terms)
+ *
+ * Also generates auto-reply messages when colonies receive diplomatic messages
+ * and haven't responded within AUTO_MESSAGE_REPLY_TICKS.
+ */
+export declare const PROPOSAL_AUTO_RESPOND_TICKS = 10;
+export declare function resolveAutoDiplomacy(colonies: Colony[], agreements: Agreement[], units: {
+    colonyId: string;
+    hexX: number;
+    hexY: number;
+}[], currentTick: number, worldId: string): {
+    events: TickEvent[];
+    mutations: AgreementMutation[];
+    messages: MessageRecord[];
+};
 /**
  * Transfer resources between colonies with active trade agreements.
  */

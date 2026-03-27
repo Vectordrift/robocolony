@@ -1,1 +1,1 @@
-{"sha":"2e2680c283e528d9c005e45557ad0e8ea2ab7ab5","short":"2e2680c","timestamp":"2026-03-27T02:16:52Z","message":"fix: stale action cleanup, DELETE endpoint, reduced decay, garrison healing, settler auto-death (#164, #165, #166, #168, #169, #170)"}
+{"sha":"7e49ddf3b76432bb23c5d59328969acd9419c23c","short":"7e49ddf","timestamp":"2026-03-27T04:12:52Z","message":"Fix morale death spiral (#171) + add auto-diplomacy responses (#167)"}
