@@ -107,6 +107,28 @@ describe('Event Feed', () => {
       );
       expect(colBPrivate).toHaveLength(0);
     });
+
+    it('deduplicated public combat events remain visible to all involved colonies as a single event', () => {
+      const events: TestEvent[] = [
+        {
+          id: 'evt_combat_1',
+          tick: 408,
+          type: 'combat_resolved',
+          public: true,
+          visibility: ['col_a', 'col_b'],
+          data: { hexX: 30, hexY: 2, casualties: 7 },
+          publicData: { hexX: 30, hexY: 2, casualties: 7, colonies: ['col_a', 'col_b'] },
+        },
+      ];
+
+      const visibleToA = filterVisibleEvents(events, 'col_a');
+      const visibleToB = filterVisibleEvents(events, 'col_b');
+
+      expect(visibleToA).toHaveLength(1);
+      expect(visibleToB).toHaveLength(1);
+      expect(visibleToA[0].id).toBe('evt_combat_1');
+      expect(visibleToB[0].id).toBe('evt_combat_1');
+    });
   });
 
   // Test since_tick filtering
