@@ -262,16 +262,16 @@ export const COMBAT_MORALE_LOSS = 0.1;
 export const COMBAT_RANDOM_BONUS = 0.3;
 /** Morale boost for units on the winning side of combat */
 export const COMBAT_MORALE_WIN = 0.15;
-/** Morale penalty for units on the losing side of combat */
-export const COMBAT_MORALE_LOSE = 0.15;
+/** Morale penalty for units on the losing side of combat (reduced from 0.15 to prevent death spirals #171) */
+export const COMBAT_MORALE_LOSE = 0.10;
 /** Maximum morale a unit can reach from combat victories */
 export const COMBAT_MORALE_CAP = 1.0;
 /** Range in hexes from own settlement for homeland defense morale bonus */
 export const HOMELAND_DEFENSE_RANGE = 5;
-/** Morale bonus for defending within HOMELAND_DEFENSE_RANGE of own settlement */
-export const HOMELAND_MORALE_BONUS = 0.1;
-/** Minimum morale for units defending within their own settlement (homeland morale floor) */
-export const GARRISON_MORALE_FLOOR = 0.6;
+/** Morale bonus for defending within HOMELAND_DEFENSE_RANGE of own settlement (buffed from 0.1 #171) */
+export const HOMELAND_MORALE_BONUS = 0.15;
+/** Minimum morale for units defending within their own settlement (homeland morale floor, raised from 0.6 #171) */
+export const GARRISON_MORALE_FLOOR = 0.7;
 /** Defense multiplier for units defending on a hex with a settlement that has walls */
 export const WALLS_DEFENSE_MULTIPLIER = 1.5;
 /** Legacy score awarded for capturing an enemy settlement */
@@ -2524,6 +2524,135 @@ export function resolveAgreementActions(colonies, agreements, actions, currentTi
     return { events, actionResults, mutations };
 }
 /**
+ * Auto-diplomacy: colonies automatically respond to pending agreement proposals (#167).
+ *
+ * After PROPOSAL_AUTO_RESPOND_TICKS, if the recipient colony hasn't manually responded,
+ * the system auto-evaluates the proposal:
+ * - Non-aggression pacts: auto-accept (generally beneficial for both sides)
+ * - Alliances: auto-accept if not currently at war with proposer
+ * - Trade agreements: auto-reject (AI can't evaluate fairness of terms)
+ *
+ * Also generates auto-reply messages when colonies receive diplomatic messages
+ * and haven't responded within AUTO_MESSAGE_REPLY_TICKS.
+ */
+export const PROPOSAL_AUTO_RESPOND_TICKS = 10; // ~50 minutes — give players time to respond manually
+export function resolveAutoDiplomacy(colonies, agreements, units, currentTick, worldId) {
+    const events = [];
+    const mutations = [];
+    const messages = [];
+    // Build a set of colony pairs currently in combat (enemy units on same hex)
+    const atWar = new Set();
+    const unitsByHex = new Map();
+    for (const u of units) {
+        const key = `${u.hexX},${u.hexY}`;
+        if (!unitsByHex.has(key))
+            unitsByHex.set(key, []);
+        unitsByHex.get(key).push(u.colonyId);
+    }
+    for (const [, colIds] of unitsByHex) {
+        const unique = [...new Set(colIds)];
+        for (let i = 0; i < unique.length; i++) {
+            for (let j = i + 1; j < unique.length; j++) {
+                atWar.add([unique[i], unique[j]].sort().join('|'));
+            }
+        }
+    }
+    // Colony name lookup
+    const colonyNameMap = new Map();
+    for (const c of colonies) {
+        colonyNameMap.set(c.id, c.name);
+    }
+    // Process pending proposals that have been waiting long enough
+    for (const agreement of agreements) {
+        if (agreement.status !== 'proposed')
+            continue;
+        const waitTicks = currentTick - agreement.proposedAtTick;
+        if (waitTicks < PROPOSAL_AUTO_RESPOND_TICKS)
+            continue;
+        const proposerName = colonyNameMap.get(agreement.proposedBy) ?? 'Unknown Colony';
+        const recipientName = colonyNameMap.get(agreement.proposedTo) ?? 'Unknown Colony';
+        const pairKey = [agreement.proposedBy, agreement.proposedTo].sort().join('|');
+        let autoAccept = false;
+        let reason = '';
+        switch (agreement.type) {
+            case 'non_aggression':
+                // Always accept NAPs — peace is generally beneficial
+                autoAccept = true;
+                reason = `${recipientName} has agreed to the non-aggression pact. Peace serves both our colonies well.`;
+                break;
+            case 'alliance':
+                // Accept alliances if not currently at war with proposer
+                if (atWar.has(pairKey)) {
+                    autoAccept = false;
+                    reason = `${recipientName} declines the alliance proposal — our colonies are currently in conflict. Cease hostilities first.`;
+                }
+                else {
+                    autoAccept = true;
+                    reason = `${recipientName} accepts the alliance. Together we are stronger.`;
+                }
+                break;
+            case 'trade':
+                // Auto-reject trade — can't evaluate terms
+                autoAccept = false;
+                reason = `${recipientName} has reviewed the trade terms but declines at this time. The terms do not align with our current economic priorities.`;
+                break;
+        }
+        if (autoAccept) {
+            agreement.status = 'active';
+            agreement.acceptedAtTick = currentTick;
+            mutations.push({ type: 'update', agreement: { ...agreement } });
+            events.push({
+                type: 'agreement_accepted',
+                colonyId: agreement.proposedTo,
+                data: {
+                    agreementId: agreement.id,
+                    agreementType: agreement.type,
+                    partnerColonyId: agreement.proposedBy,
+                    autoResponse: true,
+                    visibility: [agreement.proposedBy, agreement.proposedTo],
+                },
+            });
+        }
+        else {
+            agreement.status = 'rejected';
+            mutations.push({ type: 'update', agreement: { ...agreement } });
+            events.push({
+                type: 'agreement_rejected',
+                colonyId: agreement.proposedTo,
+                data: {
+                    agreementId: agreement.id,
+                    agreementType: agreement.type,
+                    autoResponse: true,
+                    visibility: [agreement.proposedBy, agreement.proposedTo],
+                },
+            });
+        }
+        // Generate a diplomatic message explaining the decision
+        const msg = {
+            id: `msg_auto_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+            worldId,
+            fromColony: agreement.proposedTo,
+            toColony: agreement.proposedBy,
+            sentAtTick: currentTick,
+            deliveredAtTick: currentTick,
+            content: reason,
+            read: false,
+        };
+        messages.push(msg);
+        events.push({
+            type: 'message_received',
+            colonyId: agreement.proposedBy,
+            data: {
+                messageId: msg.id,
+                fromColony: agreement.proposedTo,
+                fromColonyName: recipientName,
+                autoResponse: true,
+            },
+        });
+    }
+    return { events, mutations, messages };
+}
+/**
  * Transfer resources between colonies with active trade agreements.
  */
 export function resolveTradeTransfers(colonies, agreements) {
@@ -2583,6 +2712,27 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         agreementMutations = agreementResult.mutations;
         const agreementTypes = new Set(['propose_agreement', 'accept_agreement', 'reject_agreement', 'break_agreement']);
         actions = actions.filter(a => !agreementTypes.has(a.type));
+    }
+    // --- Auto-diplomacy: respond to pending proposals (#167) ---
+    // After manual agreement actions are resolved, auto-respond to proposals
+    // that have been pending for PROPOSAL_AUTO_RESPOND_TICKS ticks.
+    {
+        // Apply agreement mutations so far to get current state
+        const currentAgreements = [...(agreements || [])];
+        for (const mut of agreementMutations) {
+            if (mut.type === 'update') {
+                const idx = currentAgreements.findIndex(a => a.id === mut.agreement.id);
+                if (idx >= 0)
+                    currentAgreements[idx] = mut.agreement;
+            }
+            else if (mut.type === 'create') {
+                currentAgreements.push(mut.agreement);
+            }
+        }
+        const autoDipResult = resolveAutoDiplomacy(colonies, currentAgreements, units, currentTick || 0, worldId || '');
+        events.push(...autoDipResult.events);
+        agreementMutations.push(...autoDipResult.mutations);
+        newMessages.push(...autoDipResult.messages);
     }
     // --- Deduplicate actions per unit ---
     // Edge case handling (Issue #123):
@@ -3195,7 +3345,7 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         // Units on the same hex as a friendly settlement heal each tick.
         // Barracks provide a healing bonus.
         const GARRISON_HEAL_HP = 3; // Base HP recovery per tick
-        const GARRISON_HEAL_MORALE = 0.05; // Base morale recovery per tick
+        const GARRISON_HEAL_MORALE = 0.08; // Base morale recovery per tick (buffed from 0.05 #171)
         const BARRACKS_HEAL_BONUS = 2; // Extra HP per barracks level
         for (const unit of myUnits) {
             if (unit.health >= 100 && unit.morale >= 1.0)
@@ -3370,6 +3520,20 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
                     break; // One grove is enough
                 }
             }
+        }
+    }
+    // --- Passive morale recovery (#171) ---
+    // All units recover a small amount of morale each tick — represents natural resilience
+    // and rest. This prevents morale death spirals by giving losers a baseline recovery rate.
+    // Stacks with garrison, sacred grove, and food-based recovery.
+    const PASSIVE_MORALE_RECOVERY = 0.02;
+    for (const unit of updatedUnits) {
+        if (desertedUnitIds.includes(unit.id))
+            continue;
+        if (unit.health <= 0)
+            continue;
+        if (unit.morale < 1.0) {
+            unit.morale = Math.min(1.0, Math.round((unit.morale + PASSIVE_MORALE_RECOVERY) * 100) / 100);
         }
     }
     // --- Idle unit tracking ---
@@ -3548,4 +3712,3 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         agreementMutations,
     };
 }
-//# sourceMappingURL=tick.js.map
