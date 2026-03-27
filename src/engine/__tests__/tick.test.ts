@@ -1373,7 +1373,7 @@ describe('resolveTick', () => {
       makeUnit({ id: 'u2', colonyId: 'c2', type: 'soldier' }),
     ];
 
-    const result = resolveCombat(protectedUnits, [], 42, undefined, undefined, new Set(['c1']));
+    const result = resolveCombat(protectedUnits, [], 42, undefined, undefined, undefined, new Set(['c1']));
 
     expect(result.destroyedUnitIds).toHaveLength(0);
     expect(result.events.some(e => e.type === 'combat_resolved')).toBe(false);
@@ -3328,8 +3328,8 @@ describe('resolveCombat', () => {
     // Both survive — neither can deal damage
     expect(result.units).toHaveLength(2);
     expect(result.destroyedUnitIds).toHaveLength(0);
-    // With no winner, both sides take the loser-side penalty in addition to base loss.
-    expect(result.units[0].morale).toBe(1.0 - COMBAT_MORALE_LOSS - COMBAT_MORALE_LOSE);
+    // No attacks means combat resolution is skipped entirely, so morale is unchanged.
+    expect(result.units[0].morale).toBe(1.0);
   });
 
   it('should reduce morale for surviving units (winner vs loser)', () => {
