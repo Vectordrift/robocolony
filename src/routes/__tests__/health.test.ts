@@ -8,14 +8,14 @@ describe('Health endpoint', () => {
     await app.close();
   });
 
-  it('GET /health returns { status: "ok" }', async () => {
+  it('GET /health returns status and version', async () => {
     const response = await app.inject({
       method: 'GET',
       url: '/health',
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: 'ok' });
+    expect(response.json()).toEqual({ status: 'ok', version: 'dev' });
   });
 
   it('GET /health returns correct content-type', async () => {

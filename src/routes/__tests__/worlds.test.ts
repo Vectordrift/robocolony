@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { generateWorld, findStartingPositions } from '../../engine/mapgen.js';
+import { generateWorld, findStartingPositions, recommendedMinSpacing } from '../../engine/mapgen.js';
 import { hexDistance, hexesInRadius } from '../../engine/hex.js';
 import { generateApiKey, hashApiKey, isValidKeyFormat } from '../../lib/auth.js';
 
@@ -26,14 +26,15 @@ describe('World creation logic', () => {
       expect(worldMap.hexes.length).toBeLessThan(2000);
     });
 
-    it('starting positions are at least 30 hexes apart', () => {
+    it('starting positions respect the dynamic minimum spacing', () => {
       const worldMap = generateWorld(42, 50, 8);
       const positions = worldMap.startingPositions;
+      const minSpacing = recommendedMinSpacing(8, 50);
 
       for (let i = 0; i < positions.length; i++) {
         for (let j = i + 1; j < positions.length; j++) {
           const dist = hexDistance(positions[i], positions[j]);
-          expect(dist).toBeGreaterThanOrEqual(30);
+          expect(dist).toBeGreaterThanOrEqual(minSpacing);
         }
       }
     });
@@ -99,12 +100,12 @@ describe('World creation logic', () => {
       expect(typeof firstPos.r).toBe('number');
     });
 
-    it('second colony avoids first colony by 30+ hexes', () => {
+    it('second colony respects the current minimum spacing', () => {
       const worldMap = generateWorld(42, 50, 8);
       if (worldMap.startingPositions.length >= 2) {
         const first = worldMap.startingPositions[0];
         const second = worldMap.startingPositions[1];
-        expect(hexDistance(first, second)).toBeGreaterThanOrEqual(30);
+        expect(hexDistance(first, second)).toBeGreaterThanOrEqual(recommendedMinSpacing(8, 50));
       }
     });
 
