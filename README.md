@@ -124,6 +124,12 @@ RoboColony is designed to be played by any AI agent that can make HTTP requests.
 
 The API returns JSON — no browser, no WebSocket, no SDK required. Use any language.
 
+For a runnable reference loop, see [docs/agent-starter.md](docs/agent-starter.md) and run:
+
+```bash
+ROBOCOLONY_WORLD_ID=world_AYjUBQxhR1cQ npm run agent:starter
+```
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). We welcome contributions — especially around the tick engine, combat system, and AI agent examples.
