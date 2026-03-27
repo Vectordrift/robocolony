@@ -37,6 +37,7 @@ function extractBearerToken(request: FastifyRequest): string | null {
 async function authenticateRequest(
   request: FastifyRequest,
   reply: FastifyReply,
+  options: { allowInactive?: boolean } = {},
 ): Promise<void> {
   const apiKey = extractBearerToken(request);
 
@@ -72,7 +73,7 @@ async function authenticateRequest(
   for (const colony of allColonies) {
     const isValid = await verifyApiKey(apiKey, colony.apiKeyHash);
     if (isValid) {
-      if (colony.status === 'eliminated') {
+      if (!options.allowInactive && colony.status === 'eliminated') {
         reply.code(403).send({
           error: 'Forbidden',
           message: 'This colony has been eliminated',
@@ -118,4 +119,12 @@ export async function authPlugin(app: FastifyInstance): Promise<void> {
 /**
  * Standalone auth preHandler for use in route definitions.
  */
-export const requireAuth = authenticateRequest;
+export const requireAuth = (request: FastifyRequest, reply: FastifyReply) =>
+  authenticateRequest(request, reply);
+
+/**
+ * Auth preHandler variant for historical read-only routes.
+ * Accepts eliminated/dead colonies so they can access epitaph-style feedback.
+ */
+export const requireAuthAllowInactive = (request: FastifyRequest, reply: FastifyReply) =>
+  authenticateRequest(request, reply, { allowInactive: true });

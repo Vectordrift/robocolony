@@ -10,7 +10,7 @@ vi.mock('../../db/index.js', () => ({
 }));
 
 import { db } from '../../db/index.js';
-import { requireAuth } from '../auth.js';
+import { requireAuth, requireAuthAllowInactive } from '../auth.js';
 
 // Helper to build a test app with a protected route
 function buildTestApp() {
@@ -18,6 +18,13 @@ function buildTestApp() {
 
   app.get('/protected', {
     preHandler: requireAuth,
+    handler: async (request) => {
+      return { colony: request.colony };
+    },
+  });
+
+  app.get('/historical', {
+    preHandler: requireAuthAllowInactive,
     handler: async (request) => {
       return { colony: request.colony };
     },
@@ -122,6 +129,24 @@ describe('Auth middleware', () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.json().message).toContain('eliminated');
+  });
+
+  it('allows eliminated colony on historical route', async () => {
+    const apiKey = generateApiKey();
+    const hash = await hashApiKey(apiKey);
+
+    mockDbSelect([
+      { id: 'colony-1', worldId: 'world-1', name: 'DeadColony', apiKeyHash: hash, status: 'eliminated' },
+    ]);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/historical',
+      headers: { authorization: `Bearer ${apiKey}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().colony.status).toBe('eliminated');
   });
 
   it('authenticates valid key and attaches colony to request', async () => {
