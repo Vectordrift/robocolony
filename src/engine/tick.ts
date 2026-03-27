@@ -2217,13 +2217,15 @@ export function resolveCombat(
     }
   }
 
-  // Build NAP lookup: set of "colonyA|colonyB" pairs (sorted ids) with active non_aggression or alliance
+  // Build peace-treaty lookup for active non-aggression, alliance, and ceasefire agreements.
   const napPairs = new Set<string>();
+  const peaceAgreementType = new Map<string, AgreementType>();
   if (activeAgreements) {
     for (const agr of activeAgreements) {
-      if (agr.status === 'active' && (agr.type === 'non_aggression' || agr.type === 'alliance')) {
+      if (agr.status === 'active' && (agr.type === 'non_aggression' || agr.type === 'alliance' || agr.type === 'ceasefire')) {
         const pair = [agr.proposedBy, agr.proposedTo].sort().join('|');
         napPairs.add(pair);
+        peaceAgreementType.set(pair, agr.type);
       }
     }
   }
@@ -2269,6 +2271,14 @@ export function resolveCombat(
     if (allPairsProtected) {
       // All colonies on this hex have mutual NAPs — no combat, emit nap_blocked_combat event
       const [hexX, hexY] = hex.split(',').map(Number);
+      const pairTypes = new Set<string>();
+      for (let i = 0; i < colonyIds.length; i++) {
+        for (let j = i + 1; j < colonyIds.length; j++) {
+          const pair = [colonyIds[i], colonyIds[j]].sort().join('|');
+          pairTypes.add((peaceAgreementType.get(pair) ?? 'treaty').replace(/_/g, ' '));
+        }
+      }
+      const reason = `${[...pairTypes].join(' / ')} prevents combat`;
       for (const colonyId of colonyIds) {
         events.push({
           type: 'nap_blocked_combat',
@@ -2277,7 +2287,7 @@ export function resolveCombat(
             hexX,
             hexY,
             colonies: colonyIds.filter(c => c !== colonyId),
-            reason: 'Non-aggression pact prevents combat',
+            reason,
           },
         });
       }
@@ -3366,12 +3376,21 @@ export function resolveResearch(
 
 // ===== Agreement Types & Constants =====
 
-export type AgreementType = 'non_aggression' | 'trade' | 'alliance';
+export type AgreementType = 'non_aggression' | 'trade' | 'alliance' | 'ceasefire';
 export type AgreementStatus = 'proposed' | 'active' | 'rejected' | 'broken';
 
 export interface TradeTerms {
   gives: Partial<Resources>;
   receives: Partial<Resources>;
+  intervalTicks?: number;
+}
+
+export interface CeasefireTerms {
+  durationTicks: number;
+}
+
+export interface AllianceTerms {
+  visionSharing?: true;
 }
 
 export interface Agreement {
@@ -3381,7 +3400,7 @@ export interface Agreement {
   proposedBy: string;
   proposedTo: string;
   status: AgreementStatus;
-  terms: TradeTerms | Record<string, unknown>;
+  terms: TradeTerms | CeasefireTerms | AllianceTerms | Record<string, unknown>;
   proposedAtTick: number;
   acceptedAtTick: number | null;
 }
@@ -3407,9 +3426,109 @@ export const BREAK_COSTS: Record<AgreementType, number> = {
   non_aggression: 30,
   trade: 50,
   alliance: 100,
+  ceasefire: 20,
 };
 
 export const PROPOSAL_EXPIRY_TICKS = 50;
+export const DEFAULT_CEASEFIRE_DURATION_TICKS = 25;
+export const MIN_CEASEFIRE_DURATION_TICKS = 5;
+export const MAX_CEASEFIRE_DURATION_TICKS = 100;
+export const MIN_TRADE_INTERVAL_TICKS = 1;
+export const MAX_TRADE_INTERVAL_TICKS = 25;
+
+function normalizeResourceTerms(
+  value: unknown,
+  fieldName: 'gives' | 'receives',
+): { valid: true; value: Partial<Resources> } | { valid: false; error: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { valid: false, error: `'terms.${fieldName}' must be an object with resource amounts` };
+  }
+
+  const normalized: Partial<Resources> = {};
+  for (const [key, amount] of Object.entries(value)) {
+    if (!['food', 'timber', 'stone', 'iron', 'influence'].includes(key)) {
+      return { valid: false, error: `Unknown resource '${key}' in terms.${fieldName}` };
+    }
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+      return { valid: false, error: `'terms.${fieldName}.${key}' must be a positive number` };
+    }
+    normalized[key as keyof Resources] = Math.round(amount * 100) / 100;
+  }
+
+  if (Object.keys(normalized).length === 0) {
+    return { valid: false, error: `'terms.${fieldName}' must include at least one resource` };
+  }
+
+  return { valid: true, value: normalized };
+}
+
+export function normalizeAgreementTerms(
+  agreementType: AgreementType,
+  rawTerms: unknown,
+): { valid: true; terms: Agreement['terms'] } | { valid: false; error: string } {
+  const terms = rawTerms && typeof rawTerms === 'object' && !Array.isArray(rawTerms)
+    ? rawTerms as Record<string, unknown>
+    : {};
+
+  switch (agreementType) {
+    case 'trade': {
+      const gives = normalizeResourceTerms(terms.gives, 'gives');
+      if (!gives.valid) return gives;
+      const receives = normalizeResourceTerms(terms.receives, 'receives');
+      if (!receives.valid) return receives;
+
+      let intervalTicks = 1;
+      if (terms.intervalTicks !== undefined) {
+        if (!Number.isInteger(terms.intervalTicks) || (terms.intervalTicks as number) < MIN_TRADE_INTERVAL_TICKS || (terms.intervalTicks as number) > MAX_TRADE_INTERVAL_TICKS) {
+          return {
+            valid: false,
+            error: `'terms.intervalTicks' must be an integer between ${MIN_TRADE_INTERVAL_TICKS} and ${MAX_TRADE_INTERVAL_TICKS}`,
+          };
+        }
+        intervalTicks = terms.intervalTicks as number;
+      }
+
+      return {
+        valid: true,
+        terms: {
+          gives: gives.value,
+          receives: receives.value,
+          ...(intervalTicks > 1 ? { intervalTicks } : {}),
+        },
+      };
+    }
+
+    case 'ceasefire': {
+      const rawDuration = terms.durationTicks;
+      const durationTicks = rawDuration === undefined
+        ? DEFAULT_CEASEFIRE_DURATION_TICKS
+        : rawDuration;
+      if (typeof durationTicks !== 'number' || !Number.isInteger(durationTicks) || durationTicks < MIN_CEASEFIRE_DURATION_TICKS || durationTicks > MAX_CEASEFIRE_DURATION_TICKS) {
+        return {
+          valid: false,
+          error: `'terms.durationTicks' must be an integer between ${MIN_CEASEFIRE_DURATION_TICKS} and ${MAX_CEASEFIRE_DURATION_TICKS}`,
+        };
+      }
+      return {
+        valid: true,
+        terms: { durationTicks: durationTicks as number },
+      };
+    }
+
+    case 'alliance': {
+      if (terms.visionSharing !== undefined && terms.visionSharing !== true) {
+        return { valid: false, error: `'terms.visionSharing' must be true when provided` };
+      }
+      return {
+        valid: true,
+        terms: terms.visionSharing ? { visionSharing: true } : {},
+      };
+    }
+
+    case 'non_aggression':
+      return { valid: true, terms: {} };
+  }
+}
 
 /**
  * Resolve propose/accept/reject/break agreement actions.
@@ -3458,6 +3577,11 @@ export function resolveAgreementActions(
         actionResults.push({ actionId: action.id, status: 'failed', result: `Already have ${existing.status} ${agreementType} agreement` });
         continue;
       }
+      const normalizedTerms = normalizeAgreementTerms(agreementType, action.params?.terms);
+      if (!normalizedTerms.valid) {
+        actionResults.push({ actionId: action.id, status: 'failed', result: normalizedTerms.error });
+        continue;
+      }
       const newAgreement: Agreement = {
         id: `agr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
         worldId: worldId || '',
@@ -3465,7 +3589,7 @@ export function resolveAgreementActions(
         proposedBy: colony.id,
         proposedTo: targetColonyId,
         status: 'proposed',
-        terms: (action.params?.terms as TradeTerms) || {},
+        terms: normalizedTerms.terms,
         proposedAtTick: currentTick,
         acceptedAtTick: null,
       };
@@ -3522,6 +3646,26 @@ export function resolveAgreementActions(
       agreement.status = 'rejected';
       mutations.push({ type: 'update', agreement: { ...agreement } });
       events.push({ type: 'agreement_expired', colonyId: agreement.proposedBy, data: { agreementId: agreement.id, agreementType: agreement.type, visibility: [agreement.proposedBy, agreement.proposedTo] } });
+    }
+    if (agreement.status === 'active' && agreement.type === 'ceasefire') {
+      const terms = agreement.terms as CeasefireTerms;
+      const durationTicks = terms.durationTicks ?? DEFAULT_CEASEFIRE_DURATION_TICKS;
+      const acceptedAtTick = agreement.acceptedAtTick ?? currentTick;
+      if ((currentTick - acceptedAtTick) >= durationTicks) {
+        agreement.status = 'broken';
+        mutations.push({ type: 'update', agreement: { ...agreement } });
+        events.push({
+          type: 'agreement_broken',
+          colonyId: agreement.proposedBy,
+          data: {
+            agreementId: agreement.id,
+            agreementType: agreement.type,
+            brokenBy: 'system',
+            reason: 'Ceasefire duration elapsed',
+            visibility: [agreement.proposedBy, agreement.proposedTo],
+          },
+        });
+      }
     }
   }
 
@@ -3612,6 +3756,12 @@ export function resolveAutoDiplomacy(
         autoAccept = false;
         reason = `${recipientName} has reviewed the trade terms but declines at this time. The terms do not align with our current economic priorities.`;
         break;
+      case 'ceasefire':
+        autoAccept = true;
+        reason = atWar.has(pairKey)
+          ? `${recipientName} accepts the ceasefire. Let the current fighting end before it consumes us both.`
+          : `${recipientName} accepts the ceasefire. We will hold our fire for now.`;
+        break;
     }
 
     if (autoAccept) {
@@ -3677,6 +3827,7 @@ export function resolveAutoDiplomacy(
 export function resolveTradeTransfers(
   colonies: Colony[],
   agreements: Agreement[],
+  currentTick: number,
 ): TradeTransferResult {
   const events: TickEvent[] = [];
   const activeTradeAgreements = agreements.filter(a => a.type === 'trade' && a.status === 'active');
@@ -3684,6 +3835,8 @@ export function resolveTradeTransfers(
   for (const agreement of activeTradeAgreements) {
     const terms = agreement.terms as TradeTerms;
     if (!terms?.gives || !terms?.receives) continue;
+    const intervalTicks = terms.intervalTicks ?? 1;
+    if (intervalTicks > 1 && currentTick % intervalTicks !== 0) continue;
     const giver = colonies.find(c => c.id === agreement.proposedBy);
     const receiver = colonies.find(c => c.id === agreement.proposedTo);
     if (!giver || !receiver) continue;
@@ -4428,7 +4581,7 @@ export function resolveTick(
 
     // --- Trade agreement transfers ---
     if (agreements && agreements.length > 0) {
-      const tradeResult = resolveTradeTransfers(colonies, agreements);
+      const tradeResult = resolveTradeTransfers(colonies, agreements, currentTick ?? 0);
       events.push(...tradeResult.events);
     }
 

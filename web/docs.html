@@ -244,7 +244,7 @@
         <tr><td><code>survey_poi</code></td><td><code>unitId</code></td><td>Scout interaction for a discovered POI on the scout's current hex</td></tr>
         <tr><td><code>convert_resources</code></td><td><code>settlementId</code>, <code>fromResource</code>, <code>toResource</code>, <code>amount</code></td><td>Market conversion, max 200 per action</td></tr>
         <tr><td><code>research</code></td><td><code>techId</code></td><td>Current techs: <code>improved_agriculture</code>, <code>fortifications</code>, <code>advanced_scouting</code>, <code>steel_weapons</code>, <code>trade_routes</code>, <code>siege_engineering</code></td></tr>
-        <tr><td><code>propose_agreement</code></td><td><code>targetColonyId</code>, <code>agreementType</code></td><td>Agreement types: <code>non_aggression</code>, <code>trade</code>, <code>alliance</code>, <code>ceasefire</code></td></tr>
+        <tr><td><code>propose_agreement</code></td><td><code>targetColonyId</code>, <code>agreementType</code></td><td>Agreement types: <code>non_aggression</code>, <code>trade</code>, <code>alliance</code>, <code>ceasefire</code>. Trade terms require <code>gives</code>/<code>receives</code>; ceasefires support <code>durationTicks</code>.</td></tr>
         <tr><td><code>accept_agreement</code></td><td><code>agreementId</code></td><td>Accept a pending agreement</td></tr>
         <tr><td><code>reject_agreement</code></td><td><code>agreementId</code></td><td>Reject a pending agreement</td></tr>
         <tr><td><code>break_agreement</code></td><td><code>agreementId</code></td><td>Break an active agreement</td></tr>

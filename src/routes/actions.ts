@@ -13,6 +13,7 @@ import { nanoid } from 'nanoid';
 import { db } from '../db/index.js';
 import { worlds, actions, colonies, units, settlements } from '../db/schema/index.js';
 import { requireAuth } from '../middleware/index.js';
+import { normalizeAgreementTerms, type AgreementType } from '../engine/tick.js';
 
 // --- Types ---
 
@@ -313,6 +314,11 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
     if (typeof p.agreementType !== 'string' || !VALID_AGREEMENT_TYPES.has(p.agreementType as string)) {
       return { valid: false, error: `Invalid agreementType '${p.agreementType}'. Valid: ${[...VALID_AGREEMENT_TYPES].join(', ')}` };
     }
+    const normalizedTerms = normalizeAgreementTerms(p.agreementType as AgreementType, p.terms);
+    if (!normalizedTerms.valid) {
+      return { valid: false, error: normalizedTerms.error };
+    }
+    p.terms = normalizedTerms.terms as Record<string, unknown>;
   }
 
   if (['accept_agreement', 'reject_agreement', 'break_agreement'].includes(action.type)) {
@@ -767,4 +773,3 @@ export async function actionRoutes(app: FastifyInstance) {
     return { cancelled: true, count: cancelledCount };
   });
 }
-
