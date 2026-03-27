@@ -17,7 +17,7 @@ function extractBearerToken(request) {
  * Also validates that the world ID in the URL (if present) matches
  * the colony's actual world — prevents cross-world confusion.
  */
-async function authenticateRequest(request, reply) {
+async function authenticateRequest(request, reply, options = {}) {
     const apiKey = extractBearerToken(request);
     if (!apiKey) {
         reply.code(401).send({
@@ -48,7 +48,7 @@ async function authenticateRequest(request, reply) {
     for (const colony of allColonies) {
         const isValid = await verifyApiKey(apiKey, colony.apiKeyHash);
         if (isValid) {
-            if (colony.status === 'eliminated') {
+            if (!options.allowInactive && colony.status === 'eliminated') {
                 reply.code(403).send({
                     error: 'Forbidden',
                     message: 'This colony has been eliminated',
@@ -89,5 +89,10 @@ export async function authPlugin(app) {
 /**
  * Standalone auth preHandler for use in route definitions.
  */
-export const requireAuth = authenticateRequest;
+export const requireAuth = (request, reply) => authenticateRequest(request, reply);
+/**
+ * Auth preHandler variant for historical read-only routes.
+ * Accepts eliminated/dead colonies so they can access epitaph-style feedback.
+ */
+export const requireAuthAllowInactive = (request, reply) => authenticateRequest(request, reply, { allowInactive: true });
 //# sourceMappingURL=auth.js.map
