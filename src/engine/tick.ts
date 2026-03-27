@@ -16,6 +16,7 @@ export interface Colony {
   legacyScore: number;
   status: string;
   lastActionTick?: number;
+  newcomerProtectionUntilTick?: number;
   diedAtTick?: number;
   deathReason?: string;
 }
@@ -494,6 +495,7 @@ export const COMBAT_MINIMUM_DAMAGE = 1;
 
 /** Health threshold below which military units bleed out after combat (#174) */
 export const COMBAT_BLEEDOUT_THRESHOLD = 5;
+export const NEWCOMER_PROTECTION_TICKS = 24;
 
 /** Base health recovered per tick at a friendly settlement */
 export const HEALING_PER_TICK = 5;
@@ -1954,6 +1956,54 @@ export interface CombatResult {
   capturedSettlements: Array<{ settlementId: string; fromColony: string; toColony: string }>;
 }
 
+function isColonyProtected(colony: Colony, currentTick?: number): boolean {
+  return currentTick !== undefined && (colony.newcomerProtectionUntilTick ?? 0) >= currentTick;
+}
+
+function buildProtectedHexMaps(
+  colonies: Colony[],
+  settlements: Settlement[],
+  units: Unit[],
+  currentTick?: number,
+): {
+  protectedColonyIds: Set<string>;
+  protectedHexes: Map<string, Set<string>>;
+  settlementOwnersByHex: Map<string, string>;
+  unitOwnersByHex: Map<string, Set<string>>;
+} {
+  const protectedColonyIds = new Set(
+    colonies.filter(colony => isColonyProtected(colony, currentTick)).map(colony => colony.id),
+  );
+  const protectedHexes = new Map<string, Set<string>>();
+  const settlementOwnersByHex = new Map<string, string>();
+  const unitOwnersByHex = new Map<string, Set<string>>();
+
+  for (const settlement of settlements) {
+    const key = hexKey(settlement.hexX, settlement.hexY);
+    settlementOwnersByHex.set(key, settlement.colonyId);
+    if (protectedColonyIds.has(settlement.colonyId)) {
+      const owners = protectedHexes.get(key) ?? new Set<string>();
+      owners.add(settlement.colonyId);
+      protectedHexes.set(key, owners);
+    }
+  }
+
+  for (const unit of units) {
+    if (unit.health <= 0) continue;
+    const key = hexKey(unit.hexX, unit.hexY);
+    const unitOwners = unitOwnersByHex.get(key) ?? new Set<string>();
+    unitOwners.add(unit.colonyId);
+    unitOwnersByHex.set(key, unitOwners);
+    if (protectedColonyIds.has(unit.colonyId)) {
+      const owners = protectedHexes.get(key) ?? new Set<string>();
+      owners.add(unit.colonyId);
+      protectedHexes.set(key, owners);
+    }
+  }
+
+  return { protectedColonyIds, protectedHexes, settlementOwnersByHex, unitOwnersByHex };
+}
+
 /**
  * Simple seeded PRNG (mulberry32). Used for deterministic combat results.
  * Pass seed=undefined for non-deterministic (Math.random) behavior.
@@ -1985,6 +2035,7 @@ export function resolveCombat(
   activeAgreements?: Agreement[],
   settlements?: Settlement[],
   colonies?: Colony[],
+  protectedColonyIds?: Set<string>,
 ): CombatResult {
   const rng = createRng(seed);
   const events: TickEvent[] = [];
@@ -2092,7 +2143,9 @@ export function resolveCombat(
 
       // Find enemy units (from different colony AND not NAP-protected)
       const enemies = unitsOnHex.filter(u =>
-        u.colonyId !== attacker.colonyId && !hasNap(attacker.colonyId, u.colonyId)
+        u.colonyId !== attacker.colonyId
+        && !hasNap(attacker.colonyId, u.colonyId)
+        && !(protectedColonyIds?.has(attacker.colonyId) || protectedColonyIds?.has(u.colonyId))
       );
       if (enemies.length === 0) continue;
 
@@ -2143,6 +2196,8 @@ export function resolveCombat(
         damage: roundedDamage,
       });
     }
+
+    if (combatLog.length === 0) continue;
 
     // Apply damage simultaneously
     const casualties: Array<{
@@ -3627,6 +3682,31 @@ export function resolveTick(
     buildQueue: (s.buildQueue ?? []).map(bq => ({ ...bq })),
   }));
 
+  // --- Newcomer protection: protected colonies cannot initiate attacks ---
+  if (currentTick !== undefined) {
+    const colonyById = new Map(updatedColonies.map(colony => [colony.id, colony]));
+    const allowedActions: QueuedAction[] = [];
+    for (const action of actions) {
+      if (action.type !== 'attack') {
+        allowedActions.push(action);
+        continue;
+      }
+
+      const actingColony = colonyById.get(action.colonyId);
+      if (actingColony && isColonyProtected(actingColony, currentTick)) {
+        actionResults.push({
+          actionId: action.id,
+          status: 'failed',
+          result: `Colony ${actingColony.name} is under newcomer protection until tick ${actingColony.newcomerProtectionUntilTick}`,
+        });
+        continue;
+      }
+
+      allowedActions.push(action);
+    }
+    actions = allowedActions;
+  }
+
   // --- Phase -1: Resolve found_settlement actions (before movement) ---
   const foundActions = actions.filter(a => a.type === 'found_settlement');
   if (foundActions.length > 0) {
@@ -3677,6 +3757,51 @@ export function resolveTick(
     const moveResult = resolveMovement(updatedUnits, nonFoundActions, hexLookup);
     events.push(...moveResult.events);
     actionResults.push(...moveResult.actionResults);
+  }
+
+  // --- Newcomer protection: block illegal movement into protected or hostile occupied hexes ---
+  if (currentTick !== undefined) {
+    const { protectedHexes, settlementOwnersByHex, unitOwnersByHex } = buildProtectedHexMaps(
+      updatedColonies,
+      updatedSettlements,
+      updatedUnits,
+      currentTick,
+    );
+    const colonyById = new Map(updatedColonies.map(colony => [colony.id, colony]));
+
+    for (const unit of updatedUnits) {
+      const before = unitPositionsBefore.get(unit.id);
+      if (!before) continue;
+      if (before.x === unit.hexX && before.y === unit.hexY) continue;
+
+      const destinationKey = hexKey(unit.hexX, unit.hexY);
+      const destinationProtectedOwners = protectedHexes.get(destinationKey) ?? new Set<string>();
+      const destinationUnitOwners = unitOwnersByHex.get(destinationKey) ?? new Set<string>();
+      const destinationSettlementOwner = settlementOwnersByHex.get(destinationKey);
+      const actingColony = colonyById.get(unit.colonyId);
+      const actingProtected = actingColony ? isColonyProtected(actingColony, currentTick) : false;
+
+      const enteringProtectedEnemyHex = [...destinationProtectedOwners].some(owner => owner !== unit.colonyId);
+      const enteringEnemyOccupiedHex = [...destinationUnitOwners].some(owner => owner !== unit.colonyId)
+        || (destinationSettlementOwner !== undefined && destinationSettlementOwner !== unit.colonyId);
+
+      if (!enteringProtectedEnemyHex && !(actingProtected && enteringEnemyOccupiedHex)) continue;
+
+      unit.hexX = before.x;
+      unit.hexY = before.y;
+      unit.movementQueue = [];
+
+      events.push({
+        type: 'movement_blocked',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: {
+          hexX: before.x,
+          hexY: before.y,
+          reason: enteringProtectedEnemyHex ? 'newcomer_protection' : 'protected_colony_cannot_enter_enemy_territory',
+        },
+      });
+    }
   }
 
   // --- Phase 0.1: Auto-explore idle scouts ---
@@ -3744,7 +3869,18 @@ export function resolveTick(
       }
     }
 
-    const combatResult = resolveCombat(updatedUnits, actions, combatSeed, agreements, updatedSettlements, updatedColonies);
+    const protectedColonyIds = new Set(
+      updatedColonies.filter(colony => isColonyProtected(colony, currentTick)).map(colony => colony.id),
+    );
+    const combatResult = resolveCombat(
+      updatedUnits,
+      actions,
+      combatSeed,
+      agreements,
+      updatedSettlements,
+      updatedColonies,
+      protectedColonyIds,
+    );
     if (combatResult.destroyedUnitIds.length > 0 || combatResult.events.length > 0) {
       updatedUnits = combatResult.units.map(u => ({
         ...u,

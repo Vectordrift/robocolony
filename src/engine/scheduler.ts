@@ -291,6 +291,7 @@ export class TickScheduler {
           researchedTechs: ((c as any).researchedTechs ?? []) as string[],
           researchQueue: ((c as any).researchQueue ?? []) as ResearchQueueEntry[],
           lastActionTick: (c as any).lastActionTick ?? 0,
+          newcomerProtectionUntilTick: (c as any).newcomerProtectionUntilTick ?? 0,
         };
         return col as Colony;
       });
@@ -389,6 +390,7 @@ export class TickScheduler {
               ...((colony as any).researchedTechs !== undefined ? { researchedTechs: (colony as any).researchedTechs } : {}),
               ...((colony as any).researchQueue !== undefined ? { researchQueue: (colony as any).researchQueue } : {}),
               ...(colony.lastActionTick !== undefined ? { lastActionTick: colony.lastActionTick } : {}),
+              ...(colony.newcomerProtectionUntilTick !== undefined ? { newcomerProtectionUntilTick: colony.newcomerProtectionUntilTick } : {}),
               ...(colony.diedAtTick !== undefined ? { diedAtTick: colony.diedAtTick } : {}),
               ...(colony.deathReason !== undefined ? { deathReason: colony.deathReason } : {}),
             } as any)

@@ -52,6 +52,7 @@ import {
   STOCKPILE_DECAY_RATE,
   HEALING_PER_TICK,
   BARRACKS_HEALING_BONUS,
+  NEWCOMER_PROTECTION_TICKS,
   IDLE_WARNING_TICKS,
   DEMOLISH_REFUND_RATE,
   DECAY_CHANCE_PER_BUILDING,
@@ -1319,6 +1320,64 @@ describe('resolveTick', () => {
 
     // Original colony should not be mutated
     expect(colony.resources.food).toBe(originalFood);
+  });
+
+  it('prevents a protected colony from attacking other colonies', () => {
+    const protectedColony = makeColony({ id: 'c1', newcomerProtectionUntilTick: NEWCOMER_PROTECTION_TICKS });
+    const enemyColony = makeColony({ id: 'c2' });
+    const protectedUnit = makeUnit({ id: 'u1', colonyId: 'c1', type: 'soldier' });
+    const enemyUnit = makeUnit({ id: 'u2', colonyId: 'c2', type: 'soldier', hexX: 1, hexY: 0 });
+    const hexes = makePlainLine(2);
+
+    const result = resolveTick(
+      [protectedColony, enemyColony],
+      [],
+      [protectedUnit, enemyUnit],
+      hexes,
+      [{ id: 'a1', colonyId: 'c1', type: 'attack', params: { unitId: 'u1', targetX: 1, targetY: 0 } }],
+      42,
+      'world-1',
+      1,
+    );
+
+    expect(result.actionResults.find(r => r.actionId === 'a1')?.status).toBe('failed');
+    expect(result.units.find(u => u.id === 'u1')?.hexX).toBe(0);
+    expect(result.events.some(e => e.type === 'combat_resolved')).toBe(false);
+  });
+
+  it('blocks enemy movement into a protected colony settlement hex', () => {
+    const protectedColony = makeColony({ id: 'c1', newcomerProtectionUntilTick: NEWCOMER_PROTECTION_TICKS });
+    const enemyColony = makeColony({ id: 'c2' });
+    const protectedSettlement = makeSettlement({ id: 's1', colonyId: 'c1', hexX: 1, hexY: 0, population: 0 });
+    const enemyUnit = makeUnit({ id: 'u2', colonyId: 'c2', type: 'soldier', hexX: 0, hexY: 0 });
+    const hexes = makePlainLine(2);
+
+    const result = resolveTick(
+      [protectedColony, enemyColony],
+      [protectedSettlement],
+      [enemyUnit],
+      hexes,
+      [{ id: 'a1', colonyId: 'c2', type: 'move_unit', params: { unitId: 'u2', targetX: 1, targetY: 0 } }],
+      42,
+      'world-1',
+      1,
+    );
+
+    expect(result.units.find(u => u.id === 'u2')?.hexX).toBe(0);
+    expect(result.events.some(e => e.type === 'movement_blocked' && e.unitId === 'u2')).toBe(true);
+  });
+
+  it('suppresses combat involving protected colonies', () => {
+    const protectedUnits = [
+      makeUnit({ id: 'u1', colonyId: 'c1', type: 'soldier' }),
+      makeUnit({ id: 'u2', colonyId: 'c2', type: 'soldier' }),
+    ];
+
+    const result = resolveCombat(protectedUnits, [], 42, undefined, undefined, undefined, new Set(['c1']));
+
+    expect(result.destroyedUnitIds).toHaveLength(0);
+    expect(result.events.some(e => e.type === 'combat_resolved')).toBe(false);
+    expect(result.units.every(u => u.health === 100)).toBe(true);
   });
 
   // --- Movement integration in resolveTick ---
@@ -3269,8 +3328,8 @@ describe('resolveCombat', () => {
     // Both survive — neither can deal damage
     expect(result.units).toHaveLength(2);
     expect(result.destroyedUnitIds).toHaveLength(0);
-    // With no winner, both sides take the loser-side penalty in addition to base loss.
-    expect(result.units[0].morale).toBe(1.0 - COMBAT_MORALE_LOSS - COMBAT_MORALE_LOSE);
+    // No attacks means combat resolution is skipped entirely, so morale is unchanged.
+    expect(result.units[0].morale).toBe(1.0);
   });
 
   it('should reduce morale for surviving units (winner vs loser)', () => {

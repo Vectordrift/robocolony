@@ -295,6 +295,7 @@ export async function stateRoutes(app: FastifyInstance) {
         status: colonyData[0]?.status ?? 'active',
         resources: colonyData[0]?.resources ?? {},
         legacyScore: colonyData[0]?.legacyScore ?? 0,
+        newcomerProtectionUntilTick: (colonyData[0] as any)?.newcomerProtectionUntilTick ?? 0,
         ...((colonyData[0] as any)?.diedAtTick ? {
           diedAtTick: (colonyData[0] as any).diedAtTick,
           deathReason: (colonyData[0] as any).deathReason,

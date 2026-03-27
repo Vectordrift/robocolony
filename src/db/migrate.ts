@@ -48,6 +48,7 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   { table: 'colonies', column: 'research_queue', type: 'JSONB', defaultValue: "'[]'", nullable: true },
   { table: 'colonies', column: 'status', type: 'TEXT', defaultValue: "'active'" },
   { table: 'colonies', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
+  { table: 'colonies', column: 'newcomer_protection_until_tick', type: 'INTEGER', defaultValue: '0' },
 
   // units
   { table: 'units', column: 'id', type: 'TEXT' },
