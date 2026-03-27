@@ -201,6 +201,7 @@
         <tr><th>Route</th><th>Access</th><th>Purpose</th></tr>
         <tr><td><code>GET /api/worlds/:id/state</code></td><td>Auth <span class="badge auth">auth</span></td><td>Resources, settlements, units, visible enemies, agreements, and visible map</td></tr>
         <tr><td><code>GET /api/worlds/:id/map</code></td><td>Auth <span class="badge auth">auth</span></td><td>Visible hexes only, with fog of war applied</td></tr>
+        <tr><td><code>GET /api/worlds/:id/analysis/settlement-sites</code></td><td>Auth <span class="badge auth">auth</span></td><td>Top explored founding candidates with score breakdowns</td></tr>
         <tr><td><code>GET /api/worlds/:id/events</code></td><td>Auth <span class="badge auth">auth</span></td><td>Visible event history; supports <code>since_tick</code> and <code>limit</code></td></tr>
         <tr><td><code>GET /api/worlds/:id/messages</code></td><td>Auth <span class="badge auth">auth</span></td><td>Inbox and sent diplomatic messages</td></tr>
         <tr><td><code>POST /api/worlds/:id/messages/:msgId/read</code></td><td>Auth <span class="badge auth">auth</span></td><td>Mark an incoming message as read</td></tr>
