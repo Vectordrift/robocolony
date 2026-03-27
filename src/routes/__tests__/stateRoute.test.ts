@@ -1,0 +1,96 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import Fastify from 'fastify';
+
+vi.mock('../../middleware/index.js', () => ({
+  requireAuth: async (request: any) => {
+    request.colony = {
+      id: 'colony-1',
+      worldId: 'world-1',
+      name: 'Test Colony',
+    };
+  },
+}));
+
+vi.mock('../../db/index.js', () => ({
+  db: {
+    select: vi.fn(),
+  },
+}));
+
+import { db } from '../../db/index.js';
+import { stateRoutes } from '../state.js';
+
+class MockSelectChain<T> implements PromiseLike<T[]> {
+  constructor(private readonly rows: T[]) {}
+
+  from() { return this; }
+  where() { return this; }
+  limit(count: number) { return Promise.resolve(this.rows.slice(0, count)); }
+  then<TResult1 = T[], TResult2 = never>(
+    onfulfilled?: ((value: T[]) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2> {
+    return Promise.resolve(this.rows).then(onfulfilled, onrejected);
+  }
+}
+
+function mockDbSelectQueue(rowsQueue: unknown[][]) {
+  const mock = db.select as ReturnType<typeof vi.fn>;
+  mock.mockImplementation(() => {
+    const rows = rowsQueue.shift();
+    if (!rows) throw new Error('No mocked db.select response left in queue');
+    return new MockSelectChain(rows);
+  });
+}
+
+describe('State route intel', () => {
+  let app: ReturnType<typeof Fastify>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = Fastify({ logger: false });
+    await app.register(stateRoutes);
+  });
+
+  afterEach(async () => {
+    await app?.close();
+  });
+
+  it('filters destroyed enemy units out of intel.enemyUnits', async () => {
+    mockDbSelectQueue([
+      [{ currentTick: 99, status: 'running' }],
+      [{ id: 'colony-1', status: 'active', resources: { food: 100 }, legacyScore: 0, researchedTechs: [], researchQueue: [] }],
+      [],
+      [],
+      [],
+      [{ x: 5, y: 5, terrain: 'plains', resources: { food: 3 }, settlementId: null, poi: null }],
+      [{ mapRadius: 20 }],
+      [
+        { id: 'enemy-dead', colonyId: 'colony-2', type: 'soldier', hexX: 5, hexY: 5, health: 0 },
+        { id: 'enemy-live', colonyId: 'colony-2', type: 'soldier', hexX: 5, hexY: 5, health: 80 },
+      ],
+      [{ id: 'colony-2', name: 'Enemy Colony' }],
+      [],
+    ]);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/worlds/world-1/state',
+      headers: {
+        authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.intel.enemyUnits).toEqual([
+      {
+        id: 'enemy-live',
+        colonyId: 'colony-2',
+        type: 'soldier',
+        hex: { x: 5, y: 5 },
+        health: 80,
+      },
+    ]);
+  });
+});
