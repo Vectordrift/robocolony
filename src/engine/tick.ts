@@ -3078,6 +3078,7 @@ export function resolveAgreementActions(
   agreements: Agreement[],
   actions: QueuedAction[],
   currentTick: number,
+  worldId?: string,
 ): AgreementActionResult {
   const events: TickEvent[] = [];
   const actionResults: ActionResult[] = [];
@@ -3249,7 +3250,7 @@ export function resolveTick(
 
   // --- Agreement resolution (before other actions) ---
   {
-    const agreementResult = resolveAgreementActions(colonies, agreements || [], actions, currentTick || 0);
+    const agreementResult = resolveAgreementActions(colonies, agreements || [], actions, currentTick || 0, worldId);
     events.push(...agreementResult.events);
     actionResults.push(...agreementResult.actionResults);
     agreementMutations = agreementResult.mutations;
