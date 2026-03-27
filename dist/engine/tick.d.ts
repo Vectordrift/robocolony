@@ -551,7 +551,7 @@ export declare const PROPOSAL_EXPIRY_TICKS = 50;
 /**
  * Resolve propose/accept/reject/break agreement actions.
  */
-export declare function resolveAgreementActions(colonies: Colony[], agreements: Agreement[], actions: QueuedAction[], currentTick: number): AgreementActionResult;
+export declare function resolveAgreementActions(colonies: Colony[], agreements: Agreement[], actions: QueuedAction[], currentTick: number, worldId?: string): AgreementActionResult;
 /**
  * Transfer resources between colonies with active trade agreements.
  */

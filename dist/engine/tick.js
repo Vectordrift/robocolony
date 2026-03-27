@@ -2362,7 +2362,7 @@ export const PROPOSAL_EXPIRY_TICKS = 50;
 /**
  * Resolve propose/accept/reject/break agreement actions.
  */
-export function resolveAgreementActions(colonies, agreements, actions, currentTick) {
+export function resolveAgreementActions(colonies, agreements, actions, currentTick, worldId) {
     const events = [];
     const actionResults = [];
     const mutations = [];
@@ -2395,7 +2395,7 @@ export function resolveAgreementActions(colonies, agreements, actions, currentTi
             }
             const newAgreement = {
                 id: `agr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-                worldId: '',
+                worldId: worldId || '',
                 type: agreementType,
                 proposedBy: colony.id,
                 proposedTo: targetColonyId,
@@ -2541,7 +2541,7 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
     let agreementMutations = [];
     // --- Agreement resolution (before other actions) ---
     {
-        const agreementResult = resolveAgreementActions(colonies, agreements || [], actions, currentTick || 0);
+        const agreementResult = resolveAgreementActions(colonies, agreements || [], actions, currentTick || 0, worldId);
         events.push(...agreementResult.events);
         actionResults.push(...agreementResult.actionResults);
         agreementMutations = agreementResult.mutations;

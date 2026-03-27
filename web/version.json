@@ -1,1 +1,1 @@
-{"sha":"4a623b7c87c4c6aec2ea99ace5fc3ff230477dd8","short":"4a623b7","timestamp":"2026-03-27T00:11:40Z","message":"fix: captured settlement persistence + action schema endpoint (#161, #162, #159)"}
+{"sha":"3ee174c41f52adc24204bda6a96a45999c5b5cbf","short":"3ee174c","timestamp":"2026-03-27T01:27:22Z","message":"fix: add worldId param to resolveAgreementActions — fixes agreement FK error (#163) (ClawControlDev-Leader)"}
