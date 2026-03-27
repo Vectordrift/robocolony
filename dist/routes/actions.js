@@ -3,6 +3,8 @@
  *
  * POST /api/worlds/:id/actions — submit actions for next tick
  * GET  /api/worlds/:id/actions — list queued and recent resolved actions
+ * DELETE /api/worlds/:id/actions/:actionId — cancel a queued action
+ * DELETE /api/worlds/:id/actions — cancel all queued actions for next tick
  */
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
@@ -68,6 +70,21 @@ const VALID_AGREEMENT_TYPES = new Set([
 const MAX_ACTIONS_PER_TICK = 10;
 const MAX_SETTLEMENT_NAME_LENGTH = 40;
 const MAX_MESSAGE_LENGTH = 500;
+/** Number of ticks after which unprocessed queued actions are auto-expired */
+const STALE_ACTION_TICKS = 5;
+/**
+ * Expire stale queued actions: any action with status 'queued' whose tick
+ * is <= currentTick (i.e. the tick has already been processed) gets marked
+ * as 'failed' with an expiry reason.
+ */
+async function expireStaleActions(worldId, currentTick) {
+    const result = await db
+        .update(actions)
+        .set({ status: 'failed', result: 'Auto-expired: action was queued for a tick that has already passed' })
+        .where(and(eq(actions.worldId, worldId), eq(actions.status, 'queued'), sql `${actions.tick} <= ${currentTick}`));
+    // drizzle update returns the rows affected (driver-dependent)
+    return result?.rowCount ?? result?.changes ?? 0;
+}
 /** Truncate user-supplied IDs in error messages to prevent log bloat */
 function truncId(id, maxLen = 50) {
     if (id.length <= maxLen)
@@ -356,6 +373,8 @@ export async function actionRoutes(app) {
         const currentTick = world[0].currentTick;
         const nextTick = currentTick + 1;
         const mapRadius = world[0].mapRadius;
+        // Auto-expire stale queued actions from previous ticks
+        await expireStaleActions(worldId, currentTick);
         // Validate all actions first (before rate limit — invalid actions should not consume slots)
         const validationErrors = [];
         for (let i = 0; i < body.actions.length; i++) {
@@ -446,7 +465,10 @@ export async function actionRoutes(app) {
             return reply.code(404).send({ error: 'not_found', message: 'World not found' });
         }
         const currentTick = world[0].currentTick;
-        // Get queued actions (next tick)
+        const nextTick = currentTick + 1;
+        // Auto-expire stale queued actions from previous ticks
+        await expireStaleActions(worldId, currentTick);
+        // Get queued actions (next tick only — stale ones have been expired above)
         const queued = await db
             .select({
             id: actions.id,
@@ -458,7 +480,7 @@ export async function actionRoutes(app) {
             createdAt: actions.createdAt,
         })
             .from(actions)
-            .where(and(eq(actions.worldId, worldId), eq(actions.colonyId, colony.id), eq(actions.status, 'queued')));
+            .where(and(eq(actions.worldId, worldId), eq(actions.colonyId, colony.id), eq(actions.tick, nextTick), eq(actions.status, 'queued')));
         // Get recent resolved/failed actions (last 5 ticks)
         const recent = await db
             .select({
@@ -506,6 +528,66 @@ export async function actionRoutes(app) {
             return reply.code(404).send({ error: 'not_found', message: 'Action not found' });
         }
         return rows[0];
+    });
+    // Cancel a single queued action
+    app.delete('/api/worlds/:id/actions/:actionId', {
+        preHandler: requireAuth,
+    }, async (request, reply) => {
+        const colony = request.colony;
+        const { actionId } = request.params;
+        // Find the action
+        const rows = await db
+            .select({
+            id: actions.id,
+            status: actions.status,
+            colonyId: actions.colonyId,
+        })
+            .from(actions)
+            .where(and(eq(actions.id, actionId), eq(actions.worldId, colony.worldId)))
+            .limit(1);
+        if (rows.length === 0) {
+            return reply.code(404).send({ error: 'not_found', message: 'Action not found' });
+        }
+        if (rows[0].colonyId !== colony.id) {
+            return reply.code(403).send({ error: 'forbidden', message: 'Action does not belong to your colony' });
+        }
+        if (rows[0].status !== 'queued') {
+            return reply.code(409).send({
+                error: 'conflict',
+                message: `Cannot cancel action with status '${rows[0].status}' — only queued actions can be cancelled`,
+            });
+        }
+        await db
+            .update(actions)
+            .set({ status: 'failed', result: 'Cancelled by player' })
+            .where(eq(actions.id, actionId));
+        return { cancelled: true, actionId };
+    });
+    // Cancel all queued actions for next tick
+    app.delete('/api/worlds/:id/actions', {
+        preHandler: requireAuth,
+    }, async (request, reply) => {
+        const colony = request.colony;
+        const worldId = colony.worldId;
+        // Get world for current tick
+        const world = await db
+            .select({ currentTick: worlds.currentTick })
+            .from(worlds)
+            .where(eq(worlds.id, worldId))
+            .limit(1);
+        if (world.length === 0) {
+            return reply.code(404).send({ error: 'not_found', message: 'World not found' });
+        }
+        const currentTick = world[0].currentTick;
+        // First expire any stale actions
+        await expireStaleActions(worldId, currentTick);
+        // Cancel all queued actions for this colony (any future tick)
+        const result = await db
+            .update(actions)
+            .set({ status: 'failed', result: 'Cancelled by player (bulk cancel)' })
+            .where(and(eq(actions.worldId, worldId), eq(actions.colonyId, colony.id), eq(actions.status, 'queued')));
+        const cancelledCount = result?.rowCount ?? result?.changes ?? 0;
+        return { cancelled: true, count: cancelledCount };
     });
 }
 //# sourceMappingURL=actions.js.map

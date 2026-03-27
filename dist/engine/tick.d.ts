@@ -558,3 +558,4 @@ export declare function resolveAgreementActions(colonies: Colony[], agreements: 
 export declare function resolveTradeTransfers(colonies: Colony[], agreements: Agreement[]): TradeTransferResult;
 export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number, agreements?: Agreement[]): TickResult;
 export {};
+//# sourceMappingURL=tick.d.ts.map
