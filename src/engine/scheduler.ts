@@ -120,6 +120,21 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
   }
 }
 
+function eventDedupKey(event: { type: string; data: Record<string, unknown> }): string | null {
+  switch (event.type) {
+    case 'combat_resolved':
+      return JSON.stringify({
+        type: event.type,
+        hexX: event.data.hexX,
+        hexY: event.data.hexY,
+        casualties: event.data.casualties,
+        winnerColony: event.data.winnerColony,
+      });
+    default:
+      return null;
+  }
+}
+
 export interface SchedulerOptions {
   worldId: string;
   db: PostgresJsDatabase<typeof schema>;
@@ -711,20 +726,51 @@ export class TickScheduler {
           }
         }
 
-        // Insert events
+        // Insert events, collapsing duplicated public combat events emitted once per involved colony.
+        const persistedEvents = new Map<string, {
+          type: string;
+          public: boolean;
+          visibility: string[];
+          data: Record<string, unknown>;
+          publicData?: Record<string, unknown>;
+        }>();
+
         for (const event of result.events) {
           const isPublic = PUBLIC_EVENT_TYPES.has(event.type);
           const publicData = isPublic ? buildPublicData(event) : null;
+          const dedupKey = isPublic ? eventDedupKey(event) : null;
 
-          await tx.insert(schema.events).values({
-            id: nanoid(),
-            worldId: this.worldId,
-            tick: newTick,
+          if (dedupKey) {
+            const existing = persistedEvents.get(dedupKey);
+            if (existing) {
+              if (event.colonyId && !existing.visibility.includes(event.colonyId)) {
+                existing.visibility.push(event.colonyId);
+              }
+              continue;
+            }
+          }
+
+          const persistedEvent = {
             type: event.type,
             public: isPublic,
             visibility: event.colonyId ? [event.colonyId] : [],
             data: event.data,
             ...(publicData ? { publicData } : {}),
+          };
+
+          persistedEvents.set(dedupKey ?? nanoid(), persistedEvent);
+        }
+
+        for (const event of persistedEvents.values()) {
+          await tx.insert(schema.events).values({
+            id: nanoid(),
+            worldId: this.worldId,
+            tick: newTick,
+            type: event.type,
+            public: event.public,
+            visibility: event.visibility,
+            data: event.data,
+            ...(event.publicData ? { publicData: event.publicData } : {}),
           });
         }
       });
@@ -740,7 +786,6 @@ export class TickScheduler {
     }
   }
 }
-
 
 
 
