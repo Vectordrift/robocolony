@@ -19,6 +19,7 @@ import { hexDistance } from '../engine/hex.js';
 import { generateApiKey, hashApiKey } from '../lib/auth.js';
 import { requireAuth } from '../middleware/index.js';
 import { clearJoinRateLimit } from '../lib/ratelimit.js';
+import { NEWCOMER_PROTECTION_TICKS } from '../engine/tick.js';
 // --- Input Sanitization ---
 
 /** Only allow alphanumeric, spaces, hyphens, underscores, apostrophes */
@@ -271,6 +272,7 @@ export async function worldRoutes(app: FastifyInstance) {
       resources: DEFAULT_RESOURCES,
       legacyScore: 0,
       status: 'active',
+      newcomerProtectionUntilTick: w.currentTick + NEWCOMER_PROTECTION_TICKS,
     });
 
     // Create starting settlement
@@ -362,6 +364,7 @@ export async function worldRoutes(app: FastifyInstance) {
       name: colonyName,
       apiKey,
       worldId,
+      newcomerProtectionUntilTick: w.currentTick + NEWCOMER_PROTECTION_TICKS,
       startingPosition: { x: startingHex.q, y: startingHex.r },
       settlement: {
         id: settlementId,
