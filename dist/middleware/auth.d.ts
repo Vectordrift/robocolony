@@ -11,13 +11,6 @@ declare module 'fastify' {
     }
 }
 /**
- * Authenticate a request by verifying the API key against stored hashes.
- * Attaches the colony to the request object on success.
- * Also validates that the world ID in the URL (if present) matches
- * the colony's actual world — prevents cross-world confusion.
- */
-declare function authenticateRequest(request: FastifyRequest, reply: FastifyReply): Promise<void>;
-/**
  * Register the auth middleware as a Fastify plugin.
  * Adds an `authenticate` decorator that can be used as a preHandler.
  */
@@ -25,6 +18,10 @@ export declare function authPlugin(app: FastifyInstance): Promise<void>;
 /**
  * Standalone auth preHandler for use in route definitions.
  */
-export declare const requireAuth: typeof authenticateRequest;
-export {};
+export declare const requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+/**
+ * Auth preHandler variant for historical read-only routes.
+ * Accepts eliminated/dead colonies so they can access epitaph-style feedback.
+ */
+export declare const requireAuthAllowInactive: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
 //# sourceMappingURL=auth.d.ts.map
