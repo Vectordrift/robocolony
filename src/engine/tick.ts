@@ -1,5 +1,5 @@
 import type { HexCoord } from './hex.js';
-import { hexNeighbors, hexDistance } from './hex.js';
+import { hexNeighbors, hexDistance, hexRing } from './hex.js';
 import type { HexResources } from './mapgen.js';
 import { findPath, movementStepsThisTick, createHexLookup } from './pathfinding.js';
 import type { HexLookup } from './pathfinding.js';
@@ -118,6 +118,40 @@ export interface MessageRecord {
   deliveredAtTick: number;
   content: string;
   read: boolean;
+}
+
+function coordKey(coord: HexCoord): string {
+  return `${coord.q},${coord.r}`;
+}
+
+function chooseScoutDestination(
+  from: HexCoord,
+  desired: HexCoord,
+  hexLookup: HexLookup,
+  reservedTargets: Set<string>,
+): HexCoord {
+  if (!reservedTargets.has(coordKey(desired))) {
+    return desired;
+  }
+
+  for (let radius = 1; radius <= 3; radius++) {
+    const candidates = hexRing(desired, radius)
+      .sort((a, b) => {
+        const distanceDiff = hexDistance(from, a) - hexDistance(from, b);
+        if (distanceDiff !== 0) return distanceDiff;
+        if (a.q !== b.q) return a.q - b.q;
+        return a.r - b.r;
+      });
+
+    for (const candidate of candidates) {
+      const candidateKey = coordKey(candidate);
+      if (reservedTargets.has(candidateKey)) continue;
+      if (!findPath(from, candidate, hexLookup)) continue;
+      return candidate;
+    }
+  }
+
+  return desired;
 }
 
 
@@ -1888,6 +1922,7 @@ export function resolveMovement(
 ): { units: Unit[]; events: TickEvent[]; actionResults: ActionResult[] } {
   const events: TickEvent[] = [];
   const actionResults: ActionResult[] = [];
+  const reservedScoutTargetsByColony = new Map<string, Set<string>>();
 
   // Build unit lookup for ownership/existence checks
   const unitMap = new Map<string, Unit>();
@@ -1926,7 +1961,15 @@ export function resolveMovement(
     }
 
     const from: HexCoord = { q: unit.hexX, r: unit.hexY };
-    const to: HexCoord = { q: targetX, r: targetY };
+    const desired: HexCoord = { q: targetX, r: targetY };
+    let to: HexCoord = desired;
+
+    if (action.type === 'move_unit' && unit.type === 'scout') {
+      const reservedTargets = reservedScoutTargetsByColony.get(unit.colonyId) ?? new Set<string>();
+      reservedScoutTargetsByColony.set(unit.colonyId, reservedTargets);
+      to = chooseScoutDestination(from, desired, hexLookup, reservedTargets);
+      reservedTargets.add(coordKey(to));
+    }
 
     // Cancel movement: move to current position clears queue
     if (from.q === to.q && from.r === to.r) {
@@ -1969,10 +2012,13 @@ export function resolveMovement(
 
     // Set (or replace) movement queue
     unit.movementQueue = path;
+    const redirected = to.q !== desired.q || to.r !== desired.r;
     actionResults.push({
       actionId: action.id,
       status: 'resolved',
-      result: `Path computed: ${path.length} steps`,
+      result: redirected
+        ? `Path computed: ${path.length} steps (destination adjusted to ${to.q},${to.r} to avoid scout overlap)`
+        : `Path computed: ${path.length} steps`,
     });
     events.push({
       type: 'movement_queued',
