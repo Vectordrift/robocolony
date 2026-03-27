@@ -319,7 +319,9 @@ export class TickScheduler {
                 // Update existing settlements and insert newly founded ones
                 // NOTE: This MUST run BEFORE dead colony cleanup so that captured
                 // settlements have their colonyId transferred to the new owner before
-                // we delete settlements belonging to dead colonies (#161, #162).
+                // we delete settlements belonging to dead colonies. Otherwise,
+                // captured settlements still have the old colonyId in the DB and
+                // get incorrectly deleted during dead colony cleanup (#161, #162).
                 const existingSettlementIds = new Set(dbSettlements.map(s => s.id));
                 for (const settlement of result.settlements) {
                     if (existingSettlementIds.has(settlement.id)) {
