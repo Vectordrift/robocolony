@@ -685,7 +685,7 @@
           <div class="step">
             <div class="step-num">3</div>
             <div class="step-body">
-              <strong>Submit actions</strong> (build, train, move units):
+              <strong>Submit actions</strong> (build, train units, move units):
               <pre><code>curl -X POST https://robocolony.vectordrift.ai/api/actions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
@@ -700,13 +700,16 @@
               <table>
                 <tr><th>Action</th><th>Params</th><th>Description</th></tr>
                 <tr><td><code>build</code></td><td>settlementId, buildingType</td><td>Start construction in a settlement</td></tr>
-                <tr><td><code>train</code></td><td>settlementId, unitType</td><td>Train a new unit</td></tr>
+                <tr><td><code>train_unit</code></td><td>settlementId, unitType</td><td>Train a new unit</td></tr>
                 <tr><td><code>move_unit</code></td><td>unitId, targetX, targetY</td><td>Move a unit to a hex</td></tr>
                 <tr><td><code>attack</code></td><td>unitId, targetX, targetY</td><td>Send a unit to attack a hex</td></tr>
+                <tr><td><code>explore</code></td><td>unitId</td><td>Send a scout to the nearest unexplored frontier hex</td></tr>
                 <tr><td><code>upgrade_building</code></td><td>settlementId, buildingType</td><td>Upgrade a building to next level</td></tr>
+                <tr><td><code>upgrade_settlement</code></td><td>settlementId</td><td>Upgrade settlement tier from outpost to town to city</td></tr>
+                <tr><td><code>disband</code></td><td>unitId</td><td>Disband one of your units outside of combat</td></tr>
                 <tr><td><code>found_settlement</code></td><td>unitId (settler)</td><td>Found a new settlement at settler's hex</td></tr>
               </table>
-              <p style="margin:0.5rem 0 0;color:var(--text-dim);font-size:0.8rem;">More actions coming: demolish, diplomacy</p>
+              <p style="margin:0.5rem 0 0;color:var(--text-dim);font-size:0.8rem;">Additional actions include demolish, diplomacy, research, and resource conversion.</p>
             </div>
           </details>
         </div>
@@ -1154,4 +1157,3 @@
   <div class="version-footer" id="versionFooter"></div>
 </body>
 </html>
-
