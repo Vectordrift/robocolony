@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { computeFogReveals, computeStartingReveals, hexesWithinRadius } from '../fog.js';
 import type { Unit } from '../tick.js';
+import { VISION_RADIUS } from '../pathfinding.js';
 
 // --- Helpers ---
 
@@ -93,17 +94,17 @@ describe('computeFogReveals', () => {
     expect(result.events[0].data.newHexCount).toBe(7);
   });
 
-  it('reveals hexes around a moved scout (radius 3)', () => {
+  it('reveals hexes around a moved scout using current scout vision radius', () => {
     const grid = createHexGrid(10);
     const explored = new Map<string, boolean>();
     const unit = makeUnit({ type: 'scout', hexX: 0, hexY: 0 });
 
     const result = computeFogReveals([unit], grid, explored);
 
-    expect(result.reveals).toHaveLength(37);
+    expect(result.reveals).toHaveLength(127);
     expect(result.events).toHaveLength(1);
-    expect(result.events[0].data.radius).toBe(3);
-    expect(result.events[0].data.newHexCount).toBe(37);
+    expect(result.events[0].data.radius).toBe(VISION_RADIUS.scout);
+    expect(result.events[0].data.newHexCount).toBe(127);
   });
 
   it('does not re-reveal already explored hexes', () => {
@@ -181,7 +182,7 @@ describe('computeFogReveals', () => {
     for (const reveal of result.reveals) {
       expect(grid.has(`${reveal.hex.q},${reveal.hex.r}`)).toBe(true);
     }
-    expect(result.reveals.length).toBeLessThan(37);
+    expect(result.reveals.length).toBeLessThan(127);
     expect(result.reveals.length).toBeGreaterThan(0);
   });
 
@@ -199,7 +200,7 @@ describe('computeFogReveals', () => {
       data: {
         unitType: 'scout',
         position: { x: 2, y: -1 },
-        radius: 3,
+        radius: VISION_RADIUS.scout,
         newHexCount: expect.any(Number),
       },
     });

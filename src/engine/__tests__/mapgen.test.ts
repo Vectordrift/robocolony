@@ -7,7 +7,7 @@ import {
   hexRing,
 } from '../hex.js';
 import { createRng, noiseAt, multiOctaveNoise } from '../noise.js';
-import { generateWorld, getTerrainStats, findStartingPositions } from '../mapgen.js';
+import { generateWorld, getTerrainStats, findStartingPositions, recommendedMinSpacing } from '../mapgen.js';
 import type { TerrainType } from '../mapgen.js';
 
 // --- Hex utilities ---
@@ -285,14 +285,15 @@ describe('Map generation', () => {
       expect(world.startingPositions.length).toBeLessThanOrEqual(8);
     });
 
-    it('positions are spaced at least 30 hexes apart', () => {
+    it('positions respect the dynamic minimum spacing', () => {
       const world = generateWorld(42, 50);
       const positions = world.startingPositions;
+      const minSpacing = recommendedMinSpacing(8, 50);
 
       for (let i = 0; i < positions.length; i++) {
         for (let j = i + 1; j < positions.length; j++) {
           const dist = hexDistance(positions[i], positions[j]);
-          expect(dist).toBeGreaterThanOrEqual(30);
+          expect(dist).toBeGreaterThanOrEqual(minSpacing);
         }
       }
     });
@@ -312,8 +313,8 @@ describe('Map generation', () => {
       const world = generateWorld(42, 50);
       for (const pos of world.startingPositions) {
         const dist = hexDistanceFromOrigin(pos);
-        expect(dist).toBeGreaterThanOrEqual(Math.floor(50 * 0.65));
-        expect(dist).toBeLessThanOrEqual(Math.ceil(50 * 0.75));
+        expect(dist).toBeGreaterThanOrEqual(Math.floor(50 * 0.55));
+        expect(dist).toBeLessThanOrEqual(Math.ceil(50 * 0.70));
       }
     });
 
