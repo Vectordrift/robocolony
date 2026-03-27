@@ -22,8 +22,129 @@ interface FeedQueryParams {
   };
 }
 
+export interface SpectatorFeedEvent {
+  id: string;
+  tick: number;
+  type: string;
+  colonyId: string | null;
+  data: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface SpectatorRecap {
+  startTick: number | null;
+  endTick: number | null;
+  eventCount: number;
+  summary: string;
+  highlights: string[];
+}
+
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+
+function pluralize(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+export function buildSpectatorRecap(
+  events: SpectatorFeedEvent[],
+  colonyNames: Record<string, string>,
+): SpectatorRecap {
+  if (events.length === 0) {
+    return {
+      startTick: null,
+      endTick: null,
+      eventCount: 0,
+      summary: 'Quiet frontier. No public events were recorded in this window.',
+      highlights: ['No colony actions have surfaced on the public feed for this recap window yet.'],
+    };
+  }
+
+  const ticks = events.map((event) => event.tick);
+  const startTick = Math.min(...ticks);
+  const endTick = Math.max(...ticks);
+
+  const founded = events.filter((event) => event.type === 'settlement_founded');
+  const upgraded = events.filter((event) => event.type === 'settlement_upgraded');
+  const researched = events.filter((event) => event.type === 'research_complete');
+  const treaties = events.filter((event) => event.type === 'agreement_accepted' || event.type === 'agreement_broken');
+  const poiSurveys = events.filter((event) => event.type === 'poi_surveyed');
+  const combats = events.filter((event) => event.type === 'combat_resolved');
+
+  const summaryParts: string[] = [];
+  if (combats.length > 0) summaryParts.push(pluralize(combats.length, 'battle'));
+  if (founded.length > 0) summaryParts.push(pluralize(founded.length, 'settlement') + ' founded');
+  if (researched.length > 0) summaryParts.push(pluralize(researched.length, 'research milestone'));
+  if (treaties.length > 0) summaryParts.push(pluralize(treaties.length, 'treaty shift'));
+  if (poiSurveys.length > 0) summaryParts.push(pluralize(poiSurveys.length, 'frontier survey'));
+  if (summaryParts.length === 0) summaryParts.push(pluralize(events.length, 'public event'));
+
+  const highlights: string[] = [];
+
+  if (combats.length > 0) {
+    const hotspotByHex = new Map<string, { count: number; casualties: number; x: number; y: number }>();
+    for (const combat of combats) {
+      const x = Number(combat.data.hexX ?? 0);
+      const y = Number(combat.data.hexY ?? 0);
+      const key = `${x},${y}`;
+      const current = hotspotByHex.get(key) ?? { count: 0, casualties: 0, x, y };
+      current.count += 1;
+      current.casualties += Number(combat.data.casualties ?? 0);
+      hotspotByHex.set(key, current);
+    }
+    const topHotspot = [...hotspotByHex.values()].sort((a, b) => b.casualties - a.casualties || b.count - a.count)[0];
+    highlights.push(`Battles centered on (${topHotspot.x}, ${topHotspot.y}), with ${topHotspot.casualties} reported casualties across ${pluralize(topHotspot.count, 'engagement')}.`);
+  }
+
+  if (founded.length > 0) {
+    const foundedNames = founded
+      .map((event) => event.data.name)
+      .filter((name): name is string => typeof name === 'string')
+      .slice(0, 3);
+    const foundedText = foundedNames.length > 0
+      ? foundedNames.map((name) => `"${name}"`).join(', ')
+      : pluralize(founded.length, 'settlement');
+    highlights.push(`New footholds appeared on the map: ${foundedText}.`);
+  }
+
+  if (researched.length > 0) {
+    const latestResearch = researched[0];
+    const colonyName = latestResearch.colonyId ? (colonyNames[latestResearch.colonyId] ?? latestResearch.colonyId) : 'A colony';
+    const techName = typeof latestResearch.data.techName === 'string' ? latestResearch.data.techName : 'new technology';
+    highlights.push(`${colonyName} reached a new research milestone with ${techName}.`);
+  }
+
+  if (treaties.length > 0) {
+    const accepted = treaties.filter((event) => event.type === 'agreement_accepted').length;
+    const broken = treaties.filter((event) => event.type === 'agreement_broken').length;
+    const treatyParts: string[] = [];
+    if (accepted > 0) treatyParts.push(`${pluralize(accepted, 'agreement')} signed`);
+    if (broken > 0) treatyParts.push(`${pluralize(broken, 'agreement')} broken`);
+    highlights.push(`Diplomacy shifted as ${treatyParts.join(' and ')}.`);
+  }
+
+  if (poiSurveys.length > 0) {
+    const byType = new Map<string, number>();
+    for (const survey of poiSurveys) {
+      const poiType = typeof survey.data.poiType === 'string' ? survey.data.poiType : 'poi';
+      byType.set(poiType, (byType.get(poiType) ?? 0) + 1);
+    }
+    const topType = [...byType.entries()].sort((a, b) => b[1] - a[1])[0];
+    highlights.push(`Scouts turned exploration into stories, surveying ${pluralize(topType[1], topType[0].replace(/_/g, ' '))}.`);
+  }
+
+  if (upgraded.length > 0 && highlights.length < 4) {
+    highlights.push(`${pluralize(upgraded.length, 'settlement upgrade')} pushed the frontier toward more durable holdings.`);
+  }
+
+  return {
+    startTick,
+    endTick,
+    eventCount: events.length,
+    summary: `Ticks ${startTick}-${endTick}: ${summaryParts.join(', ')}.`,
+    highlights: highlights.slice(0, 4),
+  };
+}
 
 // --- Routes ---
 
@@ -159,6 +280,74 @@ export async function feedRoutes(app: FastifyInstance) {
       },
       colonies: colonySummaries,
       events: feedEvents,
+    };
+  });
+
+  app.get<FeedQueryParams>('/api/worlds/:id/recap', async (request, reply) => {
+    const worldId = request.params.id;
+
+    const worldRows = await db
+      .select()
+      .from(worlds)
+      .where(eq(worlds.id, worldId))
+      .limit(1);
+
+    if (worldRows.length === 0) {
+      return reply.code(404).send({ error: 'not_found', message: 'World not found' });
+    }
+
+    const world = worldRows[0];
+    const sinceTick = request.query.since_tick ? parseInt(request.query.since_tick, 10) : undefined;
+    let limit = request.query.limit ? parseInt(request.query.limit, 10) : DEFAULT_LIMIT;
+    if (isNaN(limit) || limit < 1) limit = DEFAULT_LIMIT;
+    if (limit > MAX_LIMIT) limit = MAX_LIMIT;
+
+    const conditions = [
+      eq(events.worldId, worldId),
+      eq(events.public, true),
+    ];
+    if (sinceTick !== undefined && !isNaN(sinceTick)) {
+      conditions.push(gt(events.tick, sinceTick));
+    }
+
+    const eventRows = await db
+      .select({
+        id: events.id,
+        tick: events.tick,
+        type: events.type,
+        publicData: events.publicData,
+        visibility: events.visibility,
+        createdAt: events.createdAt,
+      })
+      .from(events)
+      .where(and(...conditions))
+      .orderBy(desc(events.tick))
+      .limit(limit);
+
+    const recapEvents: SpectatorFeedEvent[] = eventRows.map((row) => ({
+      id: row.id,
+      tick: row.tick,
+      type: row.type,
+      colonyId: (row.visibility as string[] | null)?.[0] ?? null,
+      data: (row.publicData ?? {}) as Record<string, unknown>,
+      ...(row.createdAt ? { createdAt: row.createdAt.toISOString() } : {}),
+    }));
+
+    const colonyRows = await db
+      .select({ id: colonies.id, name: colonies.name })
+      .from(colonies)
+      .where(eq(colonies.worldId, worldId));
+
+    const colonyNames = Object.fromEntries(colonyRows.map((colony) => [colony.id, colony.name]));
+
+    return {
+      world: {
+        id: world.id,
+        name: world.name,
+        status: world.status,
+        currentTick: world.currentTick,
+      },
+      recap: buildSpectatorRecap(recapEvents, colonyNames),
     };
   });
 

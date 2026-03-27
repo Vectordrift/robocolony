@@ -253,6 +253,38 @@
       flex: 1;
     }
 
+    .recap-panel {
+      margin-bottom: 1rem;
+      padding: 1rem 1.2rem;
+      border: 1px solid rgba(143,179,118,0.22);
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(91,127,86,0.12), rgba(10,18,12,0.9));
+    }
+
+    .recap-meta {
+      color: var(--text-dim);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 0.45rem;
+    }
+
+    .recap-summary {
+      color: var(--text);
+      margin: 0 0 0.8rem;
+      line-height: 1.5;
+      font-size: 0.95rem;
+    }
+
+    .recap-highlights {
+      margin: 0;
+      padding-left: 1.15rem;
+      color: var(--text-dim);
+      display: grid;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+    }
+
     .feed-header {
       display: flex;
       justify-content: space-between;
@@ -734,6 +766,15 @@
         <div id="leaderboard" class="loading">Loading</div>
       </section>
 
+      <section class="recap-panel">
+        <div class="section-title" style="border: none; margin: 0; padding: 0;">📰 Frontier Recap</div>
+        <div id="recapMeta" class="recap-meta loading">Loading recap</div>
+        <p id="recapSummary" class="recap-summary loading">Gathering the latest public chronicle…</p>
+        <ul id="recapHighlights" class="recap-highlights loading">
+          <li>Waiting for the latest world summary…</li>
+        </ul>
+      </section>
+
       <div class="feed">
       <div class="feed-header">
         <div class="section-title" style="border: none; margin: 0; padding: 0;">📡 Live Feed</div>
@@ -894,6 +935,34 @@
             <div class="event-text">${colonyTag}${formatEvent(event)}</div>
           </li>`;
       }).join('');
+    }
+
+    function renderRecap(recap) {
+      const meta = document.getElementById('recapMeta');
+      const summary = document.getElementById('recapSummary');
+      const highlights = document.getElementById('recapHighlights');
+
+      meta.classList.remove('loading');
+      summary.classList.remove('loading');
+      highlights.classList.remove('loading');
+
+      if (!recap) {
+        meta.textContent = 'No recap available';
+        summary.textContent = 'The frontier recap is unavailable right now.';
+        highlights.innerHTML = '<li>Try refreshing once more public events are available.</li>';
+        return;
+      }
+
+      meta.textContent = recap.startTick == null
+        ? 'No public activity in this window'
+        : `Ticks ${recap.startTick}-${recap.endTick} · ${recap.eventCount} public events`;
+      summary.textContent = recap.summary || 'No recap generated.';
+
+      const items = recap.highlights && recap.highlights.length > 0
+        ? recap.highlights
+        : ['No major public highlights were detected in this recap window.'];
+
+      highlights.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
     }
 
     // --- Leaderboard rendering ---
@@ -1078,11 +1147,17 @@
     // --- Fetch and update ---
     async function fetchFeed() {
       try {
-        const res = await fetch(`${API_BASE}/api/worlds/${WORLD_ID}/feed?limit=100`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const raw = await res.json();
+        const [feedRes, recapRes] = await Promise.all([
+          fetch(`${API_BASE}/api/worlds/${WORLD_ID}/feed?limit=100`),
+          fetch(`${API_BASE}/api/worlds/${WORLD_ID}/recap?limit=60`),
+        ]);
+        if (!feedRes.ok) throw new Error(`HTTP ${feedRes.status}`);
+        if (!recapRes.ok) throw new Error(`HTTP ${recapRes.status}`);
+        const raw = await feedRes.json();
+        const recapRaw = await recapRes.json();
         // Unwrap auth-proxy envelope if present
         const data = raw.__untrusted ? raw.data : raw;
+        const recapData = recapRaw.__untrusted ? recapRaw.data : recapRaw;
 
         // Update status
         document.getElementById('statusDot').classList.remove('offline');
@@ -1113,6 +1188,7 @@
         // Update events — deduplicate consecutive identical ticks
         allEvents = deduplicateTicks(data.events);
         renderEvents();
+        renderRecap(recapData.recap);
 
         lastTick = data.world.currentTick;
       } catch (err) {
