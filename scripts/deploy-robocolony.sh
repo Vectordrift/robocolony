@@ -25,6 +25,8 @@ echo "Deploying app '$APP' with image-based rollout..."
 GIT_SHA="$(git rev-parse HEAD)"
 BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 "$FLYCTL_BIN" deploy --remote-only --depot=false -a "$APP" \
+  --ha=false \
+  --strategy immediate \
   --build-arg "VCS_REF=$GIT_SHA" \
   --build-arg "BUILD_TIMESTAMP=$BUILD_TIMESTAMP"
 
