@@ -3102,9 +3102,42 @@ describe('resolveCombat', () => {
     const militia = result.units.find(u => u.id === 'u2');
     expect(soldier).toBeDefined();
     expect(militia).toBeDefined();
-    // Militia attacks soldier: attack 4, soldier defense 6 → net damage ~max(0, 4*(1+bonus)-6) could be 0
+    // Militia attacks soldier: minimum damage of 1 applies (#173)
     // Soldier attacks militia: attack 8, militia defense 3 → net damage ~8*(1+bonus)-3 > 0
     expect(militia!.health).toBeLessThan(100);
+    expect(soldier!.health).toBeLessThan(100); // militia now always deals at least 1 damage
+  });
+
+  it('militia should deal minimum damage to soldiers (#173)', () => {
+    // Militia (attack 4) vs soldier (defense 6): raw damage < defense, but minimum 1 applies
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'militia', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    const soldier = result.units.find(u => u.id === 'u2');
+    expect(soldier).toBeDefined();
+    // Militia should deal at least 1 damage per round (COMBAT_MINIMUM_DAMAGE)
+    expect(soldier!.health).toBeLessThan(100);
+    // But militia should take more damage than soldier (soldier has higher attack)
+    const militia = result.units.find(u => u.id === 'u1');
+    expect(militia).toBeDefined();
+    expect(militia!.health).toBeLessThan(soldier!.health);
+  });
+
+  it('near-dead military units bleed out after combat (#174)', () => {
+    // Militia at 3 HP fighting a soldier — militia should be destroyed by bleedout
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'militia', health: 3 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    // Militia at 3 HP should be destroyed (either by combat damage or bleedout)
+    expect(result.destroyedUnitIds).toContain('u2');
+    // Soldier should survive
+    expect(result.units.find(u => u.id === 'u1')).toBeDefined();
   });
 
   it('should destroy units that reach 0 health', () => {
