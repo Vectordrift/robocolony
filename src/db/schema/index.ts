@@ -7,3 +7,4 @@ export { actions } from './actions.js';
 export { agreements } from './agreements.js';
 export { messages } from './messages.js';
 export { events } from './events.js';
+export { feedbackReports } from './feedbackReports.js';

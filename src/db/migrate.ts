@@ -20,6 +20,23 @@ interface ColumnDef {
   nullable?: boolean;
 }
 
+const CREATE_TABLE_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS feedback_reports (
+    id TEXT PRIMARY KEY,
+    world_id TEXT NOT NULL REFERENCES worlds(id),
+    colony_id TEXT REFERENCES colonies(id),
+    reporter_name TEXT,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    tick INTEGER,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_feedback_world_created ON feedback_reports(world_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_feedback_type_created ON feedback_reports(type, created_at)`,
+];
+
 /**
  * Expected schema — every column in every table.
  * When adding a new column to a schema file, add it here too.
@@ -130,6 +147,18 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   { table: 'messages', column: 'delivered_at_tick', type: 'INTEGER' },
   { table: 'messages', column: 'content', type: 'TEXT' },
   { table: 'messages', column: 'read', type: 'BOOLEAN', defaultValue: 'false' },
+
+  // feedback_reports
+  { table: 'feedback_reports', column: 'id', type: 'TEXT' },
+  { table: 'feedback_reports', column: 'world_id', type: 'TEXT' },
+  { table: 'feedback_reports', column: 'colony_id', type: 'TEXT', nullable: true },
+  { table: 'feedback_reports', column: 'reporter_name', type: 'TEXT', nullable: true },
+  { table: 'feedback_reports', column: 'type', type: 'TEXT' },
+  { table: 'feedback_reports', column: 'title', type: 'TEXT' },
+  { table: 'feedback_reports', column: 'description', type: 'TEXT' },
+  { table: 'feedback_reports', column: 'tick', type: 'INTEGER', nullable: true },
+  { table: 'feedback_reports', column: 'metadata', type: 'JSONB', defaultValue: "'{}'::jsonb", nullable: true },
+  { table: 'feedback_reports', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
 ];
 
 /**
@@ -139,6 +168,10 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
 export async function ensureSchema(db: PostgresJsDatabase<any>, logger: MigrationLogger): Promise<void> {
   logger.info('[migrate] Checking schema...');
   let added = 0;
+
+  for (const stmt of CREATE_TABLE_STATEMENTS) {
+    await db.execute(sql.raw(stmt));
+  }
 
   // Get all existing columns in one query
   const existing = await db.execute(sql`

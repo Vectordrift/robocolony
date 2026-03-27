@@ -7,3 +7,4 @@ export { eventRoutes } from './events.js';
 export { messageRoutes } from './messages.js';
 export { diplomacyRoutes } from './diplomacy.js';
 export { epitaphRoutes } from './epitaph.js';
+export { feedbackRoutes } from './feedback.js';

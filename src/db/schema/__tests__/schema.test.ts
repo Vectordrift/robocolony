@@ -9,6 +9,7 @@ import { actions } from '../actions.js';
 import { agreements } from '../agreements.js';
 import { messages } from '../messages.js';
 import { events } from '../events.js';
+import { feedbackReports } from '../feedbackReports.js';
 
 describe('Database schema', () => {
   describe('worlds table', () => {
@@ -179,9 +180,29 @@ describe('Database schema', () => {
     });
   });
 
-  it('all 9 tables are defined', () => {
-    const tables = [worlds, hexes, colonies, settlements, units, actions, agreements, messages, events];
-    expect(tables).toHaveLength(9);
+  describe('feedback_reports table', () => {
+    it('has correct table name', () => {
+      expect(getTableName(feedbackReports)).toBe('feedback_reports');
+    });
+
+    it('has all required columns', () => {
+      const cols = getTableColumns(feedbackReports);
+      expect(cols).toHaveProperty('id');
+      expect(cols).toHaveProperty('worldId');
+      expect(cols).toHaveProperty('colonyId');
+      expect(cols).toHaveProperty('reporterName');
+      expect(cols).toHaveProperty('type');
+      expect(cols).toHaveProperty('title');
+      expect(cols).toHaveProperty('description');
+      expect(cols).toHaveProperty('tick');
+      expect(cols).toHaveProperty('metadata');
+      expect(cols).toHaveProperty('createdAt');
+    });
+  });
+
+  it('all 10 tables are defined', () => {
+    const tables = [worlds, hexes, colonies, settlements, units, actions, agreements, messages, events, feedbackReports];
+    expect(tables).toHaveLength(10);
     tables.forEach(t => expect(getTableName(t)).toBeTruthy());
   });
 });
