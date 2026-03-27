@@ -10,6 +10,7 @@ import { feedRoutes } from './routes/feed.js';
 import { messageRoutes } from './routes/messages.js';
 import { diplomacyRoutes } from './routes/diplomacy.js';
 import { epitaphRoutes } from './routes/epitaph.js';
+import { feedbackRoutes } from './routes/feedback.js';
 import { db } from './db/index.js';
 import { worlds, settlements, colonies } from './db/schema/index.js';
 import { eq, or } from 'drizzle-orm';
@@ -110,6 +111,7 @@ export function buildApp() {
   app.register(messageRoutes);
   app.register(diplomacyRoutes);
   app.register(epitaphRoutes);
+  app.register(feedbackRoutes);
 
   // Serve static website from web/ directory
   const webRoot = join(__dirname, '..', 'web');

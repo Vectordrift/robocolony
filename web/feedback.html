@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RoboColony Feedback</title>
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #12121a;
+      --surface-2: #1a1a26;
+      --border: #2a2a3a;
+      --text: #e0e0e8;
+      --text-dim: #8888a0;
+      --accent: #4a9eff;
+      --green: #4aff8a;
+      --red: #ff4a6a;
+      --orange: #ff8a4a;
+      --yellow: #ffd54a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top, rgba(74, 158, 255, 0.16), transparent 35%), var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--text); }
+
+    .shell {
+      width: min(1120px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 1.25rem 0 3rem;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.25rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 1rem;
+    }
+
+    .brand {
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .brand span { color: var(--accent); }
+
+    .hero {
+      padding: 1.5rem;
+      background: linear-gradient(135deg, var(--surface), rgba(74, 158, 255, 0.1));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin-bottom: 1rem;
+    }
+
+    .hero h1 {
+      margin: 0 0 0.5rem;
+      font-size: clamp(1.8rem, 5vw, 2.8rem);
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--text-dim);
+      line-height: 1.6;
+      max-width: 68ch;
+    }
+
+    .hero-links {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .hero-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.6rem 0.9rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 0.85rem;
+    }
+
+    .hero-link.primary {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(300px, 380px) 1fr;
+      gap: 1rem;
+      align-items: start;
+    }
+
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+    }
+
+    .panel h2 {
+      margin: 0 0 0.9rem;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+    }
+
+    .stack {
+      display: grid;
+      gap: 0.9rem;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.35rem;
+      font-size: 0.78rem;
+      color: var(--text-dim);
+    }
+
+    input, select, textarea, button {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font: inherit;
+    }
+
+    input, select, textarea {
+      padding: 0.7rem 0.8rem;
+    }
+
+    textarea {
+      min-height: 160px;
+      resize: vertical;
+      line-height: 1.5;
+    }
+
+    button {
+      padding: 0.8rem 1rem;
+      cursor: pointer;
+      font-weight: 600;
+      transition: border-color 0.15s ease, color 0.15s ease;
+    }
+
+    button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .note {
+      margin: 0;
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    .status {
+      min-height: 1.2rem;
+      font-size: 0.8rem;
+    }
+
+    .status.success { color: var(--green); }
+    .status.error { color: var(--red); }
+
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    @media (max-width: 640px) {
+      .filters { grid-template-columns: 1fr; }
+    }
+
+    .feedback-list {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .feedback-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.015);
+      padding: 0.95rem;
+    }
+
+    .feedback-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.18rem 0.55rem;
+      background: var(--surface-2);
+    }
+
+    .tag.bug { color: var(--red); border-color: rgba(255, 74, 106, 0.35); }
+    .tag.balance { color: var(--orange); border-color: rgba(255, 138, 74, 0.35); }
+    .tag.suggestion { color: var(--yellow); border-color: rgba(255, 213, 74, 0.35); }
+
+    .feedback-title {
+      margin: 0 0 0.45rem;
+      font-size: 1rem;
+    }
+
+    .feedback-description {
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.55;
+      color: var(--text-dim);
+      font-size: 0.86rem;
+    }
+
+    .loading, .empty {
+      padding: 1.4rem;
+      text-align: center;
+      color: var(--text-dim);
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">🤖 <span>ROBO</span>COLONY Feedback</div>
+      <a href="/index.html">Back to Spectator Feed</a>
+    </header>
+
+    <section class="hero">
+      <h1>Playtester Reports</h1>
+      <p>
+        Bugs, balance concerns, and gameplay suggestions submitted through the public API land here first.
+        Use this page to monitor incoming feedback, then promote the good ones into GitHub issues manually.
+      </p>
+      <div class="hero-links">
+        <a class="hero-link primary" href="/docs.html">API Docs</a>
+        <a class="hero-link" href="https://github.com/Vectordrift/robocolony/issues" target="_blank" rel="noreferrer">Open GitHub Issues</a>
+      </div>
+    </section>
+
+    <div class="layout">
+      <section class="panel">
+        <h2>Submit Feedback</h2>
+        <form id="feedbackForm" class="stack">
+          <div>
+            <label for="worldSelect">World</label>
+            <select id="worldSelect" required></select>
+          </div>
+          <div>
+            <label for="feedbackType">Type</label>
+            <select id="feedbackType" required>
+              <option value="bug">Bug</option>
+              <option value="balance">Balance</option>
+              <option value="suggestion">Suggestion</option>
+            </select>
+          </div>
+          <div>
+            <label for="reporterName">Reporter Name</label>
+            <input id="reporterName" maxlength="40" placeholder="Optional display name">
+          </div>
+          <div>
+            <label for="feedbackTitle">Title</label>
+            <input id="feedbackTitle" maxlength="120" required placeholder="Short summary">
+          </div>
+          <div>
+            <label for="feedbackDescription">Description</label>
+            <textarea id="feedbackDescription" maxlength="4000" required placeholder="What happened? What should change?"></textarea>
+          </div>
+          <button type="submit">Submit Report</button>
+          <p class="note">API users can also POST directly to <code>/api/worlds/:id/feedback</code>. If they include a valid colony API key, the report is automatically linked to that colony.</p>
+          <div id="formStatus" class="status"></div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Reported Issues</h2>
+        <div class="filters">
+          <div>
+            <label for="filterWorld">Filter World</label>
+            <select id="filterWorld">
+              <option value="">All worlds</option>
+            </select>
+          </div>
+          <div>
+            <label for="filterType">Filter Type</label>
+            <select id="filterType">
+              <option value="">All types</option>
+              <option value="bug">Bug</option>
+              <option value="balance">Balance</option>
+              <option value="suggestion">Suggestion</option>
+            </select>
+          </div>
+          <div>
+            <label for="filterLimit">Recent Count</label>
+            <select id="filterLimit">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
+          </div>
+        </div>
+        <div id="feedbackList" class="loading">Loading reports…</div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const worldSelect = document.getElementById('worldSelect');
+    const filterWorld = document.getElementById('filterWorld');
+    const filterType = document.getElementById('filterType');
+    const filterLimit = document.getElementById('filterLimit');
+    const feedbackForm = document.getElementById('feedbackForm');
+    const feedbackList = document.getElementById('feedbackList');
+    const formStatus = document.getElementById('formStatus');
+
+    async function fetchJson(url, options) {
+      const response = await fetch(url, options);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.message || body.error || 'Request failed');
+      }
+      return body;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    async function loadWorlds() {
+      const worlds = await fetchJson('/api/worlds');
+      const options = worlds.map((world) => `
+        <option value="${escapeHtml(world.id)}">${escapeHtml(world.name)} (${world.status})</option>
+      `).join('');
+      worldSelect.innerHTML = options;
+      filterWorld.innerHTML = `<option value="">All worlds</option>${options}`;
+    }
+
+    function renderReports(reports) {
+      if (!reports.length) {
+        feedbackList.innerHTML = '<div class="empty">No feedback reports yet.</div>';
+        return;
+      }
+
+      feedbackList.className = 'feedback-list';
+      feedbackList.innerHTML = reports.map((report) => {
+        const createdAt = report.createdAt ? new Date(report.createdAt).toLocaleString() : 'Unknown time';
+        const reporter = report.reporterName ? `Reporter: ${escapeHtml(report.reporterName)}` : 'Reporter: anonymous';
+        const colony = report.colonyId ? `Colony: ${escapeHtml(report.colonyId)}` : 'No colony attached';
+        return `
+          <article class="feedback-card">
+            <div class="feedback-meta">
+              <span class="tag ${escapeHtml(report.type)}">${escapeHtml(report.type)}</span>
+              <span class="tag">World: ${escapeHtml(report.worldName)}</span>
+              <span class="tag">Tick: ${escapeHtml(report.tick ?? 'n/a')}</span>
+              <span class="tag">${reporter}</span>
+              <span class="tag">${colony}</span>
+              <span class="tag">${escapeHtml(createdAt)}</span>
+            </div>
+            <h3 class="feedback-title">${escapeHtml(report.title)}</h3>
+            <p class="feedback-description">${escapeHtml(report.description)}</p>
+          </article>
+        `;
+      }).join('');
+    }
+
+    async function loadFeedback() {
+      feedbackList.className = 'loading';
+      feedbackList.textContent = 'Loading reports…';
+      const params = new URLSearchParams();
+      if (filterWorld.value) params.set('world_id', filterWorld.value);
+      if (filterType.value) params.set('type', filterType.value);
+      if (filterLimit.value) params.set('limit', filterLimit.value);
+      const body = await fetchJson(`/api/feedback?${params.toString()}`);
+      renderReports(body.reports || []);
+    }
+
+    feedbackForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      formStatus.className = 'status';
+      formStatus.textContent = 'Submitting…';
+
+      try {
+        await fetchJson(`/api/worlds/${encodeURIComponent(worldSelect.value)}/feedback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: document.getElementById('feedbackType').value,
+            reporterName: document.getElementById('reporterName').value,
+            title: document.getElementById('feedbackTitle').value,
+            description: document.getElementById('feedbackDescription').value,
+          }),
+        });
+        feedbackForm.reset();
+        worldSelect.value = filterWorld.value || worldSelect.value;
+        formStatus.className = 'status success';
+        formStatus.textContent = 'Report submitted.';
+        await loadFeedback();
+      } catch (error) {
+        formStatus.className = 'status error';
+        formStatus.textContent = error.message || 'Failed to submit report.';
+      }
+    });
+
+    [filterWorld, filterType, filterLimit].forEach((element) => {
+      element.addEventListener('change', () => { void loadFeedback(); });
+    });
+
+    async function init() {
+      try {
+        await loadWorlds();
+        await loadFeedback();
+      } catch (error) {
+        feedbackList.className = 'empty';
+        feedbackList.textContent = error.message || 'Failed to load feedback.';
+      }
+    }
+
+    void init();
+  </script>
+</body>
+</html>
