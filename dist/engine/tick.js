@@ -1796,20 +1796,21 @@ export function resolveCombat(units, actions, seed, activeAgreements, settlement
     // Remove destroyed units
     const survivingUnits = units.filter(u => !destroyedUnitIds.includes(u.id));
     // --- Settlement capture: transfer settlements when defenders are eliminated ---
+    // A hostile army occupying an undefended settlement hex can capture it even if
+    // no combat happens on this tick. This prevents indefinite siege stalemates where
+    // attackers clear defenders but cannot finish the conquest without another fight.
     const capturedSettlements = [];
     if (settlements) {
         for (const settlement of settlements) {
-            // Check if any combat happened on this settlement's hex
-            const settleKey = hexKey(settlement.hexX, settlement.hexY);
-            const combatHex = hexUnits.get(settleKey);
-            if (!combatHex || combatHex.length < 2)
+            const occupyingUnits = survivingUnits.filter(u => u.hexX === settlement.hexX && u.hexY === settlement.hexY);
+            if (occupyingUnits.length === 0)
                 continue;
             // Check if the settlement's colony still has surviving units on this hex
-            const defenderAlive = survivingUnits.some(u => u.colonyId === settlement.colonyId && u.hexX === settlement.hexX && u.hexY === settlement.hexY);
+            const defenderAlive = occupyingUnits.some(u => u.colonyId === settlement.colonyId);
             if (defenderAlive)
                 continue;
-            // Check if any enemy units survived on this hex
-            const attackerUnits = survivingUnits.filter(u => u.colonyId !== settlement.colonyId && u.hexX === settlement.hexX && u.hexY === settlement.hexY);
+            // Check if any enemy units occupy this hex
+            const attackerUnits = occupyingUnits.filter(u => u.colonyId !== settlement.colonyId);
             if (attackerUnits.length === 0)
                 continue;
             // Find which colony has the most surviving units on the hex (the capturer)

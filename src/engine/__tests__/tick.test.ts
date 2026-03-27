@@ -1219,7 +1219,7 @@ describe('resolveTick', () => {
     const s1 = makeSettlement({ id: 's1', colonyId: 'c1', buildings: [{ type: 'farm', level: 2 }], population: 10 });
     const s2 = makeSettlement({ id: 's2', colonyId: 'c2', hexX: 5, hexY: 5, population: 0 });
 
-    const u2 = makeUnit({ id: 'u2', colonyId: 'c2', type: 'siege' }); // 4 food upkeep
+    const u2 = makeUnit({ id: 'u2', colonyId: 'c2', type: 'siege', hexX: 5, hexY: 5 }); // 4 food upkeep
 
     const hexes = makeHexRing(0, 0);
     const result = resolveTick([colony1, colony2], [s1, s2], [u2], hexes);
@@ -3657,23 +3657,31 @@ describe('Edge cases: simultaneous actions (Issue #123)', () => {
   });
 
   // Case 9: Two colonies attack undefended settlement simultaneously
-  // Settlement capture is not yet implemented — combat only destroys units.
-  // This test documents current behavior: units fight each other on the settlement hex.
-  it('two colonies fighting on settlement hex: combat resolves between units only (no capture)', () => {
-    const hexes = makePlainGrid(10);
+  // Contested attackers should still fight each other before anyone can claim the settlement.
+  it('two colonies fighting on settlement hex: combat resolves between units before capture', () => {
     const u1 = makeUnit({ id: 'u1', colonyId: 'c1', hexX: 5, hexY: 0, type: 'soldier', health: 100 });
     const u2 = makeUnit({ id: 'u2', colonyId: 'c2', hexX: 5, hexY: 0, type: 'soldier', health: 100 });
-    const c1 = makeColony({ id: 'c1', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 50 } });
-    const c2 = makeColony({ id: 'c2', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 50 } });
-    const c3 = makeColony({ id: 'c3', resources: { food: 500, timber: 200, stone: 100, iron: 50, influence: 50 } });
     const settlement = makeSettlement({ id: 's1', colonyId: 'c3', hexX: 5, hexY: 0 });
 
-    const result = resolveCombat([u1, u2], [], 42);
+    const result = resolveCombat([u1, u2], [], 42, undefined, [settlement]);
     const combatEvents = result.events.filter(e => e.type === 'combat_resolved');
     expect(combatEvents.length).toBeGreaterThan(0);
+    expect(result.capturedSettlements).toHaveLength(1);
+    expect(result.capturedSettlements[0].settlementId).toBe('s1');
+  });
 
-    // Settlement ownership unchanged (no capture mechanic)
-    // This is verified by the fact that resolveCombat doesn't return settlement mutations
+  it('captures an undefended settlement when hostile units occupy the hex without new combat', () => {
+    const occupier = makeUnit({ id: 'u1', colonyId: 'c1', hexX: 5, hexY: 0, type: 'soldier', health: 85 });
+    const settlement = makeSettlement({ id: 's1', colonyId: 'c2', hexX: 5, hexY: 0, loyalty: 100 });
+
+    const result = resolveCombat([occupier], [], 42, undefined, [settlement]);
+
+    expect(result.capturedSettlements).toEqual([
+      { settlementId: 's1', fromColony: 'c2', toColony: 'c1' },
+    ]);
+    expect(settlement.colonyId).toBe('c1');
+    expect(settlement.loyalty).toBe(50);
+    expect(result.events.some(e => e.type === 'settlement_captured')).toBe(true);
   });
 
   // Case 10: Settler tries to found on hex with enemy settlement
