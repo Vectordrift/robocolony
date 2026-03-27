@@ -224,8 +224,8 @@ export declare const STOCKPILE_CAP: Record<string, number>;
 export declare const GRANARY_BONUS_PER_LEVEL = 200;
 /** Additional stockpile capacity per warehouse level (all resources) */
 export declare const WAREHOUSE_BONUS_PER_LEVEL = 150;
-/** Fraction of excess resources that decay each tick (1%) */
-export declare const STOCKPILE_DECAY_RATE = 0.01;
+/** Fraction of excess resources that decay each tick (0.5% — halved from 1% per #166) */
+export declare const STOCKPILE_DECAY_RATE = 0.005;
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
 export declare const STOCKPILE_HARD_CEILING = 2;
 /** Fraction of building cost refunded on demolish (25%) */
@@ -558,4 +558,3 @@ export declare function resolveAgreementActions(colonies: Colony[], agreements: 
 export declare function resolveTradeTransfers(colonies: Colony[], agreements: Agreement[]): TradeTransferResult;
 export declare function resolveTick(colonies: Colony[], settlements: Settlement[], units: Unit[], hexes: HexTileState[], actions?: QueuedAction[], combatSeed?: number, worldId?: string, currentTick?: number, agreements?: Agreement[]): TickResult;
 export {};
-//# sourceMappingURL=tick.d.ts.map

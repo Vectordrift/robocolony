@@ -239,6 +239,19 @@ export class TickScheduler {
         .from(schema.hexes)
         .where(eq(schema.hexes.worldId, this.worldId));
 
+      // Auto-expire stale queued actions from ticks that have already passed
+      // This prevents phantom action counts and stale action buildup (#164, #168)
+      await this.db
+        .update(schema.actions)
+        .set({ status: 'failed', result: 'Auto-expired: action was queued for a tick that has already passed' })
+        .where(
+          and(
+            eq(schema.actions.worldId, this.worldId),
+            eq(schema.actions.status, 'queued'),
+            sql`${schema.actions.tick} <= ${world.currentTick}`,
+          ),
+        );
+
       // Load queued actions for this tick
       const dbActions = await this.db
         .select()
@@ -727,6 +740,7 @@ export class TickScheduler {
     }
   }
 }
+
 
 
 

@@ -3,10 +3,12 @@
  *
  * POST /api/worlds/:id/actions — submit actions for next tick
  * GET  /api/worlds/:id/actions — list queued and recent resolved actions
+ * DELETE /api/worlds/:id/actions/:actionId — cancel a queued action
+ * DELETE /api/worlds/:id/actions — cancel all queued actions for next tick
  */
 
 import type { FastifyInstance } from 'fastify';
-import { eq, and, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray, lt } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db } from '../db/index.js';
 import { worlds, actions, colonies, units, settlements } from '../db/schema/index.js';
@@ -96,6 +98,29 @@ const VALID_AGREEMENT_TYPES = new Set([
 const MAX_ACTIONS_PER_TICK = 10;
 const MAX_SETTLEMENT_NAME_LENGTH = 40;
 const MAX_MESSAGE_LENGTH = 500;
+
+/** Number of ticks after which unprocessed queued actions are auto-expired */
+const STALE_ACTION_TICKS = 5;
+
+/**
+ * Expire stale queued actions: any action with status 'queued' whose tick
+ * is <= currentTick (i.e. the tick has already been processed) gets marked
+ * as 'failed' with an expiry reason.
+ */
+async function expireStaleActions(worldId: string, currentTick: number): Promise<number> {
+  const result = await db
+    .update(actions)
+    .set({ status: 'failed', result: 'Auto-expired: action was queued for a tick that has already passed' })
+    .where(
+      and(
+        eq(actions.worldId, worldId),
+        eq(actions.status, 'queued'),
+        sql`${actions.tick} <= ${currentTick}`,
+      ),
+    );
+  // drizzle update returns the rows affected (driver-dependent)
+  return (result as any)?.rowCount ?? (result as any)?.changes ?? 0;
+}
 
 /** Truncate user-supplied IDs in error messages to prevent log bloat */
 function truncId(id: string, maxLen = 50): string {
@@ -449,6 +474,9 @@ export async function actionRoutes(app: FastifyInstance) {
     const nextTick = currentTick + 1;
     const mapRadius = world[0].mapRadius;
 
+    // Auto-expire stale queued actions from previous ticks
+    await expireStaleActions(worldId, currentTick);
+
     // Validate all actions first (before rate limit — invalid actions should not consume slots)
     const validationErrors: Array<{ index: number; error: string }> = [];
 
@@ -560,8 +588,12 @@ export async function actionRoutes(app: FastifyInstance) {
     }
 
     const currentTick = world[0].currentTick;
+    const nextTick = currentTick + 1;
 
-    // Get queued actions (next tick)
+    // Auto-expire stale queued actions from previous ticks
+    await expireStaleActions(worldId, currentTick);
+
+    // Get queued actions (next tick only — stale ones have been expired above)
     const queued = await db
       .select({
         id: actions.id,
@@ -577,6 +609,7 @@ export async function actionRoutes(app: FastifyInstance) {
         and(
           eq(actions.worldId, worldId),
           eq(actions.colonyId, colony.id),
+          eq(actions.tick, nextTick),
           eq(actions.status, 'queued'),
         ),
       );
@@ -646,5 +679,91 @@ export async function actionRoutes(app: FastifyInstance) {
 
     return rows[0];
   });
+
+  // Cancel a single queued action
+  app.delete<{ Params: { id: string; actionId: string } }>('/api/worlds/:id/actions/:actionId', {
+    preHandler: requireAuth,
+  }, async (request, reply) => {
+    const colony = request.colony!;
+    const { actionId } = request.params;
+
+    // Find the action
+    const rows = await db
+      .select({
+        id: actions.id,
+        status: actions.status,
+        colonyId: actions.colonyId,
+      })
+      .from(actions)
+      .where(
+        and(
+          eq(actions.id, actionId),
+          eq(actions.worldId, colony.worldId),
+        ),
+      )
+      .limit(1);
+
+    if (rows.length === 0) {
+      return reply.code(404).send({ error: 'not_found', message: 'Action not found' });
+    }
+
+    if (rows[0].colonyId !== colony.id) {
+      return reply.code(403).send({ error: 'forbidden', message: 'Action does not belong to your colony' });
+    }
+
+    if (rows[0].status !== 'queued') {
+      return reply.code(409).send({
+        error: 'conflict',
+        message: `Cannot cancel action with status '${rows[0].status}' — only queued actions can be cancelled`,
+      });
+    }
+
+    await db
+      .update(actions)
+      .set({ status: 'failed', result: 'Cancelled by player' })
+      .where(eq(actions.id, actionId));
+
+    return { cancelled: true, actionId };
+  });
+
+  // Cancel all queued actions for next tick
+  app.delete<WorldParams>('/api/worlds/:id/actions', {
+    preHandler: requireAuth,
+  }, async (request, reply) => {
+    const colony = request.colony!;
+    const worldId = colony.worldId;
+
+    // Get world for current tick
+    const world = await db
+      .select({ currentTick: worlds.currentTick })
+      .from(worlds)
+      .where(eq(worlds.id, worldId))
+      .limit(1);
+
+    if (world.length === 0) {
+      return reply.code(404).send({ error: 'not_found', message: 'World not found' });
+    }
+
+    const currentTick = world[0].currentTick;
+
+    // First expire any stale actions
+    await expireStaleActions(worldId, currentTick);
+
+    // Cancel all queued actions for this colony (any future tick)
+    const result = await db
+      .update(actions)
+      .set({ status: 'failed', result: 'Cancelled by player (bulk cancel)' })
+      .where(
+        and(
+          eq(actions.worldId, worldId),
+          eq(actions.colonyId, colony.id),
+          eq(actions.status, 'queued'),
+        ),
+      );
+
+    const cancelledCount = (result as any)?.rowCount ?? (result as any)?.changes ?? 0;
+    return { cancelled: true, count: cancelledCount };
+  });
 }
+
 

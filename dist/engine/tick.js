@@ -231,8 +231,8 @@ export const STOCKPILE_CAP = {
 export const GRANARY_BONUS_PER_LEVEL = 200;
 /** Additional stockpile capacity per warehouse level (all resources) */
 export const WAREHOUSE_BONUS_PER_LEVEL = 150;
-/** Fraction of excess resources that decay each tick (1%) */
-export const STOCKPILE_DECAY_RATE = 0.01;
+/** Fraction of excess resources that decay each tick (0.5% — halved from 1% per #166) */
+export const STOCKPILE_DECAY_RATE = 0.005;
 /** Hard ceiling multiplier: resources above cap × this are immediately clamped */
 export const STOCKPILE_HARD_CEILING = 2.0;
 /** Fraction of building cost refunded on demolish (25%) */
@@ -1708,6 +1708,42 @@ export function resolveCombat(units, actions, seed, activeAgreements, settlement
             });
         }
     }
+    // --- Settler auto-flee: critically wounded settlers flee from combat hexes (#170) ---
+    // Settlers at ≤ 10 HP on hexes with enemy units are auto-killed.
+    // This prevents near-dead settlers from acting as permanent damage sponges.
+    const SETTLER_CRITICAL_HP = 10;
+    for (const unit of units) {
+        if (destroyedUnitIds.includes(unit.id))
+            continue;
+        if (unit.type !== 'settler')
+            continue;
+        if (unit.health > SETTLER_CRITICAL_HP)
+            continue;
+        // Check if there are enemy units on the same hex
+        const unitKey = hexKey(unit.hexX, unit.hexY);
+        const hexGroup = hexUnits.get(unitKey);
+        if (!hexGroup)
+            continue;
+        const hasEnemies = hexGroup.some(u => u.colonyId !== unit.colonyId && !destroyedUnitIds.includes(u.id));
+        if (!hasEnemies)
+            continue;
+        // Critically wounded settler in enemy-occupied hex — auto-kill
+        destroyedUnitIds.push(unit.id);
+        unit.health = 0;
+        events.push({
+            type: 'unit_destroyed',
+            colonyId: unit.colonyId,
+            unitId: unit.id,
+            data: {
+                unitType: 'settler',
+                hexX: unit.hexX,
+                hexY: unit.hexY,
+                killedInCombat: true,
+                damageReceived: 0,
+                reason: 'Critically wounded settler perished in contested territory',
+            },
+        });
+    }
     // Remove destroyed units
     const survivingUnits = units.filter(u => !destroyedUnitIds.includes(u.id));
     // --- Settlement capture: transfer settlements when defenders are eliminated ---
@@ -3155,6 +3191,50 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
                 }
             }
         }
+        // --- Garrison healing: units at friendly settlements recover HP and morale (#165) ---
+        // Units on the same hex as a friendly settlement heal each tick.
+        // Barracks provide a healing bonus.
+        const GARRISON_HEAL_HP = 3; // Base HP recovery per tick
+        const GARRISON_HEAL_MORALE = 0.05; // Base morale recovery per tick
+        const BARRACKS_HEAL_BONUS = 2; // Extra HP per barracks level
+        for (const unit of myUnits) {
+            if (unit.health >= 100 && unit.morale >= 1.0)
+                continue; // Fully healthy
+            // Check if unit is on a friendly settlement hex
+            const garrisonSettlement = mySettlements.find(s => s.hexX === unit.hexX && s.hexY === unit.hexY);
+            if (!garrisonSettlement)
+                continue;
+            // Check there are no enemies on this hex
+            const unitHexKey = `${unit.hexX},${unit.hexY}`;
+            const hasEnemiesOnHex = updatedUnits.some(u => u.colonyId !== colony.id && u.hexX === unit.hexX && u.hexY === unit.hexY && u.health > 0);
+            if (hasEnemiesOnHex)
+                continue;
+            // Calculate barracks bonus
+            let barracksBonus = 0;
+            for (const b of garrisonSettlement.buildings) {
+                if (b.type === 'barracks')
+                    barracksBonus += BARRACKS_HEAL_BONUS * b.level;
+            }
+            const oldHealth = unit.health;
+            const oldMorale = unit.morale;
+            unit.health = Math.min(100, Math.round((unit.health + GARRISON_HEAL_HP + barracksBonus) * 100) / 100);
+            unit.morale = Math.min(1.0, Math.round((unit.morale + GARRISON_HEAL_MORALE) * 1000) / 1000);
+            if (unit.health > oldHealth || unit.morale > oldMorale) {
+                events.push({
+                    type: 'garrison_heal',
+                    colonyId: colony.id,
+                    unitId: unit.id,
+                    data: {
+                        settlementId: garrisonSettlement.id,
+                        healthBefore: oldHealth,
+                        healthAfter: unit.health,
+                        moraleBefore: oldMorale,
+                        moraleAfter: unit.morale,
+                        barracksBonus,
+                    },
+                });
+            }
+        }
         // --- Food deficit: famine triggers on meaningful negative net food production ---
         // Suppress famine warnings when:
         // 1. Deficit is tiny (< 1.0/tick) — likely rounding noise or pop growth oscillation
@@ -3468,4 +3548,3 @@ export function resolveTick(colonies, settlements, units, hexes, actions = [], c
         agreementMutations,
     };
 }
-//# sourceMappingURL=tick.js.map
