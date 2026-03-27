@@ -29,6 +29,8 @@ import {
   UNIT_DEFENSE,
   COMBAT_MORALE_LOSS,
   COMBAT_RANDOM_BONUS,
+  STEEL_WEAPONS_ATTACK_BONUS,
+  FORTIFICATIONS_RETALIATION_DAMAGE,
   MORALE_LOSS_RATE,
   MORALE_RECOVERY_RATE,
   DESERTION_THRESHOLD,
@@ -3106,6 +3108,49 @@ describe('resolveCombat', () => {
     // Soldier attacks militia: attack 8, militia defense 3 → net damage ~8*(1+bonus)-3 > 0
     expect(militia!.health).toBeLessThan(100);
     expect(soldier!.health).toBeLessThan(100); // militia now always deals at least 1 damage
+  });
+
+  it('should apply steel_weapons bonus to militia and soldier attacks', () => {
+    const baseline = resolveCombat([
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'militia', health: 100 }),
+    ], [], 42);
+
+    const coloniesWithTech = [
+      Object.assign(makeColony({ id: 'c1' }), { researchedTechs: ['steel_weapons'] }),
+      makeColony({ id: 'c2' }),
+    ];
+    const buffed = resolveCombat([
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'militia', health: 100 }),
+    ], [], 42, undefined, undefined, coloniesWithTech);
+
+    const baselineTarget = baseline.units.find(u => u.id === 'u2');
+    const buffedTarget = buffed.units.find(u => u.id === 'u2');
+    expect(baselineTarget).toBeDefined();
+    expect(buffedTarget).toBeDefined();
+    expect(buffedTarget!.health).toBeLessThan(baselineTarget!.health);
+    expect(baselineTarget!.health - buffedTarget!.health).toBe(STEEL_WEAPONS_ATTACK_BONUS);
+  });
+
+  it('should apply fortifications retaliation on fortified settlement hexes', () => {
+    const settlements = [
+      makeSettlement({ id: 's1', colonyId: 'c2', hexX: 0, hexY: 0 }),
+    ];
+    const coloniesWithTech = [
+      makeColony({ id: 'c1' }),
+      Object.assign(makeColony({ id: 'c2' }), { researchedTechs: ['fortifications'] }),
+    ];
+
+    const result = resolveCombat([
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'militia', health: 100 }),
+    ], [], 42, undefined, settlements, coloniesWithTech);
+
+    const attacker = result.units.find(u => u.id === 'u1');
+    expect(attacker).toBeDefined();
+    const expectedHealth = 100 - 1 - FORTIFICATIONS_RETALIATION_DAMAGE;
+    expect(attacker!.health).toBe(expectedHealth);
   });
 
   it('militia should deal minimum damage to soldiers (#173)', () => {

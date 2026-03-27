@@ -483,6 +483,12 @@ export const GARRISON_MORALE_FLOOR = 0.7;
 /** Defense multiplier for units defending on a hex with a settlement that has walls */
 export const WALLS_DEFENSE_MULTIPLIER = 1.5;
 
+/** Attack bonus from steel_weapons for militia and soldier units */
+export const STEEL_WEAPONS_ATTACK_BONUS = 2;
+
+/** Retaliation damage applied by fortifications to attackers on a fortified settlement hex */
+export const FORTIFICATIONS_RETALIATION_DAMAGE = 2;
+
 /** Minimum damage dealt by military units per combat round (prevents 0-damage stalemates #173) */
 export const COMBAT_MINIMUM_DAMAGE = 1;
 
@@ -1972,11 +1978,20 @@ export function resolveCombat(
   seed?: number,
   activeAgreements?: Agreement[],
   settlements?: Settlement[],
+  colonies?: Colony[],
 ): CombatResult {
   const rng = createRng(seed);
   const events: TickEvent[] = [];
   const actionResults: ActionResult[] = [];
   const destroyedUnitIds: string[] = [];
+  const researchedTechsByColony = new Map<string, Set<string>>();
+
+  if (colonies) {
+    for (const colony of colonies) {
+      const researched = new Set<string>(((colony as Colony & { researchedTechs?: string[] }).researchedTechs) ?? []);
+      researchedTechsByColony.set(colony.id, researched);
+    }
+  }
 
   // Build NAP lookup: set of "colonyA|colonyB" pairs (sorted ids) with active non_aggression or alliance
   const napPairs = new Set<string>();
@@ -2062,7 +2077,11 @@ export function resolveCombat(
     }> = [];
 
     for (const attacker of unitsOnHex) {
-      const attackPower = UNIT_ATTACK[attacker.type];
+      const attackerTechs = researchedTechsByColony.get(attacker.colonyId) ?? new Set<string>();
+      const attackPower = UNIT_ATTACK[attacker.type]
+        + ((attacker.type === 'militia' || attacker.type === 'soldier') && attackerTechs.has('steel_weapons')
+          ? STEEL_WEAPONS_ATTACK_BONUS
+          : 0);
       if (attackPower <= 0) continue; // settlers can't attack
 
       // Find enemy units (from different colony AND not NAP-protected)
@@ -2094,6 +2113,19 @@ export function resolveCombat(
 
       const currentDamage = damageDealt.get(target.id) ?? 0;
       damageDealt.set(target.id, currentDamage + roundedDamage);
+
+      if (settlements) {
+        const hostileSettlement = settlements.find(
+          s => s.colonyId !== attacker.colonyId && s.hexX === attacker.hexX && s.hexY === attacker.hexY
+        );
+        if (hostileSettlement) {
+          const settlementOwnerTechs = researchedTechsByColony.get(hostileSettlement.colonyId) ?? new Set<string>();
+          if (settlementOwnerTechs.has('fortifications')) {
+            const retaliationDamage = damageDealt.get(attacker.id) ?? 0;
+            damageDealt.set(attacker.id, retaliationDamage + FORTIFICATIONS_RETALIATION_DAMAGE);
+          }
+        }
+      }
 
       combatLog.push({
         attackerId: attacker.id,
@@ -3691,7 +3723,7 @@ export function resolveTick(
   // --- Phase 0.25: Resolve combat (after movement, before fog) ---
   // Units from different colonies sharing a hex fight automatically.
   {
-    const combatResult = resolveCombat(updatedUnits, actions, combatSeed, agreements, updatedSettlements);
+    const combatResult = resolveCombat(updatedUnits, actions, combatSeed, agreements, updatedSettlements, updatedColonies);
     if (combatResult.destroyedUnitIds.length > 0 || combatResult.events.length > 0) {
       updatedUnits = combatResult.units.map(u => ({
         ...u,
@@ -4568,6 +4600,4 @@ export function resolveTick(
     agreementMutations,
   };
 }
-
-
 
