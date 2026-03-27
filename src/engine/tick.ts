@@ -495,6 +495,12 @@ export const COMBAT_MINIMUM_DAMAGE = 1;
 /** Health threshold below which military units bleed out after combat (#174) */
 export const COMBAT_BLEEDOUT_THRESHOLD = 5;
 
+/** Base health recovered per tick at a friendly settlement */
+export const HEALING_PER_TICK = 5;
+
+/** Additional healing per barracks level at a friendly settlement */
+export const BARRACKS_HEALING_BONUS = 3;
+
 /** Legacy score awarded for capturing an enemy settlement */
 export const SETTLEMENT_CAPTURE_SCORE = 50;
 
@@ -3500,6 +3506,7 @@ export function resolveTick(
   let fogReveals: HexExploration[] = [];
   let newMessages: MessageRecord[] = [];
   let agreementMutations: AgreementMutation[] = [];
+  const combatHexesThisTick = new Set<string>();
 
   // --- Agreement resolution (before other actions) ---
   {
@@ -3723,6 +3730,17 @@ export function resolveTick(
   // --- Phase 0.25: Resolve combat (after movement, before fog) ---
   // Units from different colonies sharing a hex fight automatically.
   {
+    for (const unit of updatedUnits) {
+      if (unit.health <= 0) continue;
+      const hexKey = `${unit.hexX},${unit.hexY}`;
+      const coloniesOnHex = updatedUnits.filter(
+        other => other.health > 0 && other.hexX === unit.hexX && other.hexY === unit.hexY
+      );
+      if (new Set(coloniesOnHex.map(other => other.colonyId)).size > 1) {
+        combatHexesThisTick.add(hexKey);
+      }
+    }
+
     const combatResult = resolveCombat(updatedUnits, actions, combatSeed, agreements, updatedSettlements, updatedColonies);
     if (combatResult.destroyedUnitIds.length > 0 || combatResult.events.length > 0) {
       updatedUnits = combatResult.units.map(u => ({
@@ -4198,12 +4216,10 @@ export function resolveTick(
       }
     }
 
-    // --- Garrison healing: units at friendly settlements recover HP and morale (#165) ---
-    // Units on the same hex as a friendly settlement heal each tick.
-    // Barracks provide a healing bonus.
-    const GARRISON_HEAL_HP = 3; // Base HP recovery per tick
+    // --- Garrison healing: units at friendly settlements recover HP and morale (#165, #177) ---
+    // Units on the same hex as a friendly settlement heal each tick unless that hex
+    // was contested this tick. Barracks provide an additional healing bonus.
     const GARRISON_HEAL_MORALE = 0.08; // Base morale recovery per tick (buffed from 0.05 #171)
-    const BARRACKS_HEAL_BONUS = 2; // Extra HP per barracks level
     for (const unit of myUnits) {
       if (unit.health >= 100 && unit.morale >= 1.0) continue; // Fully healthy
       // Check if unit is on a friendly settlement hex
@@ -4218,16 +4234,17 @@ export function resolveTick(
         u => u.colonyId !== colony.id && u.hexX === unit.hexX && u.hexY === unit.hexY && u.health > 0
       );
       if (hasEnemiesOnHex) continue;
+      if (combatHexesThisTick.has(unitHexKey)) continue;
 
       // Calculate barracks bonus
       let barracksBonus = 0;
       for (const b of garrisonSettlement.buildings) {
-        if (b.type === 'barracks') barracksBonus += BARRACKS_HEAL_BONUS * b.level;
+        if (b.type === 'barracks') barracksBonus += BARRACKS_HEALING_BONUS * b.level;
       }
 
       const oldHealth = unit.health;
       const oldMorale = unit.morale;
-      unit.health = Math.min(100, Math.round((unit.health + GARRISON_HEAL_HP + barracksBonus) * 100) / 100);
+      unit.health = Math.min(100, Math.round((unit.health + HEALING_PER_TICK + barracksBonus) * 100) / 100);
       unit.morale = Math.min(1.0, Math.round((unit.morale + GARRISON_HEAL_MORALE) * 1000) / 1000);
 
       if (unit.health > oldHealth || unit.morale > oldMorale) {
@@ -4600,4 +4617,3 @@ export function resolveTick(
     agreementMutations,
   };
 }
-
