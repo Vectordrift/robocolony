@@ -15,7 +15,7 @@ describe('Health endpoint', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: 'ok', version: 'dev' });
+    expect(response.json()).toEqual({ status: 'ok', version: expect.any(String) });
   });
 
   it('GET /health returns correct content-type', async () => {

@@ -10,10 +10,16 @@ RUN npm run build
 # Production stage
 FROM node:22-alpine
 WORKDIR /app
+ARG VCS_REF=dev
+ARG BUILD_TIMESTAMP=unknown
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 COPY web ./web
+RUN SHORT_SHA="$(printf '%.7s' "$VCS_REF")" && \
+    printf '{"sha":"%s","short":"%s","timestamp":"%s","message":""}\n' "$VCS_REF" "$SHORT_SHA" "$BUILD_TIMESTAMP" > version.json && \
+    cp version.json dist/version.json && \
+    cp version.json web/version.json
 EXPOSE 3000
 ENV NODE_ENV=production
 CMD ["node", "dist/server.js"]
