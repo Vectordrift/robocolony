@@ -53,6 +53,8 @@ import {
   STOCKPILE_DECAY_RATE,
   HEALING_PER_TICK,
   BARRACKS_HEALING_BONUS,
+  SETTLEMENT_LOYALTY_RECOVERY,
+  SETTLEMENT_GARRISON_LOYALTY_BONUS,
   NEWCOMER_PROTECTION_TICKS,
   POI_SURVEY_INFLUENCE,
   WATCHTOWER_SURVEY_REVEAL_RADIUS,
@@ -3822,6 +3824,33 @@ describe('Edge cases: simultaneous actions (Issue #123)', () => {
     expect(settlement.colonyId).toBe('c1');
     expect(settlement.loyalty).toBe(50);
     expect(result.events.some(e => e.type === 'settlement_captured')).toBe(true);
+  });
+
+  it('recovers captured settlement loyalty over time and garrison speeds it up', () => {
+    const colony = makeColony({ id: 'c1', resources: { food: 100, timber: 100, stone: 100, iron: 100, influence: 100 } });
+    const settlement = makeSettlement({ id: 's1', colonyId: 'c1', hexX: 5, hexY: 0, loyalty: 50 });
+    const garrison = makeUnit({ id: 'u1', colonyId: 'c1', hexX: 5, hexY: 0, type: 'soldier', health: 100 });
+    const hexes = makePlainGrid(8);
+
+    const result = resolveTick([colony], [settlement], [garrison], hexes, []);
+
+    expect(result.settlements[0].loyalty).toBe(50 + SETTLEMENT_LOYALTY_RECOVERY + SETTLEMENT_GARRISON_LOYALTY_BONUS);
+    const loyaltyEvent = result.events.find(e => e.type === 'settlement_loyalty_changed');
+    expect(loyaltyEvent?.settlementId).toBe('s1');
+    expect(loyaltyEvent?.data.garrisoned).toBe(true);
+  });
+
+  it('does not recover settlement loyalty on the same tick it is captured', () => {
+    const c1 = makeColony({ id: 'c1', resources: { food: 100, timber: 100, stone: 100, iron: 100, influence: 100 } });
+    const c2 = makeColony({ id: 'c2', resources: { food: 100, timber: 100, stone: 100, iron: 100, influence: 100 } });
+    const settlement = makeSettlement({ id: 's1', colonyId: 'c2', hexX: 5, hexY: 0, loyalty: 100 });
+    const attacker = makeUnit({ id: 'u2', colonyId: 'c1', hexX: 5, hexY: 0, type: 'soldier', health: 100 });
+    const hexes = makePlainGrid(8);
+
+    const result = resolveTick([c1, c2], [settlement], [attacker], hexes, []);
+
+    expect(result.settlements[0].loyalty).toBe(50);
+    expect(result.events.some(e => e.type === 'settlement_loyalty_changed')).toBe(false);
   });
 
   // Case 10: Settler tries to found on hex with enemy settlement
