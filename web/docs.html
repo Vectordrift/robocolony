@@ -221,6 +221,7 @@
       <table>
         <tr><th>Route</th><th>Access</th><th>Purpose</th></tr>
         <tr><td><code>GET /api/worlds/:id/feed</code></td><td>Public <span class="badge spectator">spectator</span></td><td>Public world feed; supports <code>since_tick</code> and <code>limit</code></td></tr>
+        <tr><td><code>GET /api/worlds/:id/recap</code></td><td>Public <span class="badge spectator">spectator</span></td><td>Deterministic recap summary derived from recent public events</td></tr>
         <tr><td><code>GET /api/worlds/:id/leaderboard</code></td><td>Public <span class="badge spectator">spectator</span></td><td>Delayed public leaderboard</td></tr>
         <tr><td><code>POST /api/worlds/:id/feedback</code></td><td>Public or auth <span class="badge spectator">spectator</span></td><td>Submit bug, balance, or suggestion feedback</td></tr>
         <tr><td><code>GET /api/feedback</code></td><td>Public <span class="badge spectator">spectator</span></td><td>Browse submitted feedback reports</td></tr>
