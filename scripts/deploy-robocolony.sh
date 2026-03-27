@@ -22,7 +22,11 @@ if [[ -z "$FLYCTL_BIN" && -x /opt/homebrew/bin/flyctl ]]; then
 fi
 
 echo "Deploying app '$APP' with image-based rollout..."
-"$FLYCTL_BIN" deploy --remote-only --depot=false -a "$APP"
+GIT_SHA="$(git rev-parse HEAD)"
+BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+"$FLYCTL_BIN" deploy --remote-only --depot=false -a "$APP" \
+  --build-arg "VCS_REF=$GIT_SHA" \
+  --build-arg "BUILD_TIMESTAMP=$BUILD_TIMESTAMP"
 
 echo "Waiting for public health..."
 for attempt in 1 2 3 4 5; do
