@@ -554,6 +554,12 @@ export const HEALING_PER_TICK = 5;
 /** Additional healing per barracks level at a friendly settlement */
 export const BARRACKS_HEALING_BONUS = 3;
 
+/** Base loyalty recovered per tick at a friendly settlement */
+export const SETTLEMENT_LOYALTY_RECOVERY = 1;
+
+/** Extra loyalty recovered when a friendly unit garrisons the settlement hex */
+export const SETTLEMENT_GARRISON_LOYALTY_BONUS = 2;
+
 /** Legacy score awarded for capturing an enemy settlement */
 export const SETTLEMENT_CAPTURE_SCORE = 50;
 
@@ -3931,6 +3937,7 @@ export function resolveTick(
   let newMessages: MessageRecord[] = [];
   let agreementMutations: AgreementMutation[] = [];
   const combatHexesThisTick = new Set<string>();
+  const capturedSettlementIdsThisTick = new Set<string>();
 
   // --- Agreement resolution (before other actions) ---
   {
@@ -4259,6 +4266,7 @@ export function resolveTick(
     // Handle settlement captures: award legacy score, check for colony elimination
     if (combatResult.capturedSettlements.length > 0) {
       for (const capture of combatResult.capturedSettlements) {
+        capturedSettlementIdsThisTick.add(capture.settlementId);
         // Award legacy score to capturer
         const capturer = updatedColonies.find(c => c.id === capture.toColony);
         if (capturer) {
@@ -4726,6 +4734,41 @@ export function resolveTick(
             }
           }
         }
+      }
+    }
+
+    // --- Captured settlement stabilization ---
+    // Captured settlements start at 50 loyalty and recover over time while pacified.
+    // A friendly garrison on the settlement hex speeds up the recovery.
+    for (const settlement of mySettlements) {
+      if (settlement.loyalty >= 100) continue;
+      if (capturedSettlementIdsThisTick.has(settlement.id)) continue;
+      if (combatHexesThisTick.has(hexKey(settlement.hexX, settlement.hexY))) continue;
+
+      const hasEnemiesOnHex = updatedUnits.some(
+        u => u.colonyId !== colony.id && u.hexX === settlement.hexX && u.hexY === settlement.hexY && u.health > 0,
+      );
+      if (hasEnemiesOnHex) continue;
+
+      const hasFriendlyGarrison = myUnits.some(
+        u => u.hexX === settlement.hexX && u.hexY === settlement.hexY && u.health > 0,
+      );
+      const loyaltyGain = SETTLEMENT_LOYALTY_RECOVERY + (hasFriendlyGarrison ? SETTLEMENT_GARRISON_LOYALTY_BONUS : 0);
+      const previousLoyalty = settlement.loyalty;
+      settlement.loyalty = Math.min(100, settlement.loyalty + loyaltyGain);
+
+      if (settlement.loyalty > previousLoyalty) {
+        events.push({
+          type: 'settlement_loyalty_changed',
+          colonyId: colony.id,
+          settlementId: settlement.id,
+          data: {
+            loyaltyBefore: previousLoyalty,
+            loyaltyAfter: settlement.loyalty,
+            gain: settlement.loyalty - previousLoyalty,
+            garrisoned: hasFriendlyGarrison,
+          },
+        });
       }
     }
 
