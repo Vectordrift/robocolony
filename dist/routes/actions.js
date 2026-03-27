@@ -283,8 +283,45 @@ async function validateOwnership(colonyId, worldId, action) {
     }
     return { valid: true };
 }
+// --- Action Schema (for discoverability) ---
+/** Build the action schema object describing all valid action types and their params */
+function getActionSchema() {
+    const schema = {};
+    for (const [type, required] of Object.entries(VALID_ACTION_TYPES)) {
+        const allowed = ALLOWED_PARAMS[type] ?? required;
+        const optional = allowed.filter(p => !required.includes(p));
+        const entry = { required, optional };
+        // Add valid values hints for enum-like params
+        const validValues = {};
+        if (['build', 'upgrade_building', 'demolish'].includes(type)) {
+            validValues['buildingType'] = [...VALID_BUILDING_TYPES];
+        }
+        if (type === 'train_unit') {
+            validValues['unitType'] = [...VALID_UNIT_TYPES];
+        }
+        if (type === 'convert_resources') {
+            validValues['fromResource'] = [...VALID_RESOURCES];
+            validValues['toResource'] = [...VALID_RESOURCES];
+        }
+        if (type === 'propose_agreement') {
+            validValues['agreementType'] = [...VALID_AGREEMENT_TYPES];
+        }
+        if (Object.keys(validValues).length > 0) {
+            entry.validValues = validValues;
+        }
+        schema[type] = entry;
+    }
+    return schema;
+}
 // --- Routes ---
 export async function actionRoutes(app) {
+    // Action schema — discover valid action types and their params (no auth required)
+    app.get('/api/worlds/:id/actions/schema', async (_request, reply) => {
+        return {
+            maxActionsPerTick: MAX_ACTIONS_PER_TICK,
+            actionTypes: getActionSchema(),
+        };
+    });
     // Submit actions
     app.post('/api/worlds/:id/actions', {
         preHandler: requireAuth,

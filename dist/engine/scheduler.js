@@ -316,25 +316,10 @@ export class TickScheduler {
                     })
                         .where(eq(schema.colonies.id, colony.id));
                 }
-                // Handle dead colonies — clean up their settlements and units
-                if (result.deadColonyIds && result.deadColonyIds.length > 0) {
-                    for (const deadId of result.deadColonyIds) {
-                        // Delete units belonging to dead colony
-                        await tx.delete(schema.units).where(eq(schema.units.colonyId, deadId));
-                        // Delete settlements and free hexes
-                        const deadSettlements = await tx.select({ id: schema.settlements.id, hexX: schema.settlements.hexX, hexY: schema.settlements.hexY })
-                            .from(schema.settlements)
-                            .where(eq(schema.settlements.colonyId, deadId));
-                        for (const s of deadSettlements) {
-                            await tx.update(schema.hexes).set({ settlementId: null })
-                                .where(and(eq(schema.hexes.worldId, world.id), eq(schema.hexes.x, s.hexX), eq(schema.hexes.y, s.hexY)));
-                        }
-                        await tx.delete(schema.settlements).where(eq(schema.settlements.colonyId, deadId));
-                        // Remove colony from explored_by arrays (fog cleanup)
-                        await tx.execute(sql `UPDATE hexes SET explored_by = array_remove(explored_by, ${deadId}) WHERE world_id = ${world.id} AND ${deadId} = ANY(explored_by)`);
-                    }
-                }
                 // Update existing settlements and insert newly founded ones
+                // NOTE: This MUST run BEFORE dead colony cleanup so that captured
+                // settlements have their colonyId transferred to the new owner before
+                // we delete settlements belonging to dead colonies (#161, #162).
                 const existingSettlementIds = new Set(dbSettlements.map(s => s.id));
                 for (const settlement of result.settlements) {
                     if (existingSettlementIds.has(settlement.id)) {
@@ -369,6 +354,26 @@ export class TickScheduler {
                         await tx.update(schema.hexes)
                             .set({ settlementId: settlement.id })
                             .where(and(eq(schema.hexes.worldId, settlement.worldId), eq(schema.hexes.x, settlement.hexX), eq(schema.hexes.y, settlement.hexY)));
+                    }
+                }
+                // Handle dead colonies — clean up their settlements and units
+                // Runs AFTER settlement updates so captured settlements already
+                // belong to their new owner and won't be incorrectly deleted.
+                if (result.deadColonyIds && result.deadColonyIds.length > 0) {
+                    for (const deadId of result.deadColonyIds) {
+                        // Delete units belonging to dead colony
+                        await tx.delete(schema.units).where(eq(schema.units.colonyId, deadId));
+                        // Delete settlements and free hexes
+                        const deadSettlements = await tx.select({ id: schema.settlements.id, hexX: schema.settlements.hexX, hexY: schema.settlements.hexY })
+                            .from(schema.settlements)
+                            .where(eq(schema.settlements.colonyId, deadId));
+                        for (const s of deadSettlements) {
+                            await tx.update(schema.hexes).set({ settlementId: null })
+                                .where(and(eq(schema.hexes.worldId, world.id), eq(schema.hexes.x, s.hexX), eq(schema.hexes.y, s.hexY)));
+                        }
+                        await tx.delete(schema.settlements).where(eq(schema.settlements.colonyId, deadId));
+                        // Remove colony from explored_by arrays (fog cleanup)
+                        await tx.execute(sql `UPDATE hexes SET explored_by = array_remove(explored_by, ${deadId}) WHERE world_id = ${world.id} AND ${deadId} = ANY(explored_by)`);
                     }
                 }
                 // Update existing units and insert newly trained units
