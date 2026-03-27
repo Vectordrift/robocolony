@@ -10,8 +10,9 @@ import { eq, and, or, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { worlds, hexes, colonies, settlements, units, agreements } from '../db/schema/index.js';
 import { requireAuth } from '../middleware/index.js';
-import { TECH_TREE } from '../engine/tick.js';
+import { TECH_TREE, MIN_SETTLEMENT_DISTANCE } from '../engine/tick.js';
 import type { TechId } from '../engine/tick.js';
+import { hexDistance, hexNeighbors } from '../engine/hex.js';
 
 // --- Fog of War Helper ---
 
@@ -22,6 +23,122 @@ export interface VisibleHex {
   resources: Record<string, number>;
   settlementId: string | null;
   poi?: { type: string; discoveredBy?: string; discoveredAtTick?: number; surveyedBy?: string; surveyedAtTick?: number } | null;
+}
+
+export interface SettlementSiteCandidate {
+  x: number;
+  y: number;
+  score: number;
+  distanceToNearestSettlement: number | null;
+  nearbyResources: {
+    food: number;
+    timber: number;
+    stone: number;
+    iron: number;
+  };
+  terrainDiversity: number;
+  nearbyPoiCount: number;
+  nearbyMountainResourceScore: number;
+  reasons: string[];
+}
+
+export function analyzeSettlementSites(
+  visibleHexes: VisibleHex[],
+  limit = 5,
+): SettlementSiteCandidate[] {
+  const visibleHexMap = new Map(visibleHexes.map(hex => [`${hex.x},${hex.y}`, hex]));
+  const settlementCoords = visibleHexes
+    .filter(hex => hex.settlementId !== null)
+    .map(hex => ({ q: hex.x, r: hex.y }));
+
+  const candidates: SettlementSiteCandidate[] = [];
+
+  for (const hex of visibleHexes) {
+    if (hex.terrain === 'ocean') continue;
+    if (hex.settlementId !== null) continue;
+
+    const candidateCoord = { q: hex.x, r: hex.y };
+    const nearestSettlementDistance = settlementCoords.length === 0
+      ? null
+      : Math.min(...settlementCoords.map(coord => hexDistance(candidateCoord, coord)));
+
+    if (nearestSettlementDistance !== null && nearestSettlementDistance < MIN_SETTLEMENT_DISTANCE) {
+      continue;
+    }
+
+    const neighborhood = [candidateCoord, ...hexNeighbors(candidateCoord)]
+      .map(coord => visibleHexMap.get(`${coord.q},${coord.r}`))
+      .filter((neighbor): neighbor is VisibleHex => Boolean(neighbor));
+
+    const nearbyResources = neighborhood.reduce((totals, neighbor) => ({
+      food: totals.food + (neighbor.resources.food ?? 0),
+      timber: totals.timber + (neighbor.resources.timber ?? 0),
+      stone: totals.stone + (neighbor.resources.stone ?? 0),
+      iron: totals.iron + (neighbor.resources.iron ?? 0),
+    }), { food: 0, timber: 0, stone: 0, iron: 0 });
+
+    const terrainDiversity = new Set(neighborhood.map(neighbor => neighbor.terrain)).size;
+    const nearbyPoiCount = visibleHexes.filter(other => {
+      if (!other.poi) return false;
+      return hexDistance(candidateCoord, { q: other.x, r: other.y }) <= 2;
+    }).length;
+    const nearbyMountainResourceScore = visibleHexes.reduce((score, other) => {
+      if (other.terrain !== 'mountains') return score;
+      if (hexDistance(candidateCoord, { q: other.x, r: other.y }) > 2) return score;
+      return score + (other.resources.stone ?? 0) + (other.resources.iron ?? 0);
+    }, 0);
+
+    const spacingBonus = nearestSettlementDistance === null
+      ? MIN_SETTLEMENT_DISTANCE + 2
+      : Math.min(nearestSettlementDistance, MIN_SETTLEMENT_DISTANCE + 3);
+    const score = (
+      nearbyResources.food * 5 +
+      nearbyResources.timber * 2 +
+      nearbyResources.stone * 3 +
+      nearbyResources.iron * 4 +
+      terrainDiversity * 3 +
+      nearbyPoiCount * 4 +
+      nearbyMountainResourceScore * 2 +
+      spacingBonus
+    );
+
+    const reasons = [
+      `Food reach ${nearbyResources.food}`,
+      `Terrain diversity ${terrainDiversity}`,
+    ];
+    if (nearbyResources.iron > 0 || nearbyResources.stone > 0 || nearbyMountainResourceScore > 0) {
+      reasons.push(`Strong mountain access (${nearbyMountainResourceScore})`);
+    }
+    if (nearbyPoiCount > 0) {
+      reasons.push(`${nearbyPoiCount} nearby POI${nearbyPoiCount === 1 ? '' : 's'}`);
+    }
+    if (nearestSettlementDistance !== null) {
+      reasons.push(`Nearest known settlement ${nearestSettlementDistance} hexes away`);
+    }
+
+    candidates.push({
+      x: hex.x,
+      y: hex.y,
+      score,
+      distanceToNearestSettlement: nearestSettlementDistance,
+      nearbyResources,
+      terrainDiversity,
+      nearbyPoiCount,
+      nearbyMountainResourceScore,
+      reasons,
+    });
+  }
+
+  return candidates
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if ((b.distanceToNearestSettlement ?? -1) !== (a.distanceToNearestSettlement ?? -1)) {
+        return (b.distanceToNearestSettlement ?? -1) - (a.distanceToNearestSettlement ?? -1);
+      }
+      if (a.x !== b.x) return a.x - b.x;
+      return a.y - b.y;
+    })
+    .slice(0, limit);
 }
 
 /**
@@ -356,6 +473,34 @@ export async function stateRoutes(app: FastifyInstance) {
       colonyId: colony.id,
       hexCount: visibleMap.length,
       hexes: visibleMap,
+    };
+  });
+
+  app.get<WorldParams & { Querystring: { limit?: string } }>('/api/worlds/:id/analysis/settlement-sites', {
+    preHandler: requireAuth,
+  }, async (request, reply) => {
+    const colony = request.colony!;
+    const rawLimit = Number.parseInt(request.query.limit ?? '5', 10);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 10) : 5;
+
+    const world = await db
+      .select({ currentTick: worlds.currentTick })
+      .from(worlds)
+      .where(eq(worlds.id, colony.worldId))
+      .limit(1);
+
+    if (world.length === 0) {
+      return reply.code(404).send({ error: 'not_found', message: 'World not found' });
+    }
+
+    const visibleMap = await getVisibleHexes(colony.worldId, colony.id);
+    const candidates = analyzeSettlementSites(visibleMap, limit);
+
+    return {
+      tick: world[0].currentTick,
+      colonyId: colony.id,
+      count: candidates.length,
+      candidates,
     };
   });
 
