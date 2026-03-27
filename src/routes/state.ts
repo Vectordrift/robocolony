@@ -289,7 +289,7 @@ export async function stateRoutes(app: FastifyInstance) {
       // Filter to only units on visible hexes
       const visibleSet = new Set(visibleCoords.map(c => `${c.x},${c.y}`));
       enemyUnitsOnMap = allVisibleUnits
-        .filter(u => visibleSet.has(`${u.hexX},${u.hexY}`))
+        .filter(u => u.health > 0 && visibleSet.has(`${u.hexX},${u.hexY}`))
         .map(u => ({
           id: u.id,
           colonyId: u.colonyId,
