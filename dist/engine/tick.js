@@ -274,6 +274,10 @@ export const HOMELAND_MORALE_BONUS = 0.15;
 export const GARRISON_MORALE_FLOOR = 0.7;
 /** Defense multiplier for units defending on a hex with a settlement that has walls */
 export const WALLS_DEFENSE_MULTIPLIER = 1.5;
+/** Minimum damage dealt by military units per combat round (prevents 0-damage stalemates #173) */
+export const COMBAT_MINIMUM_DAMAGE = 1;
+/** Health threshold below which military units bleed out after combat (#174) */
+export const COMBAT_BLEEDOUT_THRESHOLD = 5;
 /** Legacy score awarded for capturing an enemy settlement */
 export const SETTLEMENT_CAPTURE_SCORE = 50;
 const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
@@ -1576,7 +1580,8 @@ export function resolveCombat(units, actions, seed, activeAgreements, settlement
             // Calculate damage with random bonus
             const bonus = rng() * COMBAT_RANDOM_BONUS;
             const rawDamage = attackPower * (1 + bonus);
-            let effectiveDamage = Math.max(0, rawDamage - UNIT_DEFENSE[target.type]);
+            // Military units always deal at least COMBAT_MINIMUM_DAMAGE (#173)
+            let effectiveDamage = Math.max(COMBAT_MINIMUM_DAMAGE, rawDamage - UNIT_DEFENSE[target.type]);
             // Walls defense bonus: defending units on a settlement hex with walls take reduced damage
             if (settlements) {
                 const defenderSettlement = settlements.find(s => s.colonyId === target.colonyId && s.hexX === target.hexX && s.hexY === target.hexY);
@@ -1741,6 +1746,46 @@ export function resolveCombat(units, actions, seed, activeAgreements, settlement
                 killedInCombat: true,
                 damageReceived: 0,
                 reason: 'Critically wounded settler perished in contested territory',
+            },
+        });
+    }
+    // --- Military unit bleedout: near-dead military units perish after combat (#174) ---
+    // Units at ≤ COMBAT_BLEEDOUT_THRESHOLD HP are destroyed after combat resolution.
+    // This prevents zombie militia/soldiers lingering at 1 HP forever.
+    for (const unit of units) {
+        if (destroyedUnitIds.includes(unit.id))
+            continue;
+        if (unit.type === 'settler' || unit.type === 'scout')
+            continue; // settlers handled above, scouts don't fight
+        if (!MILITARY_UNIT_TYPES.has(unit.type))
+            continue;
+        if (unit.health > COMBAT_BLEEDOUT_THRESHOLD)
+            continue;
+        // Only bleedout units that participated in combat (on a contested hex)
+        const unitKey = hexKey(unit.hexX, unit.hexY);
+        const hexGroup = hexUnits.get(unitKey);
+        if (!hexGroup)
+            continue;
+        const wasInCombat = hexGroup.some(u => u.colonyId !== unit.colonyId && !destroyedUnitIds.includes(u.id))
+            || destroyedUnitIds.some(dId => {
+                const destroyed = units.find(u => u.id === dId);
+                return destroyed && destroyed.hexX === unit.hexX && destroyed.hexY === unit.hexY && destroyed.colonyId !== unit.colonyId;
+            });
+        if (!wasInCombat)
+            continue;
+        destroyedUnitIds.push(unit.id);
+        unit.health = 0;
+        events.push({
+            type: 'unit_destroyed',
+            colonyId: unit.colonyId,
+            unitId: unit.id,
+            data: {
+                unitType: unit.type,
+                hexX: unit.hexX,
+                hexY: unit.hexY,
+                killedInCombat: true,
+                damageReceived: 0,
+                reason: `Critically wounded ${unit.type} bled out after combat`,
             },
         });
     }

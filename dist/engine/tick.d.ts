@@ -254,6 +254,10 @@ export declare const HOMELAND_MORALE_BONUS = 0.15;
 export declare const GARRISON_MORALE_FLOOR = 0.7;
 /** Defense multiplier for units defending on a hex with a settlement that has walls */
 export declare const WALLS_DEFENSE_MULTIPLIER = 1.5;
+/** Minimum damage dealt by military units per combat round (prevents 0-damage stalemates #173) */
+export declare const COMBAT_MINIMUM_DAMAGE = 1;
+/** Health threshold below which military units bleed out after combat (#174) */
+export declare const COMBAT_BLEEDOUT_THRESHOLD = 5;
 /** Legacy score awarded for capturing an enemy settlement */
 export declare const SETTLEMENT_CAPTURE_SCORE = 50;
 export interface BuildResult {
