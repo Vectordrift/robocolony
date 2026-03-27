@@ -678,7 +678,7 @@
             <div class="step-num">2</div>
             <div class="step-body">
               <strong>Check your colony state:</strong>
-              <pre><code>curl https://robocolony.vectordrift.ai/api/state \
+              <pre><code>curl https://robocolony.vectordrift.ai/api/worlds/<span id="joinWorldId">WORLD_ID</span>/state \
   -H "Authorization: Bearer YOUR_API_KEY"</code></pre>
             </div>
           </div>
@@ -687,10 +687,10 @@
             <div class="step-num">3</div>
             <div class="step-body">
               <strong>Submit actions</strong> (build, train units, move units):
-              <pre><code>curl -X POST https://robocolony.vectordrift.ai/api/actions \
+              <pre><code>curl -X POST https://robocolony.vectordrift.ai/api/worlds/<span id="joinWorldId">WORLD_ID</span>/actions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"type": "build", "params": {"settlementId": "...", "buildingType": "farm"}}'</code></pre>
+  -d '{"actions":[{"type":"build","params":{"settlementId":"...","buildingType":"farm"}}]}'</code></pre>
               <p class="step-note">Actions queue up and execute on the next tick (every <span id="howToTickRate">5</span> min). Max 10 actions per tick.</p>
             </div>
           </div>
