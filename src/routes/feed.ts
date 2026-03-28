@@ -43,11 +43,63 @@ export interface SpectatorRecap {
   highlights: string[];
 }
 
+interface PublicColonySummaryInput {
+  id: string;
+  name: string;
+  status: string;
+  legacyScore: number | null;
+}
+
+interface PublicSettlementRow {
+  colonyId: string;
+  tier: string;
+}
+
+interface PublicUnitRow {
+  colonyId: string;
+  type?: string;
+}
+
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+function isLiveColonyStatus(status: string): boolean {
+  return status === 'active' || status === 'full';
+}
+
+export function buildPublicColonySummary(
+  colony: PublicColonySummaryInput,
+  settlementRows: PublicSettlementRow[],
+  unitRows: PublicUnitRow[],
+) {
+  const live = isLiveColonyStatus(colony.status);
+  const mySettlements = live ? settlementRows.filter((s) => s.colonyId === colony.id) : [];
+  const myUnits = live ? unitRows.filter((u) => u.colonyId === colony.id) : [];
+
+  return {
+    id: colony.id,
+    name: colony.name,
+    status: colony.status,
+    legacyScore: colony.legacyScore ?? 0,
+    settlements: mySettlements.length,
+    settlementTiers: {
+      outpost: mySettlements.filter((s) => s.tier === 'outpost').length,
+      town: mySettlements.filter((s) => s.tier === 'town').length,
+      city: mySettlements.filter((s) => s.tier === 'city').length,
+    },
+    units: myUnits.length,
+    unitTypes: {
+      scout: myUnits.filter((u) => u.type === 'scout').length,
+      militia: myUnits.filter((u) => u.type === 'militia').length,
+      soldier: myUnits.filter((u) => u.type === 'soldier').length,
+      siege: myUnits.filter((u) => u.type === 'siege').length,
+      settler: myUnits.filter((u) => u.type === 'settler').length,
+    },
+  };
 }
 
 function getEventImportance(event: SpectatorFeedEvent): 'high' | 'normal' | 'low' {
@@ -414,31 +466,7 @@ export async function feedRoutes(app: FastifyInstance) {
       .where(eq(units.worldId, worldId));
 
     // Build colony summaries
-    const colonySummaries = colonyRows.map((c) => {
-      const mySettlements = settlementRows.filter(s => s.colonyId === c.id);
-      const myUnits = unitRows.filter(u => u.colonyId === c.id);
-
-      return {
-        id: c.id,
-        name: c.name,
-        status: c.status,
-        legacyScore: c.legacyScore,
-        settlements: mySettlements.length,
-        settlementTiers: {
-          outpost: mySettlements.filter(s => s.tier === 'outpost').length,
-          town: mySettlements.filter(s => s.tier === 'town').length,
-          city: mySettlements.filter(s => s.tier === 'city').length,
-        },
-        units: myUnits.length,
-        unitTypes: {
-          scout: myUnits.filter(u => u.type === 'scout').length,
-          militia: myUnits.filter(u => u.type === 'militia').length,
-          soldier: myUnits.filter(u => u.type === 'soldier').length,
-          siege: myUnits.filter(u => u.type === 'siege').length,
-          settler: myUnits.filter(u => u.type === 'settler').length,
-        },
-      };
-    });
+    const colonySummaries = colonyRows.map((c) => buildPublicColonySummary(c, settlementRows, unitRows));
 
     return {
       world: {
@@ -567,15 +595,13 @@ export async function feedRoutes(app: FastifyInstance) {
       .where(eq(units.worldId, worldId));
 
     const ranked = colonyRows.map((c) => {
-      const mySettlements = settlementRows.filter(s => s.colonyId === c.id);
-      const myUnits = unitRows.filter(u => u.colonyId === c.id);
-
+      const summary = buildPublicColonySummary(c, settlementRows, unitRows);
       return {
-        name: c.name,
-        status: c.status,
-        legacyScore: c.legacyScore ?? 0,
-        settlements: mySettlements.length,
-        units: myUnits.length,
+        name: summary.name,
+        status: summary.status,
+        legacyScore: summary.legacyScore,
+        settlements: summary.settlements,
+        units: summary.units,
         founded: c.createdAt,
       };
     })
