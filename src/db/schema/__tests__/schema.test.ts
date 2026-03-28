@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { getTableName, getTableColumns } from 'drizzle-orm';
 import { worlds } from '../worlds.js';
 import { starSystems } from '../starSystems.js';
+import { sectors } from '../sectors.js';
+import { starLanes } from '../starLanes.js';
 import { hexes } from '../hexes.js';
 import { colonies } from '../colonies.js';
 import { settlements } from '../settlements.js';
@@ -44,12 +46,51 @@ describe('Database schema', () => {
       const cols = getTableColumns(starSystems);
       expect(cols).toHaveProperty('id');
       expect(cols).toHaveProperty('name');
+      expect(cols).toHaveProperty('sectorId');
       expect(cols).toHaveProperty('status');
       expect(cols).toHaveProperty('importance');
       expect(cols).toHaveProperty('positionX');
       expect(cols).toHaveProperty('positionY');
       expect(cols).toHaveProperty('claimants');
       expect(cols).toHaveProperty('neighborSystemIds');
+      expect(cols).toHaveProperty('metadata');
+      expect(cols).toHaveProperty('createdAt');
+    });
+  });
+
+  describe('sectors table', () => {
+    it('has correct table name', () => {
+      expect(getTableName(sectors)).toBe('sectors');
+    });
+
+    it('has all required columns', () => {
+      const cols = getTableColumns(sectors);
+      expect(cols).toHaveProperty('id');
+      expect(cols).toHaveProperty('name');
+      expect(cols).toHaveProperty('status');
+      expect(cols).toHaveProperty('strategicValue');
+      expect(cols).toHaveProperty('positionX');
+      expect(cols).toHaveProperty('positionY');
+      expect(cols).toHaveProperty('metadata');
+      expect(cols).toHaveProperty('createdAt');
+    });
+  });
+
+  describe('star_lanes table', () => {
+    it('has correct table name', () => {
+      expect(getTableName(starLanes)).toBe('star_lanes');
+    });
+
+    it('has all required columns', () => {
+      const cols = getTableColumns(starLanes);
+      expect(cols).toHaveProperty('id');
+      expect(cols).toHaveProperty('fromSystemId');
+      expect(cols).toHaveProperty('toSystemId');
+      expect(cols).toHaveProperty('laneClass');
+      expect(cols).toHaveProperty('travelCost');
+      expect(cols).toHaveProperty('travelTicks');
+      expect(cols).toHaveProperty('chokepoint');
+      expect(cols).toHaveProperty('visibility');
       expect(cols).toHaveProperty('metadata');
       expect(cols).toHaveProperty('createdAt');
     });
@@ -224,9 +265,9 @@ describe('Database schema', () => {
     });
   });
 
-  it('all 11 tables are defined', () => {
-    const tables = [worlds, starSystems, hexes, colonies, settlements, units, actions, agreements, messages, events, feedbackReports];
-    expect(tables).toHaveLength(11);
+  it('all 13 tables are defined', () => {
+    const tables = [worlds, starSystems, sectors, starLanes, hexes, colonies, settlements, units, actions, agreements, messages, events, feedbackReports];
+    expect(tables).toHaveLength(13);
     tables.forEach(t => expect(getTableName(t)).toBeTruthy());
   });
 });

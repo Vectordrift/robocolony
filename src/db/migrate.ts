@@ -21,15 +21,38 @@ interface ColumnDef {
 }
 
 const CREATE_TABLE_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS sectors (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    strategic_value INTEGER NOT NULL DEFAULT 0,
+    position_x INTEGER,
+    position_y INTEGER,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
   `CREATE TABLE IF NOT EXISTS star_systems (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    sector_id TEXT,
     status TEXT NOT NULL DEFAULT 'surveyed',
     importance INTEGER NOT NULL DEFAULT 0,
     position_x INTEGER,
     position_y INTEGER,
     claimants JSONB NOT NULL DEFAULT '[]'::jsonb,
     neighbor_system_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS star_lanes (
+    id TEXT PRIMARY KEY,
+    from_system_id TEXT NOT NULL,
+    to_system_id TEXT NOT NULL,
+    lane_class TEXT NOT NULL DEFAULT 'standard',
+    travel_cost INTEGER NOT NULL DEFAULT 1,
+    travel_ticks INTEGER NOT NULL DEFAULT 1,
+    chokepoint BOOLEAN NOT NULL DEFAULT false,
+    visibility TEXT NOT NULL DEFAULT 'public',
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
@@ -72,6 +95,7 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   // star_systems
   { table: 'star_systems', column: 'id', type: 'TEXT' },
   { table: 'star_systems', column: 'name', type: 'TEXT' },
+  { table: 'star_systems', column: 'sector_id', type: 'TEXT', nullable: true },
   { table: 'star_systems', column: 'status', type: 'TEXT', defaultValue: "'surveyed'" },
   { table: 'star_systems', column: 'importance', type: 'INTEGER', defaultValue: '0' },
   { table: 'star_systems', column: 'position_x', type: 'INTEGER', nullable: true },
@@ -80,6 +104,28 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   { table: 'star_systems', column: 'neighbor_system_ids', type: 'JSONB', defaultValue: "'[]'::jsonb" },
   { table: 'star_systems', column: 'metadata', type: 'JSONB', defaultValue: "'{}'::jsonb" },
   { table: 'star_systems', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
+
+  // sectors
+  { table: 'sectors', column: 'id', type: 'TEXT' },
+  { table: 'sectors', column: 'name', type: 'TEXT' },
+  { table: 'sectors', column: 'status', type: 'TEXT', defaultValue: "'open'" },
+  { table: 'sectors', column: 'strategic_value', type: 'INTEGER', defaultValue: '0' },
+  { table: 'sectors', column: 'position_x', type: 'INTEGER', nullable: true },
+  { table: 'sectors', column: 'position_y', type: 'INTEGER', nullable: true },
+  { table: 'sectors', column: 'metadata', type: 'JSONB', defaultValue: "'{}'::jsonb" },
+  { table: 'sectors', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
+
+  // star_lanes
+  { table: 'star_lanes', column: 'id', type: 'TEXT' },
+  { table: 'star_lanes', column: 'from_system_id', type: 'TEXT' },
+  { table: 'star_lanes', column: 'to_system_id', type: 'TEXT' },
+  { table: 'star_lanes', column: 'lane_class', type: 'TEXT', defaultValue: "'standard'" },
+  { table: 'star_lanes', column: 'travel_cost', type: 'INTEGER', defaultValue: '1' },
+  { table: 'star_lanes', column: 'travel_ticks', type: 'INTEGER', defaultValue: '1' },
+  { table: 'star_lanes', column: 'chokepoint', type: 'BOOLEAN', defaultValue: 'false' },
+  { table: 'star_lanes', column: 'visibility', type: 'TEXT', defaultValue: "'public'" },
+  { table: 'star_lanes', column: 'metadata', type: 'JSONB', defaultValue: "'{}'::jsonb" },
+  { table: 'star_lanes', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
 
   // colonies
   { table: 'colonies', column: 'id', type: 'TEXT' },
