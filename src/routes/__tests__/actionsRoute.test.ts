@@ -69,6 +69,84 @@ describe('Action submission route', () => {
     await app?.close();
   });
 
+  it('exposes a comprehensive action schema endpoint', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/worlds/world-1/actions/schema',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      maxActionsPerTick: 10,
+      actionCapacity: {
+        basePerTick: 10,
+        perSettlement: 2,
+      },
+      notes: {
+        unknownParamsStripped: true,
+        validationErrorsIncludeHints: true,
+      },
+      actionTypes: {
+        move_unit: {
+          description: expect.any(String),
+          required: ['unitId', 'targetX', 'targetY'],
+          optional: [],
+          params: {
+            unitId: { type: 'string', description: expect.any(String) },
+            targetX: { type: 'integer', description: expect.any(String) },
+            targetY: { type: 'integer', description: expect.any(String) },
+          },
+        },
+        build: {
+          params: {
+            buildingType: {
+              validValues: expect.arrayContaining(['farm', 'workshop']),
+            },
+          },
+        },
+        propose_agreement: {
+          optional: ['terms'],
+        },
+      },
+    });
+  });
+
+  it('returns actionable validation hints for malformed actions', async () => {
+    mockDbSelectQueue([
+      [{ currentTick: 42, status: 'active', mapRadius: 12 }],
+      [{ count: 1 }],
+    ]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/worlds/world-1/actions',
+      headers: {
+        authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+      payload: {
+        actions: [
+          { type: 'build', params: { settlementId: 'set-1' } },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: 'validation_error',
+      details: [
+        {
+          index: 0,
+          actionType: 'build',
+          error: "Missing required param 'buildingType' for action type 'build'",
+          help: {
+            requiredParams: ['settlementId', 'buildingType'],
+            optionalParams: [],
+          },
+        },
+      ],
+    });
+  });
+
   it('rejects research submissions when the colony has no workshop', async () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],
@@ -95,6 +173,7 @@ describe('Action submission route', () => {
       details: [
         {
           index: 0,
+          actionType: 'research',
           error: 'You need a workshop building to research. Build a workshop first.',
         },
       ],
