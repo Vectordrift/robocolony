@@ -836,10 +836,10 @@
     // --- Filter logic ---
     const FILTER_MAP = {
       all: () => true,
-      production: (e) => e.type === 'production' || e.type === 'famine' || e.type === 'shortage' || e.type === '_repeated',
-      movement: (e) => e.type.includes('movement') || e.type === 'unit_moved' || e.type === '_repeated',
-      build: (e) => e.type.includes('build') || e.type === 'settlement_founded' || e.type === '_repeated',
-      military: (e) => ['combat_resolved', 'unit_destroyed', 'desertion', 'unit_trained', '_repeated'].includes(e.type),
+      production: (e) => e.type === 'production' || e.type === 'famine' || e.type === 'shortage' || (e.groupedTypes || []).some((type) => ['production', 'famine', 'shortage'].includes(type)) || e.type === '_repeated',
+      movement: (e) => e.type.includes('movement') || e.type === 'unit_moved' || (e.groupedTypes || []).some((type) => type.includes('movement') || type === 'unit_moved') || e.type === '_repeated',
+      build: (e) => e.type.includes('build') || e.type === 'settlement_founded' || (e.groupedTypes || []).some((type) => type.includes('build') || type === 'settlement_founded') || e.type === '_repeated',
+      military: (e) => ['combat_resolved', 'unit_destroyed', 'desertion', 'unit_trained', '_repeated'].includes(e.type) || (e.groupedTypes || []).some((type) => ['combat_resolved', 'unit_destroyed', 'desertion', 'unit_trained'].includes(type)),
     };
 
     document.querySelectorAll('.feed-controls button').forEach((btn) => {
@@ -873,6 +873,14 @@
 
     function formatEvent(event) {
       const d = event.data || {};
+      if (event.summary) {
+        const tone = event.importance === 'high'
+          ? '⭐ '
+          : event.importance === 'low'
+            ? '· '
+            : '';
+        return `${tone}${escapeHtml(event.summary)}`;
+      }
       switch (event.type) {
         case 'production': {
           const net = d.net || {};
@@ -945,11 +953,15 @@
           ? `<span class="event-colony">${escapeHtml(colony)}</span> `
           : '';
         const timeStr = event.createdAt ? formatEventTime(event.createdAt) : '';
+        const detailTag = event.groupedCount && event.groupedCount > 1
+          ? `<span class="event-time">${event.groupedCount} events</span>`
+          : '';
         return `
-          <li class="event-item ${event.type}">
+          <li class="event-item ${event.type} ${event.importance || 'normal'}">
             <div class="event-tick">
               <span>Tick ${event.tick}</span>
               ${timeStr ? `<span class="event-time">${timeStr}</span>` : ''}
+              ${detailTag}
             </div>
             <div class="event-text">${colonyTag}${formatEvent(event)}</div>
           </li>`;
