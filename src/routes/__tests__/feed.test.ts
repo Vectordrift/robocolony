@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateFeedEvents, buildSpectatorRecap, type SpectatorFeedEvent } from '../feed.js';
+import { aggregateFeedEvents, buildPublicColonySummary, buildSpectatorRecap, type SpectatorFeedEvent } from '../feed.js';
 
 describe('buildSpectatorRecap', () => {
   it('summarizes a mixed public event window into a recap', () => {
@@ -157,5 +157,56 @@ describe('aggregateFeedEvents', () => {
     expect(aggregated[0].groupedCount).toBe(2);
     expect(aggregated[0].summary).toContain('activity update');
     expect(aggregated[0].groupedTypes).toEqual(expect.arrayContaining(['build_complete', 'build_started']));
+  });
+});
+
+describe('buildPublicColonySummary', () => {
+  it('zeros live assets for eliminated colonies in public summaries', () => {
+    const summary = buildPublicColonySummary(
+      {
+        id: 'col_a',
+        name: 'Fallen Colony',
+        status: 'eliminated',
+        legacyScore: 88,
+      },
+      [
+        { colonyId: 'col_a', tier: 'outpost' },
+        { colonyId: 'col_a', tier: 'town' },
+      ],
+      [
+        { colonyId: 'col_a', type: 'soldier' },
+        { colonyId: 'col_a', type: 'militia' },
+      ],
+    );
+
+    expect(summary.legacyScore).toBe(88);
+    expect(summary.settlements).toBe(0);
+    expect(summary.units).toBe(0);
+    expect(summary.settlementTiers).toEqual({ outpost: 0, town: 0, city: 0 });
+    expect(summary.unitTypes).toEqual({ scout: 0, militia: 0, soldier: 0, siege: 0, settler: 0 });
+  });
+
+  it('keeps active colony assets visible in public summaries', () => {
+    const summary = buildPublicColonySummary(
+      {
+        id: 'col_a',
+        name: 'Frontier Colony',
+        status: 'active',
+        legacyScore: 42,
+      },
+      [
+        { colonyId: 'col_a', tier: 'outpost' },
+        { colonyId: 'col_a', tier: 'town' },
+      ],
+      [
+        { colonyId: 'col_a', type: 'soldier' },
+        { colonyId: 'col_a', type: 'militia' },
+      ],
+    );
+
+    expect(summary.settlements).toBe(2);
+    expect(summary.units).toBe(2);
+    expect(summary.settlementTiers).toEqual({ outpost: 1, town: 1, city: 0 });
+    expect(summary.unitTypes).toEqual({ scout: 0, militia: 1, soldier: 1, siege: 0, settler: 0 });
   });
 });
