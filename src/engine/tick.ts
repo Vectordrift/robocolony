@@ -651,6 +651,8 @@ export const COMBAT_MINIMUM_DAMAGE = 1;
 
 /** Health threshold below which military units bleed out after combat (#174) */
 export const COMBAT_BLEEDOUT_THRESHOLD = 5;
+/** Health threshold below which military units require friendly shelter by end of tick */
+export const CRITICAL_WOUND_THRESHOLD = 6;
 export const NEWCOMER_PROTECTION_TICKS = 24;
 
 /** Base health recovered per tick at a friendly settlement */
@@ -3967,6 +3969,7 @@ export function resolveTick(
 ): TickResult {
   const events: TickEvent[] = [];
   const desertedUnitIds: string[] = [];
+  const criticalWoundUnitIds: string[] = [];
   let actionResults: ActionResult[] = [];
   let fogReveals: HexExploration[] = [];
   let newMessages: MessageRecord[] = [];
@@ -4917,6 +4920,34 @@ export function resolveTick(
       }
     }
 
+    // Critically wounded units need to reach a friendly settlement to survive.
+    for (const unit of myUnits) {
+      if (criticalWoundUnitIds.includes(unit.id)) continue;
+      if (!MILITARY_UNIT_TYPES.has(unit.type)) continue;
+      if (unit.health > CRITICAL_WOUND_THRESHOLD) continue;
+
+      const onFriendlySettlement = mySettlements.some(
+        settlement => settlement.hexX === unit.hexX && settlement.hexY === unit.hexY,
+      );
+      if (onFriendlySettlement) continue;
+
+      criticalWoundUnitIds.push(unit.id);
+      unit.health = 0;
+      events.push({
+        type: 'unit_destroyed',
+        colonyId: colony.id,
+        unitId: unit.id,
+        data: {
+          unitType: unit.type,
+          hexX: unit.hexX,
+          hexY: unit.hexY,
+          killedInCombat: false,
+          damageReceived: 0,
+          reason: `Critically wounded ${unit.type} perished without reaching a friendly settlement`,
+        },
+      });
+    }
+
     // --- Food deficit: famine triggers on meaningful negative net food production ---
     // Suppress famine warnings when:
     // 1. Deficit is tiny (< 1.0/tick) — likely rounding noise or pop growth oscillation
@@ -5124,7 +5155,8 @@ export function resolveTick(
   }
 
   // Remove deserted units
-  const survivingUnits = updatedUnits.filter(u => !desertedUnitIds.includes(u.id));
+  const removedUnitIds = new Set([...desertedUnitIds, ...criticalWoundUnitIds]);
+  const survivingUnits = updatedUnits.filter(u => !removedUnitIds.has(u.id));
 
   // Emit action_failed events so failures appear in the event feed
   for (const ar of actionResults) {
