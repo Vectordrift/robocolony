@@ -18,6 +18,7 @@ import { TickScheduler } from './engine/scheduler.js';
 import { ensureSchema } from './db/migrate.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { canWorldRunScheduler } from './lib/worldLifecycle.js';
 import {
   rateLimitStore, joinRateLimitStore,
   RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS,
@@ -134,6 +135,7 @@ export function buildApp() {
 
 /** Active schedulers keyed by worldId */
 const schedulers = new Map<string, TickScheduler>();
+const SCHEDULER_RECONCILE_INTERVAL_MS = 10_000;
 
 /** Debug log buffer — captures scheduler debug output */
 const debugLog: string[] = [];
@@ -162,7 +164,7 @@ async function startSchedulers(logger: { info: (msg: string) => void; error: (ms
   const runningWorlds = await db
     .select()
     .from(worlds)
-    .where(or(eq(worlds.status, 'running'), eq(worlds.status, 'open')));
+    .where(or(eq(worlds.status, 'running'), eq(worlds.status, 'open'), eq(worlds.status, 'full')));
 
   for (const world of runningWorlds) {
     if (schedulers.has(world.id)) continue;
@@ -190,6 +192,21 @@ async function startSchedulers(logger: { info: (msg: string) => void; error: (ms
       logger.error(`Failed to start scheduler for world ${world.id}: ${err}`);
     }
   }
+}
+
+async function reconcileSchedulers(logger: { info: (msg: string) => void; error: (msg: string) => void }) {
+  const allWorlds = await db.select().from(worlds);
+  const activeWorldIds = new Set(allWorlds.filter((world) => canWorldRunScheduler(world.status)).map((world) => world.id));
+
+  for (const [worldId, scheduler] of schedulers.entries()) {
+    if (!activeWorldIds.has(worldId)) {
+      scheduler.stop();
+      schedulers.delete(worldId);
+      logger.info(`Scheduler stopped for world ${worldId} due to status change`);
+    }
+  }
+
+  await startSchedulers(logger);
 }
 
 /**
@@ -280,6 +297,9 @@ async function start() {
     logger.info(`RoboColony server running on ${host}:${port}`);
     await startSchedulers(logger);
     logger.info(`Tick schedulers initialized (${schedulers.size} world(s))`);
+    setInterval(() => {
+      reconcileSchedulers(logger).catch((err) => logger.error(`Scheduler reconcile failed: ${err}`));
+    }, SCHEDULER_RECONCILE_INTERVAL_MS).unref();
   } catch (err) {
     (app.log as any).error(err);
     process.exit(1);

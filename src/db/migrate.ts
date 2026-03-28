@@ -156,6 +156,7 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   { table: 'worlds', column: 'star_system_id', type: 'TEXT', nullable: true },
   { table: 'worlds', column: 'theater_type', type: 'TEXT', defaultValue: "'surface'" },
   { table: 'worlds', column: 'orbital_slot', type: 'INTEGER', nullable: true },
+  { table: 'worlds', column: 'suspended_status', type: 'TEXT', nullable: true },
   { table: 'worlds', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
 
   // star_systems

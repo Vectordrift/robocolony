@@ -111,6 +111,7 @@ See [docs/roadmap.md](docs/roadmap.md) for the current product roadmap and scope
 - **[Orbital Control](docs/orbital-control.md)** — fleets, orbital assets, and system-level conflict primitives
 - **[Simulation LOD](docs/simulation-lod.md)** — how quiet sectors compress while contested theaters stay detailed
 - **[Hierarchical Actors](docs/hierarchical-actors.md)** — colony, system, sector, and polity authority boundaries
+- **[Data Boundaries](docs/data-boundaries.md)** — which tables belong to surface, system, and galaxy layers
 - **[Contributing](CONTRIBUTING.md)** — how to set up, code style, PR workflow
 
 ## Status
