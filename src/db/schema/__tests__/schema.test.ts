@@ -6,6 +6,8 @@ import { sectors } from '../sectors.js';
 import { starLanes } from '../starLanes.js';
 import { fleets } from '../fleets.js';
 import { orbitalAssets } from '../orbitalAssets.js';
+import { governanceActors } from '../governanceActors.js';
+import { actorDelegations } from '../actorDelegations.js';
 import { hexes } from '../hexes.js';
 import { colonies } from '../colonies.js';
 import { settlements } from '../settlements.js';
@@ -150,6 +152,47 @@ describe('Database schema', () => {
       expect(cols).toHaveProperty('controlLevel');
       expect(cols).toHaveProperty('capacity');
       expect(cols).toHaveProperty('visibility');
+      expect(cols).toHaveProperty('metadata');
+      expect(cols).toHaveProperty('createdAt');
+    });
+  });
+
+  describe('governance_actors table', () => {
+    it('has correct table name', () => {
+      expect(getTableName(governanceActors)).toBe('governance_actors');
+    });
+
+    it('has all required columns', () => {
+      const cols = getTableColumns(governanceActors);
+      expect(cols).toHaveProperty('id');
+      expect(cols).toHaveProperty('type');
+      expect(cols).toHaveProperty('name');
+      expect(cols).toHaveProperty('parentActorId');
+      expect(cols).toHaveProperty('colonyId');
+      expect(cols).toHaveProperty('starSystemId');
+      expect(cols).toHaveProperty('sectorId');
+      expect(cols).toHaveProperty('polityId');
+      expect(cols).toHaveProperty('authorityScope');
+      expect(cols).toHaveProperty('visibilityScope');
+      expect(cols).toHaveProperty('metadata');
+      expect(cols).toHaveProperty('createdAt');
+    });
+  });
+
+  describe('actor_delegations table', () => {
+    it('has correct table name', () => {
+      expect(getTableName(actorDelegations)).toBe('actor_delegations');
+    });
+
+    it('has all required columns', () => {
+      const cols = getTableColumns(actorDelegations);
+      expect(cols).toHaveProperty('id');
+      expect(cols).toHaveProperty('fromActorId');
+      expect(cols).toHaveProperty('toActorId');
+      expect(cols).toHaveProperty('status');
+      expect(cols).toHaveProperty('authorityScope');
+      expect(cols).toHaveProperty('controlSurface');
+      expect(cols).toHaveProperty('visibilityRules');
       expect(cols).toHaveProperty('metadata');
       expect(cols).toHaveProperty('createdAt');
     });
@@ -324,9 +367,9 @@ describe('Database schema', () => {
     });
   });
 
-  it('all 15 tables are defined', () => {
-    const tables = [worlds, starSystems, sectors, starLanes, fleets, orbitalAssets, hexes, colonies, settlements, units, actions, agreements, messages, events, feedbackReports];
-    expect(tables).toHaveLength(15);
+  it('all 17 tables are defined', () => {
+    const tables = [worlds, starSystems, sectors, starLanes, fleets, orbitalAssets, governanceActors, actorDelegations, hexes, colonies, settlements, units, actions, agreements, messages, events, feedbackReports];
+    expect(tables).toHaveLength(17);
     tables.forEach(t => expect(getTableName(t)).toBeTruthy());
   });
 });
