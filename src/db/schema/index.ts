@@ -2,6 +2,8 @@ export { worlds } from './worlds.js';
 export { starSystems } from './starSystems.js';
 export { sectors } from './sectors.js';
 export { starLanes } from './starLanes.js';
+export { fleets } from './fleets.js';
+export { orbitalAssets } from './orbitalAssets.js';
 export { hexes } from './hexes.js';
 export { colonies } from './colonies.js';
 export { settlements } from './settlements.js';
