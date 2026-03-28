@@ -44,7 +44,7 @@ const PUBLIC_EVENT_TYPES = new Set([
  * Build public-safe data for spectator feed.
  * Strips private info (exact resource amounts) but keeps the interesting bits.
  */
-function buildPublicData(event: { type: string; colonyId?: string; data: Record<string, unknown> }): Record<string, unknown> | null {
+export function buildPublicData(event: { type: string; colonyId?: string; data: Record<string, unknown> }): Record<string, unknown> | null {
   switch (event.type) {
     case 'settlement_founded':
       return {
@@ -94,6 +94,8 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
     case 'unit_destroyed':
       return {
         unitType: event.data.unitType,
+        hexX: event.data.hexX,
+        hexY: event.data.hexY,
         cause: event.data.cause || 'combat',
       };
     case 'research_complete':
@@ -796,7 +798,6 @@ export class TickScheduler {
     }
   }
 }
-
 
 
 
