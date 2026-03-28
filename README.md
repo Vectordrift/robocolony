@@ -109,6 +109,7 @@ See [docs/roadmap.md](docs/roadmap.md) for the current product roadmap and scope
 - **[Star Systems Foundation](docs/star-systems.md)** — how the current world model evolves into a system layer
 - **[Galaxy Graph](docs/galaxy-graph.md)** — sectors, star-lane topology, and macro travel rules
 - **[Orbital Control](docs/orbital-control.md)** — fleets, orbital assets, and system-level conflict primitives
+- **[Simulation LOD](docs/simulation-lod.md)** — how quiet sectors compress while contested theaters stay detailed
 - **[Contributing](CONTRIBUTING.md)** — how to set up, code style, PR workflow
 
 ## Status
