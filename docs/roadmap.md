@@ -71,7 +71,15 @@ Genesis World — tick ~560, 5 colonies, 1 eliminated. Bolt Industries leading w
 
 ## Research & Technology Vision
 
-Reaching space should not be a checkbox. A colony should need deep planetary mastery — a functioning industrial economy, mature governance, energy infrastructure, and scientific depth — before it can even contemplate orbit. The tech tree enforces this through tiers that each represent a genuine civilizational threshold.
+Reaching space should not be a checkbox. A colony should need deep planetary capability — a functioning industrial economy, mature governance, energy infrastructure, and scientific depth — before it can sustain an orbital or system-scale presence. The tech tree enforces this through tiers that each represent a genuine civilizational threshold, and those thresholds should align with simulation layers rather than just "more stuff on the same surface map."
+
+### Progression Ladder
+
+- **Type 0 foundation** — survive, expand, fight, and negotiate on a single surface theater
+- **Type 0.5 planetary consolidation** — build a stable industrial civilization on one world
+- **Type I system mastery** — operate orbital infrastructure, fleets, interplanetary logistics, and system governance
+- **Type I+ interstellar reach** — project power across multiple star systems and sectors
+- **Type II stellar engineering** — coordinate megastructures such as Dyson swarms across the galaxy layer
 
 ### Tier 2 — Agricultural & Industrial Revolution
 
@@ -118,11 +126,11 @@ Full planetary industrialization. Energy becomes a resource. The colony is a tru
 | Global Trade | 500inf, 400f, 300t | 22 | Logistics | Harbor building; supply chains ignore distance; trade routes generate energy |
 | Urban Planning | 400s, 300t, 200inf, 100steel | 20 | Architecture | Population specialization; settlement districts |
 
-### Tier 5 — Pre-Spaceflight Civilization (Type 0.5 → Type I transition)
+### Tier 5 — Planetary Consolidation (Type 0.5)
 
 **Unlock:** All 6 Tier 4 techs + 5 cities + 1000 population + energy production ≥ 50/tick.
 
-This tier represents the final planetary push before a civilization can look upward. Completing it earns Type I status — mastery of your planet's resources.
+This tier represents the final planetary push before a civilization can sustain a system-layer presence. Completing it earns Type 0.5 status: a unified industrial world with the institutions and energy base required to build beyond its atmosphere. It is a launch point, not the Type I finish line.
 
 | Tech | Cost | Ticks | Prereq (T4) | Effect |
 |------|------|-------|-------------|--------|
@@ -131,13 +139,13 @@ This tier represents the final planetary push before a civilization can look upw
 | Nuclear Power | 600steel, 500i, 400s, 300energy | 35 | Electrical Grid | Power Plant output ×3; unlocks fusion research |
 | Satellite Networks | 500steel, 400energy, 300i | 25 | Rocketry | Orbital surveillance; full map visibility for 50 ticks |
 | Megastructure Theory | 800s, 600steel, 500energy | 35 | Mass Production + Nuclear Power | Unlocks orbital construction; megaproject framework |
-| Planetary Unification | 1000inf, 800f, 500energy | 40 | Unified Governance | Declares Type I; all settlements gain +50% production |
+| Planetary Unification | 1000inf, 800f, 500energy | 40 | Unified Governance | Declares Type 0.5; all settlements gain +50% production |
 
-### Tier 6 — Orbital & Early System (Type I → Type I.5)
+### Tier 6 — Orbital & Early System (Type I Gate)
 
-**Unlock:** Type I achieved (all Tier 5 + planet mastery) + orbital launch pad + 100 energy/tick.
+**Unlock:** Type 0.5 achieved (all Tier 5 + planetary consolidation) + orbital launch pad + 100 energy/tick.
 
-The colony extends beyond its surface. Orbital infrastructure, system-layer awareness, first fleets.
+The colony extends beyond its surface. Orbital infrastructure, system-layer awareness, fleets, and interplanetary logistics become first-class systems. Completing this tier is what should qualify a polity as Type I: it can coordinate and defend an entire star system rather than merely dominate one planet.
 
 | Tech | Cost | Ticks | Prereq (T5) | Effect |
 |------|------|-------|-------------|--------|
@@ -147,6 +155,13 @@ The colony extends beyond its surface. Orbital infrastructure, system-layer awar
 | Interplanetary Logistics | 1000steel, 800energy, 500f | 40 | Orbital Construction | Supply chains between planets in same system |
 | Stellar Survey | 600energy, 500steel, 400inf | 30 | Satellite Networks | Reveals nearby star systems; galaxy-layer awareness |
 | Dyson Theory | 2000steel, 1500energy, 1000i | 60 | Fusion Power + Megastructure Theory | Unlocks Dyson Swarm megaproject; path to Type II |
+
+### Phase Boundaries
+
+- **Surface-only tiers (T1-T4)** deepen the local theater and are valid even before any system layer exists.
+- **Planetary consolidation (T5)** is the capstone for the current surface game and the prerequisite for orbital play.
+- **System mastery (T6 + system foundations)** is the real Type I threshold.
+- **Galaxy expansion** should begin only after star systems, fleets, routes, and simulation LOD exist as core primitives.
 
 ---
 
@@ -187,20 +202,20 @@ Each phase is self-contained and shippable. Playtesters stress-test each layer b
 17. **Settlement districts** — adjacent hex specialization with bonuses
 18. **Harbor + coastal/sea trade** — geographic advantage for coastal settlements
 
-### Phase D: Tier 5 + Planetary Mastery (Type I Gate)
+### Phase D: Tier 5 + Planetary Consolidation (Type 0.5 Gate)
 
-**Goal:** The civilization masters its planet. Rocketry, satellites, unified governance, and megastructure theory prepare for the leap to orbit.
+**Goal:** The civilization consolidates one world into a durable industrial base. Rocketry, satellites, unified governance, and megastructure theory prepare the leap to orbit, but they do not yet complete system mastery.
 
 19. **Tier 5 tech tree** — Rocketry through Planetary Unification
 20. **Launch Pad building** — prerequisite for all orbital construction
 21. **Satellite networks** — reconnaissance and communication infrastructure
 22. **World governance (UN)** — multi-colony voting on world resolutions
 23. **Diplomat + Merchant units** — specialized non-combat agents
-24. **Type I declaration** — completing Tier 5 achieves planetary mastery
+24. **Type 0.5 declaration** — completing Tier 5 achieves planetary consolidation
 
-### Phase E: System Layer (Type I.5)
+### Phase E: System Foundations (Type I Gate)
 
-**Goal:** Introduce the system simulation layer. Planets, orbital infrastructure, fleets, and in-system logistics.
+**Goal:** Introduce the system simulation layer. Planets, orbital infrastructure, fleets, and in-system logistics become the next default theater. This is the phase that should earn Type I.
 
 25. **System-layer data model** — stars, planets, orbital slots, routes
 26. **Tier 6 tech tree** — Orbital Construction through Dyson Theory
@@ -208,17 +223,39 @@ Each phase is self-contained and shippable. Playtesters stress-test each layer b
 28. **Fleet units** — ships, patrols, blockades, orbital combat
 29. **Interplanetary logistics** — supply chains across planets in a system
 30. **Stellar survey** — galaxy-layer awareness, nearby star discovery
+31. **Type I declaration** — completing system operations across one star system
 
-### Phase F: Galaxy Layer (Type II)
+### Phase F: Galaxy Layer (Type I+ to Type II)
 
 **Goal:** Multiple star systems, interstellar travel, sector governance, and megastructures.
 
-31. **Galaxy graph** — stars, sectors, routes, travel costs
-32. **Interstellar travel** — colony ships, multi-tick journeys, communication latency
-33. **Sector governance** — federations, empires, multi-system polities
-34. **Dyson Swarm** — world-level cooperative megaproject; victory condition
-35. **Dynamic simulation LOD** — aggregated mode for quiet sectors, full detail for active ones
-36. **Chronicle generation** — automated narrative at world, system, sector, and empire scales
+32. **Galaxy graph** — stars, sectors, routes, travel costs
+33. **Interstellar travel** — colony ships, multi-tick journeys, communication latency
+34. **Sector governance** — federations, empires, multi-system polities
+35. **Dyson Swarm** — multi-system megaproject; first true stellar-engineering program
+36. **Dynamic simulation LOD** — aggregated mode for quiet sectors, full detail for active ones
+37. **Chronicle generation** — automated narrative at world, system, sector, and empire scales
+
+## Strategic Ordering After Phase A
+
+Once the current planetary-foundation work is stable, roadmap priority should shift in this order:
+
+1. **Reframe progression and gates** — keep Type I and later milestones tied to system capability, not just deeper surface content.
+2. **Introduce first-class star systems** — establish the core data model for planets, orbits, routes, and system ownership.
+3. **Add galaxy topology and sector structure** — define the larger geography the system layer will connect into.
+4. **Add fleets, orbital control, and route primitives** — make conflict and logistics work in space before expanding flavor content.
+5. **Add simulation LOD and hierarchical actors** — this is what makes hundreds or thousands of colonies affordable to simulate.
+
+In issue terms, the recommended order after the current Phase A work is:
+
+1. **#254** — roadmap reframe around system mastery
+2. **#253** — introduce first-class star systems
+3. **#250** — add galaxy graph and sector topology
+4. **#252** — fleets, routes, and orbital control primitives
+5. **#251** — simulation LOD for quiet sectors versus contested theaters
+6. **#255** — hierarchical actors and control surfaces
+
+Surface-heavy later-phase issues still make sense, but they should be treated as local-theater enrichments unless they directly support one of the system-foundation steps above.
 
 ---
 
