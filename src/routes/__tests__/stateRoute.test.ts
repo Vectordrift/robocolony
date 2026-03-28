@@ -93,4 +93,39 @@ describe('State route intel', () => {
       },
     ]);
   });
+
+  it('shows Tier 2 techs as locked until all Tier 1 techs are researched', async () => {
+    mockDbSelectQueue([
+      [{
+        id: 'colony-1',
+        researchedTechs: ['improved_agriculture', 'fortifications', 'advanced_scouting'],
+        researchQueue: [],
+      }],
+    ]);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/worlds/world-1/tech',
+      headers: {
+        authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    const cropRotation = body.techs.find((tech: { id: string }) => tech.id === 'crop_rotation');
+    const steelWeapons = body.techs.find((tech: { id: string }) => tech.id === 'steel_weapons');
+
+    expect(cropRotation).toMatchObject({
+      id: 'crop_rotation',
+      tier: 2,
+      status: 'locked',
+      requires: ['improved_agriculture'],
+    });
+    expect(steelWeapons).toMatchObject({
+      id: 'steel_weapons',
+      tier: 1,
+      status: 'available',
+    });
+  });
 });

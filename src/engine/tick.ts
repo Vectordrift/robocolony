@@ -265,7 +265,19 @@ export interface ResearchQueueEntry {
   ticksRemaining: number;
 }
 
-export type TechId = 'improved_agriculture' | 'fortifications' | 'advanced_scouting' | 'steel_weapons' | 'trade_routes' | 'siege_engineering';
+export type TechId =
+  | 'improved_agriculture'
+  | 'fortifications'
+  | 'advanced_scouting'
+  | 'steel_weapons'
+  | 'trade_routes'
+  | 'siege_engineering'
+  | 'crop_rotation'
+  | 'metallurgy'
+  | 'cartography'
+  | 'professional_army'
+  | 'currency'
+  | 'civil_engineering';
 
 export interface TechDefinition {
   id: TechId;
@@ -273,6 +285,7 @@ export interface TechDefinition {
   description: string;
   cost: Partial<Resources>;
   ticks: number;
+  tier: 1 | 2;
   requires?: TechId[];
 }
 
@@ -283,6 +296,7 @@ export const TECH_TREE: Record<TechId, TechDefinition> = {
     description: 'Farm production +30%',
     cost: { food: 200, timber: 100 },
     ticks: 10,
+    tier: 1,
   },
   fortifications: {
     id: 'fortifications',
@@ -290,6 +304,7 @@ export const TECH_TREE: Record<TechId, TechDefinition> = {
     description: 'Settlement defense bonus — attackers take 2 damage per combat round',
     cost: { stone: 200, iron: 100, timber: 50 },
     ticks: 12,
+    tier: 1,
   },
   advanced_scouting: {
     id: 'advanced_scouting',
@@ -297,6 +312,7 @@ export const TECH_TREE: Record<TechId, TechDefinition> = {
     description: 'Scout vision radius +3, scout movement speed +2',
     cost: { food: 150, timber: 100, iron: 50 },
     ticks: 8,
+    tier: 1,
   },
   steel_weapons: {
     id: 'steel_weapons',
@@ -304,6 +320,7 @@ export const TECH_TREE: Record<TechId, TechDefinition> = {
     description: 'Militia and soldier combat power +2',
     cost: { iron: 200, stone: 100, timber: 50 },
     ticks: 15,
+    tier: 1,
     requires: ['fortifications'],
   },
   trade_routes: {
@@ -312,6 +329,7 @@ export const TECH_TREE: Record<TechId, TechDefinition> = {
     description: '+5 influence per tick, +2 food per settlement beyond first',
     cost: { food: 150, timber: 100, influence: 50 },
     ticks: 10,
+    tier: 1,
     requires: ['improved_agriculture'],
   },
   siege_engineering: {
@@ -320,9 +338,97 @@ export const TECH_TREE: Record<TechId, TechDefinition> = {
     description: 'Siege units deal double damage to settlements',
     cost: { iron: 250, stone: 200, timber: 100 },
     ticks: 20,
+    tier: 1,
     requires: ['steel_weapons'],
   },
+  crop_rotation: {
+    id: 'crop_rotation',
+    name: 'Crop Rotation',
+    description: 'Unlocks the next agricultural growth tier.',
+    cost: { food: 300, timber: 150, iron: 50 },
+    ticks: 12,
+    tier: 2,
+    requires: ['improved_agriculture'],
+  },
+  metallurgy: {
+    id: 'metallurgy',
+    name: 'Metallurgy',
+    description: 'Unlocks advanced industrial refinement.',
+    cost: { iron: 300, stone: 200, timber: 150 },
+    ticks: 18,
+    tier: 2,
+    requires: ['fortifications'],
+  },
+  cartography: {
+    id: 'cartography',
+    name: 'Cartography',
+    description: 'Unlocks large-scale mapping and frontier surveying.',
+    cost: { food: 200, timber: 150, iron: 100 },
+    ticks: 12,
+    tier: 2,
+    requires: ['advanced_scouting'],
+  },
+  professional_army: {
+    id: 'professional_army',
+    name: 'Professional Army',
+    description: 'Unlocks more disciplined military organization.',
+    cost: { food: 400, iron: 300, stone: 200 },
+    ticks: 20,
+    tier: 2,
+    requires: ['steel_weapons'],
+  },
+  currency: {
+    id: 'currency',
+    name: 'Currency',
+    description: 'Unlocks more advanced trade and market coordination.',
+    cost: { food: 250, influence: 200, timber: 100 },
+    ticks: 14,
+    tier: 2,
+    requires: ['trade_routes'],
+  },
+  civil_engineering: {
+    id: 'civil_engineering',
+    name: 'Civil Engineering',
+    description: 'Unlocks advanced infrastructure planning and construction.',
+    cost: { stone: 250, timber: 200, iron: 100 },
+    ticks: 14,
+    tier: 2,
+    requires: ['siege_engineering'],
+  },
 };
+
+export const TIER_1_TECHS = Object.values(TECH_TREE)
+  .filter((tech) => tech.tier === 1)
+  .map((tech) => tech.id);
+
+export function canResearchTech(techId: TechId, researched: string[]): { ok: true } | { ok: false; reason: string } {
+  const tech = TECH_TREE[techId];
+  if (!tech) {
+    return { ok: false, reason: `Unknown tech: ${techId}` };
+  }
+
+  if (tech.tier > 1) {
+    const missingTierOne = TIER_1_TECHS.filter((id) => !researched.includes(id));
+    if (missingTierOne.length > 0) {
+      return {
+        ok: false,
+        reason: `Tier 2 research is locked until all Tier 1 techs are complete. Missing: ${missingTierOne.map((id) => TECH_TREE[id].name).join(', ')}`,
+      };
+    }
+  }
+
+  if (tech.requires) {
+    const missing = tech.requires.filter((id) => !researched.includes(id));
+    if (missing.length > 0) {
+      return {
+        ok: false,
+        reason: `Missing prerequisite tech(s): ${missing.map((id) => TECH_TREE[id]?.name ?? id).join(', ')}`,
+      };
+    }
+  }
+
+  return { ok: true };
+}
 
 
 export interface TickResult {
@@ -3438,13 +3544,10 @@ export function resolveResearch(
     }
 
     // Check prerequisites
-    if (tech.requires) {
-      const missing = tech.requires.filter(r => !researched.includes(r));
-      if (missing.length > 0) {
-        const names = missing.map(id => TECH_TREE[id]?.name ?? id).join(', ');
-        actionResults.push({ actionId: action.id, status: 'failed', result: `Missing prerequisite tech(s): ${names}` });
-        continue;
-      }
+    const eligibility = canResearchTech(techId, researched);
+    if (!eligibility.ok) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: eligibility.reason });
+      continue;
     }
 
     // Check not already in queue

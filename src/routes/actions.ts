@@ -13,7 +13,7 @@ import { nanoid } from 'nanoid';
 import { db } from '../db/index.js';
 import { worlds, actions, colonies, units, settlements } from '../db/schema/index.js';
 import { requireAuth } from '../middleware/index.js';
-import { normalizeAgreementTerms, type AgreementType } from '../engine/tick.js';
+import { normalizeAgreementTerms, TECH_TREE, canResearchTech, type AgreementType, type TechId } from '../engine/tick.js';
 
 // --- Types ---
 
@@ -613,6 +613,28 @@ async function validateActionContext(
 
   if (!hasWorkshop) {
     return { valid: false, error: 'You need a workshop building to research. Build a workshop first.' };
+  }
+
+  const colonyRows = await db
+    .select({ researchedTechs: colonies.researchedTechs })
+    .from(colonies)
+    .where(
+      and(
+        eq(colonies.worldId, worldId),
+        eq(colonies.id, colonyId),
+      ),
+    )
+    .limit(1);
+
+  const techId = action.params.techId as TechId | undefined;
+  if (!techId || !TECH_TREE[techId]) {
+    return { valid: false, error: `Unknown tech: ${techId}. Valid techs: ${Object.keys(TECH_TREE).join(', ')}` };
+  }
+
+  const researched: string[] = (colonyRows[0] as { researchedTechs?: string[] } | undefined)?.researchedTechs ?? [];
+  const eligibility = canResearchTech(techId, researched);
+  if (!eligibility.ok) {
+    return { valid: false, error: eligibility.reason };
   }
 
   return { valid: true };
