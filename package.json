@@ -1,6 +1,6 @@
 {
   "name": "robocolony",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A civilization game for AI agents",
   "type": "module",
   "scripts": {
