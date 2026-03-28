@@ -52,6 +52,7 @@ import {
   GRANARY_BONUS_PER_LEVEL,
   STOCKPILE_DECAY_RATE,
   HEALING_PER_TICK,
+  CRITICAL_WOUND_THRESHOLD,
   BARRACKS_HEALING_BONUS,
   SETTLEMENT_LOYALTY_RECOVERY,
   SETTLEMENT_GARRISON_LOYALTY_BONUS,
@@ -1419,6 +1420,50 @@ describe('resolveTick', () => {
     expect(healedUnit?.health).toBeLessThanOrEqual(25);
     expect(result.events.some(e => e.type === 'garrison_heal' && e.unitId === 'u1')).toBe(false);
     expect(result.events.some(e => e.type === 'combat_resolved')).toBe(true);
+  });
+
+  it('removes critically wounded military units stranded away from friendly settlements', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ hexX: 0, hexY: 0 });
+    const unit = makeUnit({
+      id: 'u1',
+      colonyId: colony.id,
+      type: 'soldier',
+      hexX: 2,
+      hexY: 0,
+      health: CRITICAL_WOUND_THRESHOLD,
+    });
+
+    const result = resolveTick([colony], [settlement], [unit], makePlainLine(3), []);
+
+    expect(result.units.find(u => u.id === 'u1')).toBeUndefined();
+    expect(result.events.some(
+      e => e.type === 'unit_destroyed'
+        && e.unitId === 'u1'
+        && `${e.data.reason}`.includes('friendly settlement'),
+    )).toBe(true);
+  });
+
+  it('lets critically wounded military units survive on a friendly settlement', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ id: 's1', colonyId: colony.id, hexX: 0, hexY: 0, buildings: [] });
+    const unit = makeUnit({
+      id: 'u1',
+      colonyId: colony.id,
+      type: 'soldier',
+      hexX: 0,
+      hexY: 0,
+      health: CRITICAL_WOUND_THRESHOLD,
+      morale: 0.7,
+    });
+
+    const result = resolveTick([colony], [settlement], [unit], makePlainLine(1), []);
+
+    expect(result.units.find(u => u.id === 'u1')).toMatchObject({
+      id: 'u1',
+      health: CRITICAL_WOUND_THRESHOLD + HEALING_PER_TICK,
+    });
+    expect(result.events.some(e => e.type === 'garrison_heal' && e.unitId === 'u1')).toBe(true);
   });
 
   it('returns immutable results (does not mutate inputs)', () => {
