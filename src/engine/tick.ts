@@ -2476,6 +2476,7 @@ export function resolveCombat(
   const events: TickEvent[] = [];
   const actionResults: ActionResult[] = [];
   const destroyedUnitIds: string[] = [];
+  const combatDamageReceived = new Map<string, number>();
   const researchedTechsByColony = new Map<string, Set<string>>();
 
   if (colonies) {
@@ -2647,6 +2648,9 @@ export function resolveCombat(
     for (const unit of unitsOnHex) {
       const totalDamage = damageDealt.get(unit.id) ?? 0;
       if (totalDamage > 0) {
+        combatDamageReceived.set(unit.id, totalDamage);
+      }
+      if (totalDamage > 0) {
         unit.health = Math.round(unit.health - totalDamage);
       }
 
@@ -2791,7 +2795,7 @@ export function resolveCombat(
         hexX: unit.hexX,
         hexY: unit.hexY,
         killedInCombat: true,
-        damageReceived: 0,
+        damageReceived: combatDamageReceived.get(unit.id) ?? 0,
         reason: 'Critically wounded settler perished in contested territory',
       },
     });
@@ -2828,7 +2832,7 @@ export function resolveCombat(
         hexX: unit.hexX,
         hexY: unit.hexY,
         killedInCombat: true,
-        damageReceived: 0,
+        damageReceived: combatDamageReceived.get(unit.id) ?? 0,
         reason: `Critically wounded ${unit.type} bled out after combat`,
       },
     });
