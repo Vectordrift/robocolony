@@ -81,6 +81,9 @@ export async function worldRoutes(app: FastifyInstance) {
         status: worlds.status,
         currentTick: worlds.currentTick,
         maxColonies: worlds.maxColonies,
+        starSystemId: worlds.starSystemId,
+        theaterType: worlds.theaterType,
+        orbitalSlot: worlds.orbitalSlot,
         createdAt: worlds.createdAt,
       })
       .from(worlds);

@@ -9,5 +9,8 @@ export const worlds = pgTable('worlds', {
   status: text('status').notNull().default('open'), // open | running | full | ended
   mapRadius: integer('map_radius').notNull().default(50),
   maxColonies: integer('max_colonies').notNull().default(8),
+  starSystemId: text('star_system_id'),
+  theaterType: text('theater_type').notNull().default('surface'),
+  orbitalSlot: integer('orbital_slot'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

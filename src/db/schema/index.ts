@@ -1,4 +1,5 @@
 export { worlds } from './worlds.js';
+export { starSystems } from './starSystems.js';
 export { hexes } from './hexes.js';
 export { colonies } from './colonies.js';
 export { settlements } from './settlements.js';
