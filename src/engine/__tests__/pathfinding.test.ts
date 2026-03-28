@@ -67,12 +67,20 @@ describe('constants', () => {
     expect(UNIT_SPEED['militia']).toBe(3);
   });
 
+  it('engineer speed is 2', () => {
+    expect(UNIT_SPEED['engineer']).toBe(2);
+  });
+
   it('scout vision is 6', () => {
     expect(VISION_RADIUS['scout']).toBe(6);
   });
 
   it('militia vision is 1', () => {
     expect(VISION_RADIUS['militia']).toBe(1);
+  });
+
+  it('engineer vision is 3', () => {
+    expect(VISION_RADIUS['engineer']).toBe(3);
   });
 });
 
@@ -178,6 +186,27 @@ describe('findPath', () => {
     expect(hexDistance(from, path![0])).toBe(1);
     expect(path![path!.length - 1]).toEqual(to);
   });
+
+  it('prefers a longer roaded route when it is cheaper', () => {
+    const lookup = createHexLookup([
+      { x: 0, y: 0, terrain: 'plains', roads: { '1,0': { status: 'built' } } },
+      { x: 1, y: 0, terrain: 'mountains', roads: { '0,0': { status: 'built' }, '2,0': { status: 'built' } } },
+      { x: 2, y: 0, terrain: 'mountains', roads: { '1,0': { status: 'built' }, '3,0': { status: 'built' } } },
+      { x: 3, y: 0, terrain: 'plains', roads: { '2,0': { status: 'built' } } },
+      { x: 0, y: 1, terrain: 'plains' },
+      { x: 1, y: 1, terrain: 'plains' },
+      { x: 2, y: 1, terrain: 'plains' },
+      { x: 3, y: 1, terrain: 'plains' },
+    ]);
+
+    const path = findPath({ q: 0, r: 0 }, { q: 3, r: 1 }, lookup);
+    expect(path).toEqual([
+      { q: 1, r: 0 },
+      { q: 2, r: 0 },
+      { q: 3, r: 0 },
+      { q: 3, r: 1 },
+    ]);
+  });
 });
 
 describe('movementStepsThisTick', () => {
@@ -256,6 +285,21 @@ describe('movementStepsThisTick', () => {
     ];
     const steps = movementStepsThisTick(path, 'settler', lookup);
     expect(steps).toBe(1);
+  });
+
+  it('halves movement cost across a built road edge', () => {
+    const lookup = createHexLookup([
+      { x: 0, y: 0, terrain: 'plains', roads: { '1,0': { status: 'built' } } },
+      { x: 1, y: 0, terrain: 'mountains', roads: { '0,0': { status: 'built' }, '2,0': { status: 'built' } } },
+      { x: 2, y: 0, terrain: 'mountains', roads: { '1,0': { status: 'built' } } },
+    ]);
+    const path: HexCoord[] = [
+      { q: 1, r: 0 },
+      { q: 2, r: 0 },
+    ];
+
+    const steps = movementStepsThisTick(path, 'engineer', lookup, { q: 0, r: 0 });
+    expect(steps).toBe(2);
   });
 
   it('handles full path consumption', () => {

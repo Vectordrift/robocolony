@@ -22,7 +22,23 @@ export interface VisibleHex {
   terrain: string;
   resources: Record<string, number>;
   settlementId: string | null;
+  roads?: Array<{ toX: number; toY: number; status: string }>;
   poi?: { type: string; discoveredBy?: string; discoveredAtTick?: number; surveyedBy?: string; surveyedAtTick?: number } | null;
+}
+
+function normalizeRoads(roads: Record<string, { status?: string }> | null | undefined): VisibleHex['roads'] {
+  if (!roads || typeof roads !== 'object') return undefined;
+
+  const entries = Object.entries(roads)
+    .map(([key, value]) => {
+      const [toX, toY] = key.split(',').map(Number);
+      if (!Number.isFinite(toX) || !Number.isFinite(toY) || !value?.status) return null;
+      return { toX, toY, status: value.status };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((a, b) => (a.toX - b.toX) || (a.toY - b.toY));
+
+  return entries.length > 0 ? entries : undefined;
 }
 
 export interface SettlementSiteCandidate {
@@ -179,13 +195,17 @@ export async function getVisibleHexes(worldId: string, colonyId: string): Promis
       terrain: hexes.terrain,
       resources: hexes.resources,
       settlementId: hexes.settlementId,
+      roads: hexes.roads,
       poi: hexes.poi,
     })
     .from(hexes)
     .where(
       and(
         eq(hexes.worldId, worldId),
-        sql`explored_by && ARRAY[${sql.join(visibleColonyIds.map(id => sql`${id}`), sql`, `)}]::text[]`,
+        sql`(
+          explored_by && ARRAY[${sql.join(visibleColonyIds.map(id => sql`${id}`), sql`, `)}]::text[]
+          OR COALESCE(jsonb_object_length(${hexes.roads}), 0) > 0
+        )`,
       ),
     );
 
@@ -195,6 +215,7 @@ export async function getVisibleHexes(worldId: string, colonyId: string): Promis
     terrain: h.terrain,
     resources: h.resources as Record<string, number>,
     settlementId: h.settlementId,
+    ...(normalizeRoads(h.roads as Record<string, { status?: string }> | undefined) ? { roads: normalizeRoads(h.roads as Record<string, { status?: string }> | undefined) } : {}),
     ...(h.poi ? { poi: h.poi as VisibleHex['poi'] } : {}),
   }));
 }

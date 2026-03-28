@@ -213,6 +213,8 @@ describe('Database schema', () => {
       expect(cols).toHaveProperty('resources');
       expect(cols).toHaveProperty('settlementId');
       expect(cols).toHaveProperty('exploredBy');
+      expect(cols).toHaveProperty('roads');
+      expect(cols).toHaveProperty('poi');
     });
   });
 

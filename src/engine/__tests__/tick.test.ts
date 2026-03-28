@@ -6,6 +6,8 @@ import {
   resolveFoundSettlement,
   resolveBuilding,
   resolveTrainUnit,
+  resolveBuildRoad,
+  progressRoads,
   resolveUpgradeSettlement,
   resolveUpgradeBuilding,
   resolveDemolish,
@@ -59,6 +61,8 @@ import {
   SETTLEMENT_LOYALTY_RECOVERY,
   SETTLEMENT_GARRISON_LOYALTY_BONUS,
   NEWCOMER_PROTECTION_TICKS,
+  ROAD_BUILD_TICKS,
+  ROAD_DECAY_TICKS,
   POI_SURVEY_INFLUENCE,
   WATCHTOWER_SURVEY_REVEAL_RADIUS,
   SACRED_GROVE_SURVEY_MORALE_BONUS,
@@ -2047,9 +2051,9 @@ describe('resolveTrainUnit', () => {
 
   it('deducts correct resources for each unit type', () => {
     for (const unitType of VALID_UNIT_TYPES) {
-      const colony = makeColony({
+      const colony = Object.assign(makeColony({
         resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
-      });
+      }), unitType === 'engineer' ? { researchedTechs: ['civil_engineering'] } : {});
       const settlement = makeSettlement({
         buildings: [{ type: 'barracks', level: 1 }],
       });
@@ -4172,6 +4176,115 @@ describe('Edge cases: simultaneous actions (Issue #123)', () => {
     expect(result.actionResults[0].status).toBe('resolved');
     expect(result.actionResults[0].result).toContain(TECH_TREE.civil_engineering.name);
     expect((colony as Colony & { researchQueue?: Array<{ techId: string }> }).researchQueue?.[0]?.techId).toBe('civil_engineering');
+  });
+
+  it('trains engineers after Civil Engineering is researched', () => {
+    const colony = Object.assign(makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 50 },
+    }), {
+      researchedTechs: ['civil_engineering'],
+    });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+
+    const result = resolveTrainUnit(
+      [colony],
+      [settlement],
+      [makeTrainAction({ params: { settlementId: settlement.id, unitType: 'engineer' } })],
+    );
+
+    expect(result.actionResults[0]).toMatchObject({
+      status: 'resolved',
+      result: expect.stringContaining('engineer trained'),
+    });
+    expect(result.newUnits[0]).toMatchObject({
+      type: 'engineer',
+      hexX: settlement.hexX,
+      hexY: settlement.hexY,
+    });
+  });
+
+  it('builds roads between adjacent hexes and completes them after two ticks', () => {
+    const colony = Object.assign(makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 50 },
+    }), {
+      researchedTechs: ['civil_engineering'],
+    });
+    const settlement = makeSettlement({ colonyId: colony.id, hexX: 0, hexY: 0 });
+    const engineer = makeUnit({ id: 'eng-1', type: 'engineer', hexX: 0, hexY: 0 });
+    const hexes = [makeHex(0, 0), makeHex(1, 0)];
+
+    const buildResult = resolveBuildRoad(
+      [engineer],
+      [colony],
+      [settlement],
+      hexes,
+      [{ id: 'road-1', colonyId: colony.id, type: 'build_road', params: { unitId: engineer.id, fromX: 0, fromY: 0, toX: 1, toY: 0 } }],
+      10,
+    );
+
+    expect(buildResult.actionResults[0]).toMatchObject({ status: 'resolved' });
+    expect(hexes[0].roads?.['1,0']).toMatchObject({
+      status: 'building',
+      remainingTicks: ROAD_BUILD_TICKS,
+    });
+
+    progressRoads(hexes, [settlement], 11);
+    expect(hexes[0].roads?.['1,0']?.status).toBe('building');
+    expect(hexes[0].roads?.['1,0']?.remainingTicks).toBe(1);
+
+    progressRoads(hexes, [settlement], 12);
+    expect(hexes[0].roads?.['1,0']).toMatchObject({
+      status: 'built',
+      builtAtTick: 12,
+    });
+    expect(hexes[1].roads?.['0,0']?.status).toBe('built');
+  });
+
+  it('pathfinding prefers completed roads during movement resolution', () => {
+    const hexes = [
+      makeHex(0, 0, { roads: { '1,0': { colonyId: 'colony-1', status: 'built', lastSupportedTick: 5 } } }),
+      makeHex(1, 0, { terrain: 'mountains', roads: { '0,0': { colonyId: 'colony-1', status: 'built', lastSupportedTick: 5 }, '2,0': { colonyId: 'colony-1', status: 'built', lastSupportedTick: 5 } } }),
+      makeHex(2, 0, { terrain: 'mountains', roads: { '1,0': { colonyId: 'colony-1', status: 'built', lastSupportedTick: 5 }, '3,0': { colonyId: 'colony-1', status: 'built', lastSupportedTick: 5 } } }),
+      makeHex(3, 0, { roads: { '2,0': { colonyId: 'colony-1', status: 'built', lastSupportedTick: 5 } } }),
+      makeHex(0, 1),
+      makeHex(1, 1),
+      makeHex(2, 1),
+      makeHex(3, 1),
+    ];
+    const unit = makeUnit({ id: 'eng-path', type: 'engineer', hexX: 0, hexY: 0 });
+    const hexLookup = createHexLookup(hexes.map((hex) => ({ x: hex.x, y: hex.y, terrain: hex.terrain, roads: hex.roads })));
+
+    const result = resolveMovement(
+      [unit],
+      [{ id: 'move-road', colonyId: unit.colonyId, type: 'move_unit', params: { unitId: unit.id, targetX: 3, targetY: 1 } }],
+      hexLookup,
+      hexes,
+    );
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect({ x: unit.hexX, y: unit.hexY }).toEqual({ x: 2, y: 0 });
+    expect(unit.movementQueue).toEqual([
+      { q: 3, r: 0 },
+      { q: 3, r: 1 },
+    ]);
+  });
+
+  it('decays unsupported roads after 100 ticks without a nearby friendly settlement', () => {
+    const hexes = [
+      makeHex(0, 0, { roads: { '1,0': { colonyId: 'colony-1', status: 'built', builtAtTick: 10, lastSupportedTick: 10 } } }),
+      makeHex(1, 0, { roads: { '0,0': { colonyId: 'colony-1', status: 'built', builtAtTick: 10, lastSupportedTick: 10 } } }),
+    ];
+
+    const progress = progressRoads(hexes, [], 110);
+
+    expect(progress.events[0]).toMatchObject({
+      type: 'road_decayed',
+      colonyId: 'colony-1',
+    });
+    expect(hexes[0].roads?.['1,0']).toBeUndefined();
+    expect(hexes[1].roads?.['0,0']).toBeUndefined();
   });
 
 });

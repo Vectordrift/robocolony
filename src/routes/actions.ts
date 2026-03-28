@@ -40,7 +40,7 @@ const VALID_BUILDING_TYPES = new Set([
 
 // Valid unit types
 const VALID_UNIT_TYPES = new Set([
-  'scout', 'militia', 'soldier', 'siege', 'settler',
+  'scout', 'militia', 'soldier', 'siege', 'settler', 'engineer',
 ]);
 
 // Valid resources
@@ -145,6 +145,18 @@ const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
       unitId: { type: 'string', description: 'Unit that will attack.' },
       targetX: { type: 'integer', description: 'Target hex x coordinate.' },
       targetY: { type: 'integer', description: 'Target hex y coordinate.' },
+    },
+  },
+  build_road: {
+    description: 'Order an engineer to construct a road between adjacent hexes.',
+    required: ['unitId', 'fromX', 'fromY', 'toX', 'toY'],
+    optional: [],
+    params: {
+      unitId: { type: 'string', description: 'Engineer unit that will build the road.' },
+      fromX: { type: 'integer', description: 'Starting hex x coordinate.' },
+      fromY: { type: 'integer', description: 'Starting hex y coordinate.' },
+      toX: { type: 'integer', description: 'Ending hex x coordinate.' },
+      toY: { type: 'integer', description: 'Ending hex y coordinate.' },
     },
   },
   send_message: {
@@ -404,6 +416,29 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
     }
   }
 
+  if (action.type === 'build_road') {
+    if (typeof p.unitId !== 'string' || p.unitId.length === 0) {
+      return { valid: false, error: `'unitId' must be a non-empty string` };
+    }
+    for (const coordKey of ['fromX', 'fromY', 'toX', 'toY'] as const) {
+      if (!isFiniteInt(p[coordKey])) {
+        return { valid: false, error: `'${coordKey}' must be an integer`, help: { expectedType: 'integer' } };
+      }
+      if ((p[coordKey] as number) < -mapRadius || (p[coordKey] as number) > mapRadius) {
+        return { valid: false, error: `'${coordKey}' out of map bounds: ${p[coordKey]} (must be between -${mapRadius} and ${mapRadius})`, help: { min: -mapRadius, max: mapRadius } };
+      }
+    }
+
+    const fromX = p.fromX as number;
+    const fromY = p.fromY as number;
+    const toX = p.toX as number;
+    const toY = p.toY as number;
+    const axialDistance = (Math.abs(fromX - toX) + Math.abs(fromY - toY) + Math.abs((fromX + fromY) - (toX + toY))) / 2;
+    if (axialDistance !== 1) {
+      return { valid: false, error: 'Road endpoints must be adjacent hexes' };
+    }
+  }
+
   // String ID validation for unit-based actions
   if (['explore', 'survey_poi', 'found_settlement', 'disband'].includes(action.type)) {
     if (typeof p.unitId !== 'string' || p.unitId.length === 0) {
@@ -561,6 +596,9 @@ async function validateOwnership(
     if ((action.type === 'explore' || action.type === 'survey_poi') && unit[0].type !== 'scout') {
       return { valid: false, error: `Unit ${truncId(params.unitId as string)} is a ${unit[0].type}, not a scout. Only scouts can use the ${action.type} action.` };
     }
+    if (action.type === 'build_road' && unit[0].type !== 'engineer') {
+      return { valid: false, error: `Unit ${truncId(params.unitId as string)} is a ${unit[0].type}, not an engineer. Only engineers can build roads.` };
+    }
   }
 
   // Check settlement ownership
@@ -592,6 +630,26 @@ async function validateActionContext(
   worldId: string,
   action: ActionInput,
 ): Promise<ValidationResult> {
+  if (action.type === 'build_road') {
+    const colonyRows = await db
+      .select({ researchedTechs: colonies.researchedTechs })
+      .from(colonies)
+      .where(
+        and(
+          eq(colonies.worldId, worldId),
+          eq(colonies.id, colonyId),
+        ),
+      )
+      .limit(1);
+
+    const researched: string[] = (colonyRows[0] as { researchedTechs?: string[] } | undefined)?.researchedTechs ?? [];
+    if (!researched.includes('civil_engineering')) {
+      return { valid: false, error: 'You need Civil Engineering before engineers can build roads.' };
+    }
+
+    return { valid: true };
+  }
+
   if (action.type !== 'research') {
     return { valid: true };
   }

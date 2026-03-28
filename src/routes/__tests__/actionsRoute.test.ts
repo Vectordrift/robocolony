@@ -104,6 +104,16 @@ describe('Action submission route', () => {
             },
           },
         },
+        train_unit: {
+          params: {
+            unitType: {
+              validValues: expect.arrayContaining(['engineer']),
+            },
+          },
+        },
+        build_road: {
+          required: ['unitId', 'fromX', 'fromY', 'toX', 'toY'],
+        },
         propose_agreement: {
           optional: ['terms'],
         },
@@ -175,6 +185,40 @@ describe('Action submission route', () => {
           index: 0,
           actionType: 'research',
           error: 'You need a workshop building to research. Build a workshop first.',
+        },
+      ],
+    });
+  });
+
+  it('rejects build_road submissions before Civil Engineering is researched', async () => {
+    mockDbSelectQueue([
+      [{ currentTick: 42, status: 'active', mapRadius: 12 }],
+      [{ count: 1 }],
+      [{ colonyId: 'colony-1', type: 'engineer' }],
+      [{ researchedTechs: [] }],
+    ]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/worlds/world-1/actions',
+      headers: {
+        authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+      payload: {
+        actions: [
+          { type: 'build_road', params: { unitId: 'eng-1', fromX: 0, fromY: 0, toX: 1, toY: 0 } },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: 'validation_error',
+      details: [
+        {
+          index: 0,
+          actionType: 'build_road',
+          error: 'You need Civil Engineering before engineers can build roads.',
         },
       ],
     });
