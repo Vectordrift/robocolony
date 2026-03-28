@@ -12,10 +12,14 @@ vi.mock('../../middleware/index.js', () => ({
 }));
 
 const updateWhereMock = vi.fn().mockResolvedValue({ rowCount: 0 });
+const insertValuesMock = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../db/index.js', () => ({
   db: {
     select: vi.fn(),
+    insert: vi.fn(() => ({
+      values: insertValuesMock,
+    })),
     update: vi.fn(() => ({
       set: vi.fn(() => ({
         where: updateWhereMock,
@@ -56,6 +60,7 @@ describe('Action submission route', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     updateWhereMock.mockResolvedValue({ rowCount: 0 });
+    insertValuesMock.mockResolvedValue(undefined);
     app = Fastify({ logger: false });
     await app.register(actionRoutes);
   });
@@ -67,6 +72,7 @@ describe('Action submission route', () => {
   it('rejects research submissions when the colony has no workshop', async () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],
+      [{ count: 1 }],
       [{ buildings: [{ type: 'farm', level: 1 }] }],
     ]);
 
@@ -93,5 +99,36 @@ describe('Action submission route', () => {
         },
       ],
     });
+  });
+
+  it('scales action capacity with settlement count', async () => {
+    mockDbSelectQueue([
+      [{ currentTick: 42, status: 'active', mapRadius: 12 }],
+      [{ count: 9 }],
+      [{ count: 0 }],
+    ]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/worlds/world-1/actions',
+      headers: {
+        authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+      payload: {
+        actions: Array.from({ length: 24 }, (_, i) => ({
+          type: 'send_message',
+          params: {
+            toColonyId: `colony-${i + 2}`,
+            message: `Reinforce front ${i + 1}`,
+          },
+        })),
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.submitted).toBe(24);
+    expect(body.truncated).toBeUndefined();
+    expect(insertValuesMock).toHaveBeenCalledTimes(24);
   });
 });
