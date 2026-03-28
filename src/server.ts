@@ -254,7 +254,7 @@ async function normalizeData(logger: { info: (msg: string) => void; error: (msg:
       const resources = c.resources as Record<string, unknown>;
       let needsFix = false;
 
-      for (const key of ['food', 'timber', 'stone', 'iron', 'influence']) {
+      for (const key of ['food', 'timber', 'stone', 'iron', 'steel', 'influence']) {
         const val = resources[key];
         if (val == null || (typeof val === 'number' && Number.isNaN(val))) {
           resources[key] = 0;

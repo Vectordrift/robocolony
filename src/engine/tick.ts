@@ -26,7 +26,15 @@ export interface Resources {
   timber: number;
   stone: number;
   iron: number;
+  steel?: number;
   influence: number;
+}
+
+export const RESOURCE_KEYS = ['food', 'timber', 'stone', 'iron', 'steel', 'influence'] as const;
+export type ResourceKey = (typeof RESOURCE_KEYS)[number];
+
+export function emptyResources(): Resources {
+  return { food: 0, timber: 0, stone: 0, iron: 0, steel: 0, influence: 0 };
 }
 
 export interface Settlement {
@@ -53,7 +61,7 @@ export interface BuildQueueEntry {
   ticksRemaining: number;
 }
 
-export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'barracks' | 'granary' | 'market' | 'workshop' | 'warehouse' | 'walls';
+export type BuildingType = 'farm' | 'lumberMill' | 'quarry' | 'mine' | 'foundry' | 'barracks' | 'granary' | 'market' | 'workshop' | 'warehouse' | 'walls';
 
 export interface Unit {
   id: string;
@@ -475,6 +483,7 @@ export const BUILDING_PRODUCTION: Record<BuildingType, Partial<Resources>> = {
   lumberMill: { timber: 5 },
   quarry:     { stone: 4 },
   mine:       { iron: 3 },
+  foundry:    {},
   barracks:   {},
   granary:    {},
   market:     { influence: 2 },
@@ -489,6 +498,7 @@ export const BUILDING_UPKEEP: Record<BuildingType, Partial<Resources>> = {
   lumberMill: { timber: 1, stone: 1 },
   quarry:     { timber: 1 },
   mine:       { timber: 1, food: 1 },
+  foundry:    { iron: 2, timber: 1, food: 1 },
   barracks:   { food: 2, iron: 2, timber: 1 },
   granary:    { timber: 1 },
   market:     { food: 1, timber: 1 },
@@ -503,6 +513,7 @@ export const BUILDING_COSTS: Record<BuildingType, Partial<Resources>> = {
   lumberMill: { timber: 10, stone: 10 },
   quarry:     { stone: 20, iron: 10 },
   mine:       { stone: 30, timber: 20 },
+  foundry:    { stone: 60, iron: 40, timber: 30 },
   barracks:   { timber: 40, stone: 20, iron: 10 },
   granary:    { timber: 25, stone: 10 },
   market:     { stone: 30, timber: 15, iron: 5 },
@@ -535,8 +546,15 @@ export const BUILD_TIME = 3;
 
 /** All valid building types */
 export const VALID_BUILDING_TYPES: BuildingType[] = [
-  'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop', 'warehouse', 'walls',
+  'farm', 'lumberMill', 'quarry', 'mine', 'foundry', 'barracks', 'granary', 'market', 'workshop', 'warehouse', 'walls',
 ];
+
+export const BUILDING_TECH_REQUIREMENTS: Partial<Record<BuildingType, TechId>> = {
+  foundry: 'metallurgy',
+};
+
+export const FOUNDRY_STEEL_OUTPUT_PER_LEVEL = 2;
+export const FOUNDRY_IRON_CONVERSION_PER_LEVEL = 3;
 
 /** Unit food upkeep per tick */
 export const UNIT_UPKEEP: Record<UnitType, number> = {
@@ -797,7 +815,7 @@ function hexKey(x: number, y: number): string {
  */
 function hasResources(resources: Resources, cost: Partial<Resources>): boolean {
   for (const [key, amount] of Object.entries(cost)) {
-    if ((amount as number) > 0 && resources[key as keyof Resources] < (amount as number)) {
+    if ((amount as number) > 0 && (resources[key as keyof Resources] ?? 0) < (amount as number)) {
       return false;
     }
   }
@@ -810,7 +828,7 @@ function hasResources(resources: Resources, cost: Partial<Resources>): boolean {
 function deductResources(resources: Resources, cost: Partial<Resources>): void {
   for (const [key, amount] of Object.entries(cost)) {
     if ((amount as number) > 0) {
-      resources[key as keyof Resources] -= amount as number;
+      resources[key as keyof Resources] = (resources[key as keyof Resources] ?? 0) - (amount as number);
     }
   }
 }
@@ -941,6 +959,17 @@ export function resolveBuilding(
         actionId: action.id,
         status: 'failed',
         result: `Colony ${truncId(action.colonyId)} not found`,
+      });
+      continue;
+    }
+
+    const requiredTech = BUILDING_TECH_REQUIREMENTS[bType];
+    const researchedTechs: string[] = (colony as Colony & { researchedTechs?: string[] }).researchedTechs ?? [];
+    if (requiredTech && !researchedTechs.includes(requiredTech)) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `${bType} requires ${TECH_TREE[requiredTech].name}`,
       });
       continue;
     }
@@ -2434,7 +2463,7 @@ export function calculateProduction(
   nearbyHexes: HexTileState[],
 ): Partial<Resources> {
   const tierMult = TIER_MULTIPLIER[settlement.tier] ?? 1.0;
-  const production: Resources = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
+  const production = emptyResources();
 
   // Building production
   for (const building of settlement.buildings) {
@@ -2460,7 +2489,7 @@ export function calculateProduction(
  * Calculate building upkeep for a settlement.
  */
 export function calculateBuildingUpkeep(settlement: Settlement): Partial<Resources> {
-  const upkeep: Resources = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
+  const upkeep = emptyResources();
 
   for (const building of settlement.buildings) {
     const cost = BUILDING_UPKEEP[building.type];
@@ -3368,11 +3397,11 @@ export function resolveConvertResources(
       continue;
     }
 
-    if (colony.resources[fromResource] < amount) {
+    if ((colony.resources[fromResource] ?? 0) < amount) {
       actionResults.push({
         actionId: action.id,
         status: 'failed',
-        result: `Insufficient ${fromResource}: have ${colony.resources[fromResource]}, need ${amount}`,
+        result: `Insufficient ${fromResource}: have ${colony.resources[fromResource] ?? 0}, need ${amount}`,
       });
       continue;
     }
@@ -3384,8 +3413,8 @@ export function resolveConvertResources(
     );
     const received = Math.round((amount / conversionRate) * 100) / 100;
 
-    colony.resources[fromResource] = Math.round((colony.resources[fromResource] - amount) * 100) / 100;
-    colony.resources[toResource] = Math.round((colony.resources[toResource] + received) * 100) / 100;
+    colony.resources[fromResource] = Math.round(((colony.resources[fromResource] ?? 0) - amount) * 100) / 100;
+    colony.resources[toResource] = Math.round(((colony.resources[toResource] ?? 0) + received) * 100) / 100;
 
     events.push({
       type: 'resources_converted',
@@ -3708,7 +3737,7 @@ function normalizeResourceTerms(
 
   const normalized: Partial<Resources> = {};
   for (const [key, amount] of Object.entries(value)) {
-    if (!['food', 'timber', 'stone', 'iron', 'influence'].includes(key)) {
+    if (!['food', 'timber', 'stone', 'iron', 'steel', 'influence'].includes(key)) {
       return { valid: false, error: `Unknown resource '${key}' in terms.${fieldName}` };
     }
     if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
@@ -4754,8 +4783,8 @@ export function resolveTick(
     if (colony.status !== 'active') continue;
 
     // Sanitize resources: replace null/NaN with 0 (guards against corrupted DB data)
-    for (const key of ['food', 'timber', 'stone', 'iron', 'influence'] as (keyof Resources)[]) {
-      if (colony.resources[key] == null || Number.isNaN(colony.resources[key])) {
+    for (const key of RESOURCE_KEYS) {
+      if (colony.resources[key] == null || Number.isNaN(colony.resources[key] as number)) {
         colony.resources[key] = 0;
       }
     }
@@ -4764,8 +4793,8 @@ export function resolveTick(
     const myUnits = colonyUnits.get(colony.id) ?? [];
 
     // --- Production ---
-    const totalProduction: Resources = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
-    const totalUpkeep: Resources = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
+    const totalProduction = emptyResources();
+    const totalUpkeep = emptyResources();
 
     for (const settlement of mySettlements) {
       // Get neighboring hexes for this settlement
@@ -4778,7 +4807,7 @@ export function resolveTick(
       const production = calculateProduction(settlement, nearbyHexes);
       const upkeep = calculateBuildingUpkeep(settlement);
 
-      for (const key of Object.keys(totalProduction) as (keyof Resources)[]) {
+      for (const key of RESOURCE_KEYS) {
         totalProduction[key] += (production[key] as number) ?? 0;
         totalUpkeep[key] += (upkeep[key] as number) ?? 0;
       }
@@ -4809,7 +4838,7 @@ export function resolveTick(
     // --- POI Resource Bonuses ---
     // Resource POIs within 3 hexes of a settlement provide bonus resources per tick
     const POI_RESOURCE_RANGE = 3;
-    const poiBonuses: Resources = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
+    const poiBonuses = emptyResources();
     const claimedPoiHexes = new Set<string>();
 
     for (const settlement of mySettlements) {
@@ -4840,20 +4869,35 @@ export function resolveTick(
       }
     }
 
-    for (const key of Object.keys(totalProduction) as (keyof Resources)[]) {
-      totalProduction[key] += poiBonuses[key];
+    for (const key of RESOURCE_KEYS) {
+      totalProduction[key] += poiBonuses[key] ?? 0;
+    }
+
+    const foundryLevels = mySettlements.reduce((total, settlement) => (
+      total + settlement.buildings
+        .filter((building) => building.type === 'foundry')
+        .reduce((buildingTotal, building) => buildingTotal + building.level, 0)
+    ), 0);
+    if (foundryLevels > 0) {
+      const ironDemand = foundryLevels * FOUNDRY_IRON_CONVERSION_PER_LEVEL;
+      const ironAvailable = Math.max(0, (colony.resources.iron ?? 0) + totalProduction.iron - totalUpkeep.iron);
+      const ironSpent = Math.min(ironDemand, ironAvailable);
+      const steelProduced = Math.round((ironSpent / FOUNDRY_IRON_CONVERSION_PER_LEVEL) * FOUNDRY_STEEL_OUTPUT_PER_LEVEL * 100) / 100;
+
+      totalUpkeep.iron += ironSpent;
+      totalProduction.steel = (totalProduction.steel ?? 0) + steelProduced;
     }
 
     // --- Apply net resources ---
-    const net: Resources = { food: 0, timber: 0, stone: 0, iron: 0, influence: 0 };
-    for (const key of Object.keys(net) as (keyof Resources)[]) {
-      net[key] = totalProduction[key] - totalUpkeep[key];
-      colony.resources[key] = Math.round((colony.resources[key] + net[key]) * 100) / 100;
+    const net = emptyResources();
+    for (const key of RESOURCE_KEYS) {
+      net[key] = (totalProduction[key] ?? 0) - (totalUpkeep[key] ?? 0);
+      colony.resources[key] = Math.round(((colony.resources[key] ?? 0) + net[key]) * 100) / 100;
     }
 
     // Clamp ALL resources to 0 (stockpiles cannot go negative)
-    for (const key of ['food', 'timber', 'stone', 'iron', 'influence'] as (keyof Resources)[]) {
-      if (colony.resources[key] < 0) {
+    for (const key of RESOURCE_KEYS) {
+      if ((colony.resources[key] ?? 0) < 0) {
         events.push({
           type: 'shortage',
           colonyId: colony.id,
@@ -4931,19 +4975,19 @@ export function resolveTick(
     const baseCap = STOCKPILE_CAP[highestTier] ?? 500;
     const effectiveCap = baseCap + totalGranaryLevels * GRANARY_BONUS_PER_LEVEL + totalWarehouseLevels * WAREHOUSE_BONUS_PER_LEVEL;
 
-    for (const key of ['food', 'timber', 'stone', 'iron'] as (keyof Resources)[]) {
-      if (colony.resources[key] > effectiveCap) {
+    for (const key of ['food', 'timber', 'stone', 'iron', 'steel'] as (keyof Resources)[]) {
+      if ((colony.resources[key] ?? 0) > effectiveCap) {
         // Hard ceiling: immediately clamp to cap × STOCKPILE_HARD_CEILING
         const hardCeiling = Math.round(effectiveCap * STOCKPILE_HARD_CEILING);
         let clamped = 0;
-        if (colony.resources[key] > hardCeiling) {
-          clamped = Math.round((colony.resources[key] - hardCeiling) * 100) / 100;
+        if ((colony.resources[key] ?? 0) > hardCeiling) {
+          clamped = Math.round(((colony.resources[key] ?? 0) - hardCeiling) * 100) / 100;
           colony.resources[key] = hardCeiling;
         }
         // Then apply percentage decay on remaining excess
-        const excess = colony.resources[key] - effectiveCap;
+        const excess = (colony.resources[key] ?? 0) - effectiveCap;
         const decayed = Math.round(excess * STOCKPILE_DECAY_RATE * 100) / 100;
-        colony.resources[key] = Math.round((colony.resources[key] - decayed) * 100) / 100;
+        colony.resources[key] = Math.round(((colony.resources[key] ?? 0) - decayed) * 100) / 100;
         const totalDecayed = Math.round((clamped + decayed) * 100) / 100;
         events.push({
           type: 'stockpile_decay',

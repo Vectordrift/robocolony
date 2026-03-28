@@ -52,6 +52,7 @@ const DEFAULT_RESOURCES = {
   timber: 50,
   stone: 30,
   iron: 10,
+  steel: 0,
   influence: 50,
 };
 
