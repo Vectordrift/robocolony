@@ -1001,6 +1001,45 @@ describe('resolveMovement', () => {
       e => e.type === 'movement_blocked' && e.unitId === 'unit-move' && e.data.reason === 'hex_full',
     )).toBe(true);
   });
+
+  it('lets adjacent reinforcements support combat on a full contested hex', () => {
+    const attackerColony = makeColony({ id: 'colony-1' });
+    const defenderColony = makeColony({ id: 'colony-2', name: 'Iron Horde' });
+    const defenders = Array.from({ length: MAX_UNITS_PER_HEX - 1 }, (_, i) =>
+      makeUnit({ id: `defender-${i}`, colonyId: 'colony-2', hexX: 1, hexY: 0, type: 'soldier' }),
+    );
+    const frontlineAttacker = makeUnit({ id: 'frontline', colonyId: 'colony-1', hexX: 1, hexY: 0, type: 'soldier' });
+    const reinforcement = makeUnit({ id: 'reinforcement', colonyId: 'colony-1', hexX: 0, hexY: 0, type: 'soldier' });
+    const settlement = makeSettlement({ id: 'settlement-2', colonyId: 'colony-2', hexX: 1, hexY: 0, population: 20 });
+    const result = resolveTick(
+      [attackerColony, defenderColony],
+      [settlement],
+      [frontlineAttacker, reinforcement, ...defenders],
+      makePlainLine(1),
+      [makeAction({ colonyId: 'colony-1', params: { unitId: 'reinforcement', targetX: 1, targetY: 0 } })],
+      123,
+      'world-1',
+      50,
+    );
+
+    expect(result.units.find(unit => unit.id === 'reinforcement')).toMatchObject({ hexX: 0, hexY: 0 });
+    expect(result.events.some(
+      event => event.type === 'movement_blocked'
+        && event.unitId === 'reinforcement'
+        && event.data.reason === 'hex_full',
+    )).toBe(true);
+
+    const combatEvent = result.events.find(
+      event => event.type === 'combat_resolved' && event.colonyId === 'colony-1',
+    );
+    expect(combatEvent).toBeDefined();
+    expect(combatEvent?.data.combatLog.some((entry: { attackerId: string; supporting?: boolean }) =>
+      entry.attackerId === 'reinforcement' && entry.supporting === true,
+    )).toBe(true);
+    expect(combatEvent?.data.participants.some((participant: { unitId: string; supporting?: boolean }) =>
+      participant.unitId === 'reinforcement' && participant.supporting === true,
+    )).toBe(true);
+  });
 });
 
 // --- resolveFoundSettlement ---

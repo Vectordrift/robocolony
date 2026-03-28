@@ -807,6 +807,12 @@ export const BARRACKS_HEALING_BONUS = 3;
 /** Hard cap on total units that can occupy a single hex */
 export const MAX_UNITS_PER_HEX = 12;
 
+/** Adjacent military units can support a full contested hex at reduced effectiveness */
+export const SUPPORT_COMBAT_ATTACK_MULTIPLIER = 0.5;
+
+/** Supporting units take reduced incoming damage because they fight from adjacent hexes */
+export const SUPPORT_COMBAT_DEFENSE_MULTIPLIER = 0.25;
+
 /** Base loyalty recovered per tick at a friendly settlement */
 export const SETTLEMENT_LOYALTY_RECOVERY = 1;
 
@@ -834,6 +840,10 @@ function parseHexKey(key: string): HexCoord | null {
   const [q, r] = key.split(',').map(Number);
   if (!Number.isFinite(q) || !Number.isFinite(r)) return null;
   return { q, r };
+}
+
+function isMilitaryUnit(unit: Unit): boolean {
+  return MILITARY_UNIT_TYPES.has(unit.type);
 }
 
 function getRoadEntry(hex: HexTileState, to: HexCoord): RoadEdgeState | undefined {
@@ -2936,8 +2946,15 @@ export function resolveCombat(
     hexUnits.set(key, list);
   }
 
+  const assignedSupportHexByUnitId = new Map<string, string>();
+  const sortedCombatHexes = [...hexUnits.entries()]
+    .filter(([, unitsOnHex]) => new Set(unitsOnHex.map(u => u.colonyId)).size > 1)
+    .map(([hex]) => hex)
+    .sort();
+
   // For each hex, check if there are units from multiple colonies
-  for (const [hex, unitsOnHex] of hexUnits) {
+  for (const hex of sortedCombatHexes) {
+    const unitsOnHex = hexUnits.get(hex) ?? [];
     const colonies = new Set(unitsOnHex.map(u => u.colonyId));
     if (colonies.size < 2) continue;
 
@@ -2982,8 +2999,32 @@ export function resolveCombat(
       continue; // Skip combat on this hex entirely
     }
 
-    // Combat! Units on this hex fight (respecting NAP protections for individual pairs).
-    // Each unit attacks a random enemy unit that is NOT NAP-protected.
+    const combatParticipants = [...unitsOnHex];
+    const supportUnitIds = new Set<string>();
+    const parsedHex = parseHexKey(hex);
+    if (parsedHex && unitsOnHex.length >= MAX_UNITS_PER_HEX) {
+      const involvedColonies = new Set(unitsOnHex.map(unit => unit.colonyId));
+      const neighboringHexes = hexNeighbors(parsedHex)
+        .map(candidate => ({ key: hexKey(candidate.q, candidate.r), coord: candidate }))
+        .sort((a, b) => a.key.localeCompare(b.key));
+
+      for (const neighbor of neighboringHexes) {
+        const neighborUnits = hexUnits.get(neighbor.key) ?? [];
+        for (const unit of neighborUnits) {
+          if (assignedSupportHexByUnitId.has(unit.id)) continue;
+          if (!isMilitaryUnit(unit)) continue;
+          if (!involvedColonies.has(unit.colonyId)) continue;
+          if (unit.health <= 0) continue;
+          supportUnitIds.add(unit.id);
+          assignedSupportHexByUnitId.set(unit.id, hex);
+          combatParticipants.push(unit);
+        }
+      }
+    }
+
+    // Combat! Units on this hex fight, with adjacent support on full contested hexes.
+    // Each participant attacks a random enemy participant that is NOT NAP-protected.
+    // Support units remain on adjacent hexes, deal reduced damage, and take reduced damage.
     // We process all attacks simultaneously (no kill-order advantage).
 
     // Calculate damage dealt by each unit
@@ -2996,18 +3037,22 @@ export function resolveCombat(
       targetType: string;
       targetColony: string;
       damage: number;
+      supporting: boolean;
     }> = [];
 
-    for (const attacker of unitsOnHex) {
+    for (const attacker of combatParticipants) {
+      const attackerSupporting = supportUnitIds.has(attacker.id);
       const attackerTechs = researchedTechsByColony.get(attacker.colonyId) ?? new Set<string>();
-      const attackPower = UNIT_ATTACK[attacker.type]
+      const attackPower = (
+        UNIT_ATTACK[attacker.type]
         + ((attacker.type === 'militia' || attacker.type === 'soldier') && attackerTechs.has('steel_weapons')
           ? STEEL_WEAPONS_ATTACK_BONUS
-          : 0);
+          : 0)
+      ) * (attackerSupporting ? SUPPORT_COMBAT_ATTACK_MULTIPLIER : 1);
       if (attackPower <= 0) continue; // settlers can't attack
 
       // Find enemy units (from different colony AND not NAP-protected)
-      const enemies = unitsOnHex.filter(u =>
+      const enemies = combatParticipants.filter(u =>
         u.colonyId !== attacker.colonyId
         && !hasPeaceAgreement(napPairs, attacker.colonyId, u.colonyId)
         && !(protectedColonyIds?.has(attacker.colonyId) || protectedColonyIds?.has(u.colonyId))
@@ -3023,12 +3068,16 @@ export function resolveCombat(
       // Military units always deal at least COMBAT_MINIMUM_DAMAGE (#173)
       let effectiveDamage = Math.max(COMBAT_MINIMUM_DAMAGE, rawDamage - UNIT_DEFENSE[target.type]);
 
+      if (supportUnitIds.has(target.id)) {
+        effectiveDamage *= SUPPORT_COMBAT_DEFENSE_MULTIPLIER;
+      }
+
       // Walls defense bonus: defending units on a settlement hex with walls take reduced damage
       if (settlements) {
         const defenderSettlement = settlements.find(
           s => s.colonyId === target.colonyId && s.hexX === target.hexX && s.hexY === target.hexY
         );
-        if (defenderSettlement && defenderSettlement.buildings.some(b => b.type === 'walls')) {
+        if (defenderSettlement && defenderSettlement.buildings.some(b => b.type === 'walls') && !supportUnitIds.has(target.id)) {
           effectiveDamage = effectiveDamage / WALLS_DEFENSE_MULTIPLIER;
         }
       }
@@ -3059,6 +3108,7 @@ export function resolveCombat(
         targetType: target.type,
         targetColony: target.colonyId,
         damage: roundedDamage,
+        supporting: attackerSupporting,
       });
     }
 
@@ -3072,7 +3122,7 @@ export function resolveCombat(
       damageReceived: number;
     }> = [];
 
-    for (const unit of unitsOnHex) {
+    for (const unit of combatParticipants) {
       const totalDamage = damageDealt.get(unit.id) ?? 0;
       if (totalDamage > 0) {
         combatDamageReceived.set(unit.id, totalDamage);
@@ -3178,7 +3228,7 @@ export function resolveCombat(
           hexY,
           winnerColony,
           isHomeland: homelandColonies.has(colonyId),
-          participants: unitsOnHex.map(u => ({
+          participants: combatParticipants.map(u => ({
             unitId: u.id,
             unitType: u.type,
             colonyId: u.colonyId,
@@ -3186,6 +3236,7 @@ export function resolveCombat(
             healthAfter: u.health,
             morale: u.morale,
             destroyed: destroyedUnitIds.includes(u.id),
+            supporting: supportUnitIds.has(u.id),
           })),
           casualties: casualties.length,
           combatLog,
