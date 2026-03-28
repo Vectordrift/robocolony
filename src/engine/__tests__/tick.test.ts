@@ -937,7 +937,7 @@ describe('resolveMovement', () => {
     const units = [movingUnit, ...blockers];
     const actions = [makeAction({ params: { unitId: 'unit-move', targetX: 1, targetY: 0 } })];
 
-    const result = resolveMovement(units, actions, hexLookup);
+    const result = resolveMovement(units, actions, hexLookup, hexes);
 
     expect(units[0]).toMatchObject({ hexX: 0, hexY: 0 });
     expect(result.events.some(
