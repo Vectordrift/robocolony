@@ -13,7 +13,7 @@ import { nanoid } from 'nanoid';
 import { db } from '../db/index.js';
 import { worlds, actions, colonies, units, settlements } from '../db/schema/index.js';
 import { requireAuth } from '../middleware/index.js';
-import { normalizeAgreementTerms, TECH_TREE, canResearchTech, type AgreementType, type TechId } from '../engine/tick.js';
+import { normalizeAgreementTerms, TECH_TREE, canResearchTech, BUILDING_TECH_REQUIREMENTS, type AgreementType, type TechId, type BuildingType } from '../engine/tick.js';
 
 // --- Types ---
 
@@ -35,7 +35,7 @@ interface ActionInput {
 
 // Valid building types
 const VALID_BUILDING_TYPES = new Set([
-  'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop',
+  'farm', 'lumberMill', 'quarry', 'mine', 'foundry', 'barracks', 'granary', 'market', 'workshop',
 ]);
 
 // Valid unit types
@@ -645,6 +645,32 @@ async function validateActionContext(
     const researched: string[] = (colonyRows[0] as { researchedTechs?: string[] } | undefined)?.researchedTechs ?? [];
     if (!researched.includes('civil_engineering')) {
       return { valid: false, error: 'You need Civil Engineering before engineers can build roads.' };
+    }
+
+    return { valid: true };
+  }
+
+  if (action.type === 'build') {
+    const buildingType = action.params.buildingType as BuildingType | undefined;
+    if (buildingType) {
+      const requiredTech = BUILDING_TECH_REQUIREMENTS[buildingType];
+      if (requiredTech) {
+        const colonyRows = await db
+          .select({ researchedTechs: colonies.researchedTechs })
+          .from(colonies)
+          .where(
+            and(
+              eq(colonies.worldId, worldId),
+              eq(colonies.id, colonyId),
+            ),
+          )
+          .limit(1);
+
+        const researched: string[] = (colonyRows[0] as { researchedTechs?: string[] } | undefined)?.researchedTechs ?? [];
+        if (!researched.includes(requiredTech)) {
+          return { valid: false, error: `${buildingType} requires ${TECH_TREE[requiredTech].name}` };
+        }
+      }
     }
 
     return { valid: true };

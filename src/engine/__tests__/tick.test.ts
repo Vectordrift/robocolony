@@ -70,6 +70,8 @@ import {
   DEMOLISH_REFUND_RATE,
   DECAY_CHANCE_PER_BUILDING,
   TECH_TREE,
+  FOUNDRY_STEEL_OUTPUT_PER_LEVEL,
+  FOUNDRY_IRON_CONVERSION_PER_LEVEL,
   type Colony,
   type Settlement,
   type Unit,
@@ -502,7 +504,10 @@ describe('resolveBuilding', () => {
     for (const bType of VALID_BUILDING_TYPES) {
       const cost = BUILDING_COSTS[bType];
       const startRes = { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 };
-      const colony = makeColony({ resources: { ...startRes } });
+      const colony = Object.assign(
+        makeColony({ resources: { ...startRes } }),
+        bType === 'foundry' ? { researchedTechs: ['metallurgy'] } : {},
+      );
       const settlement = makeSettlement({ id: `s-${bType}` });
       const action = makeBuildAction({
         id: `act-${bType}`,
@@ -664,6 +669,35 @@ describe('resolveBuilding', () => {
 
     expect(result.actionResults[0].status).toBe('failed');
     expect(result.actionResults[0].result).toContain('Insufficient resources');
+  });
+
+  it('fails to build a foundry before metallurgy is researched', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 200, stone: 200, iron: 200, influence: 50 } });
+    const settlement = makeSettlement();
+    const action = makeBuildAction({
+      params: { settlementId: 'settlement-1', buildingType: 'foundry' },
+    });
+
+    const result = resolveBuilding([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('requires Metallurgy');
+  });
+
+  it('allows foundry construction after metallurgy is researched', () => {
+    const colony = Object.assign(
+      makeColony({ resources: { food: 100, timber: 200, stone: 200, iron: 200, influence: 50 } }),
+      { researchedTechs: ['metallurgy'] },
+    );
+    const settlement = makeSettlement();
+    const action = makeBuildAction({
+      params: { settlementId: 'settlement-1', buildingType: 'foundry' },
+    });
+
+    const result = resolveBuilding([settlement], [colony], [action]);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(settlement.buildQueue[0].type).toBe('foundry');
   });
 
   it('fails when colony not found', () => {
@@ -4285,6 +4319,34 @@ describe('Edge cases: simultaneous actions (Issue #123)', () => {
     });
     expect(hexes[0].roads?.['1,0']).toBeUndefined();
     expect(hexes[1].roads?.['0,0']).toBeUndefined();
+  });
+
+  it('converts iron into steel through foundries during colony production', () => {
+    const colony = Object.assign(
+      makeColony({ resources: { food: 100, timber: 100, stone: 100, iron: 20, influence: 50 } }),
+      { researchedTechs: ['metallurgy'] },
+    );
+    const settlement = makeSettlement({
+      buildings: [{ type: 'foundry', level: 1 }],
+    });
+    const hexes = [
+      makeHex(0, 0, { resources: { food: 0, timber: 0, stone: 0, iron: 0 } }),
+      makeHex(1, 0, { resources: { food: 0, timber: 0, stone: 0, iron: 0 } }),
+      makeHex(1, -1, { resources: { food: 0, timber: 0, stone: 0, iron: 0 } }),
+      makeHex(0, -1, { resources: { food: 0, timber: 0, stone: 0, iron: 0 } }),
+      makeHex(-1, 0, { resources: { food: 0, timber: 0, stone: 0, iron: 0 } }),
+      makeHex(-1, 1, { resources: { food: 0, timber: 0, stone: 0, iron: 0 } }),
+      makeHex(0, 1, { resources: { food: 0, timber: 0, stone: 0, iron: 0 } }),
+    ];
+
+    const result = resolveTick([colony], [settlement], [], hexes, []);
+
+    expect(result.colonies[0].resources.iron).toBe(20 - 2 - FOUNDRY_IRON_CONVERSION_PER_LEVEL);
+    expect(result.colonies[0].resources.steel).toBe(FOUNDRY_STEEL_OUTPUT_PER_LEVEL);
+
+    const productionEvent = result.events.find((event) => event.type === 'production');
+    expect(productionEvent?.data.produced.steel).toBe(FOUNDRY_STEEL_OUTPUT_PER_LEVEL);
+    expect(productionEvent?.data.consumed.iron).toBe(2 + FOUNDRY_IRON_CONVERSION_PER_LEVEL);
   });
 
 });

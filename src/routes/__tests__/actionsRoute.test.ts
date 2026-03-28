@@ -258,6 +258,40 @@ describe('Action submission route', () => {
     });
   });
 
+  it('rejects foundry builds until metallurgy is researched', async () => {
+    mockDbSelectQueue([
+      [{ currentTick: 42, status: 'active', mapRadius: 12 }],
+      [{ count: 1 }],
+      [{ colonyId: 'colony-1' }],
+      [{ researchedTechs: [] }],
+    ]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/worlds/world-1/actions',
+      headers: {
+        authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+      payload: {
+        actions: [
+          { type: 'build', params: { settlementId: 'settlement-1', buildingType: 'foundry' } },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: 'validation_error',
+      details: [
+        {
+          index: 0,
+          actionType: 'build',
+          error: 'foundry requires Metallurgy',
+        },
+      ],
+    });
+  });
+
   it('scales action capacity with settlement count', async () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],
