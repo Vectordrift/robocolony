@@ -29,6 +29,10 @@ export interface SpectatorFeedEvent {
   colonyId: string | null;
   data: Record<string, unknown>;
   createdAt?: string;
+  summary?: string;
+  importance?: 'high' | 'normal' | 'low';
+  groupedCount?: number;
+  groupedTypes?: string[];
 }
 
 export interface SpectatorRecap {
@@ -44,6 +48,173 @@ const MAX_LIMIT = 200;
 
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+function getEventImportance(event: SpectatorFeedEvent): 'high' | 'normal' | 'low' {
+  switch (event.type) {
+    case 'settlement_founded':
+    case 'settlement_upgraded':
+    case 'settlement_captured':
+    case 'settlement_lost':
+    case 'research_complete':
+    case 'agreement_accepted':
+    case 'agreement_broken':
+    case 'colony_eliminated':
+      return 'high';
+    case 'unit_trained':
+    case 'build_complete':
+    case 'build_started':
+      return 'low';
+    case 'combat_resolved': {
+      const attackerLosses = Number(event.data.attackerLosses ?? 0);
+      const defenderLosses = Number(event.data.defenderLosses ?? 0);
+      return attackerLosses + defenderLosses > 0 ? 'high' : 'low';
+    }
+    default:
+      return 'normal';
+  }
+}
+
+function describeFeedEvent(event: SpectatorFeedEvent): string {
+  const data = event.data ?? {};
+  switch (event.type) {
+    case 'settlement_founded':
+      return typeof data.name === 'string' ? `founded ${data.name}` : 'founded a settlement';
+    case 'settlement_upgraded':
+      return typeof data.name === 'string'
+        ? `upgraded ${data.name} to ${String(data.tier ?? 'a higher tier')}`
+        : 'upgraded a settlement';
+    case 'research_complete':
+      return typeof data.techName === 'string' ? `completed ${data.techName} research` : 'completed research';
+    case 'unit_trained':
+      return typeof data.unitType === 'string' ? `trained ${data.unitType}` : 'trained a unit';
+    case 'build_complete':
+      return typeof data.buildingType === 'string' ? `completed ${data.buildingType}` : 'completed construction';
+    case 'combat_resolved': {
+      const attackerLosses = Number(data.attackerLosses ?? 0);
+      const defenderLosses = Number(data.defenderLosses ?? 0);
+      if (attackerLosses + defenderLosses === 0) {
+        return 'frontier skirmish with no losses';
+      }
+      return `combat with ${attackerLosses + defenderLosses} total losses`;
+    }
+    default:
+      return event.type.replace(/_/g, ' ');
+  }
+}
+
+function getCombatLocationKey(event: SpectatorFeedEvent): string {
+  const x = Number(event.data.hexX ?? NaN);
+  const y = Number(event.data.hexY ?? NaN);
+  return Number.isFinite(x) && Number.isFinite(y) ? `${x},${y}` : 'unknown';
+}
+
+export function aggregateFeedEvents(events: SpectatorFeedEvent[]): SpectatorFeedEvent[] {
+  const aggregated: SpectatorFeedEvent[] = [];
+
+  for (const event of events) {
+    const enriched: SpectatorFeedEvent = {
+      ...event,
+      importance: getEventImportance(event),
+    };
+
+    if (event.type === 'unit_trained') {
+      const unitType = typeof event.data.unitType === 'string' ? event.data.unitType : 'unit';
+      const existing = aggregated.find((candidate) =>
+        candidate.type === 'unit_trained'
+        && candidate.tick === event.tick
+        && candidate.colonyId === event.colonyId
+        && candidate.data.unitType === unitType,
+      );
+
+      if (existing) {
+        existing.groupedCount = (existing.groupedCount ?? 1) + 1;
+        existing.summary = `raised forces: trained ${existing.groupedCount} ${unitType}${existing.groupedCount === 1 ? '' : 's'}`;
+        continue;
+      }
+
+      enriched.groupedCount = 1;
+      enriched.summary = `raised forces: trained 1 ${unitType}`;
+      aggregated.push(enriched);
+      continue;
+    }
+
+    if (event.type === 'combat_resolved') {
+      const attackerLosses = Number(event.data.attackerLosses ?? 0);
+      const defenderLosses = Number(event.data.defenderLosses ?? 0);
+
+      if (attackerLosses + defenderLosses === 0) {
+        const locationKey = getCombatLocationKey(event);
+        const existing = aggregated.find((candidate) =>
+          candidate.type === 'combat_resolved'
+          && candidate.tick === event.tick
+          && candidate.colonyId === event.colonyId
+          && candidate.data.attackerLosses === 0
+          && candidate.data.defenderLosses === 0
+          && getCombatLocationKey(candidate) === locationKey,
+        );
+
+        if (existing) {
+          existing.groupedCount = (existing.groupedCount ?? 1) + 1;
+          existing.summary = `frontier skirmishing continued (${existing.groupedCount} clashes, no losses)`;
+          continue;
+        }
+
+        enriched.groupedCount = 1;
+        enriched.summary = 'frontier skirmish with no losses';
+        aggregated.push(enriched);
+        continue;
+      }
+    }
+
+    const existingTickSummary = aggregated.find((candidate) =>
+      candidate.type === 'tick_summary'
+      && candidate.tick === event.tick
+      && candidate.colonyId === event.colonyId
+      && candidate.importance === 'low'
+      && enriched.importance === 'low',
+    );
+
+    if (existingTickSummary) {
+      const existingSummaries = Array.isArray(existingTickSummary.data.summaries)
+        ? (existingTickSummary.data.summaries as string[])
+        : [];
+      const nextSummaries = [...existingSummaries, describeFeedEvent(enriched)];
+      existingTickSummary.data.summaries = nextSummaries;
+      existingTickSummary.data.groupedEvents = [...((existingTickSummary.data.groupedEvents as string[]) ?? []), enriched.type];
+      existingTickSummary.groupedCount = (existingTickSummary.groupedCount ?? 1) + 1;
+      existingTickSummary.groupedTypes = [...new Set((existingTickSummary.groupedTypes ?? []).concat(enriched.type))];
+      existingTickSummary.summary = `activity update: ${nextSummaries.slice(0, 3).join(', ')}${nextSummaries.length > 3 ? `, +${nextSummaries.length - 3} more` : ''}`;
+      continue;
+    }
+
+    if (enriched.importance === 'low' && event.type !== 'unit_trained' && event.type !== 'combat_resolved') {
+      aggregated.push({
+        ...enriched,
+        type: 'tick_summary',
+        id: `${event.id}:summary`,
+        groupedCount: 1,
+        groupedTypes: [event.type],
+        summary: `activity update: ${describeFeedEvent(enriched)}`,
+        data: {
+          summaries: [describeFeedEvent(enriched)],
+          groupedEvents: [event.type],
+        },
+      });
+      continue;
+    }
+
+    aggregated.push({
+      ...enriched,
+      summary: enriched.summary ?? describeFeedEvent(enriched),
+    });
+  }
+
+  return aggregated.sort((a, b) => {
+    if (b.tick !== a.tick) return b.tick - a.tick;
+    const priority = { high: 0, normal: 1, low: 2 } as const;
+    return priority[a.importance ?? 'normal'] - priority[b.importance ?? 'normal'];
+  });
 }
 
 export function buildSpectatorRecap(
@@ -204,14 +375,14 @@ export async function feedRoutes(app: FastifyInstance) {
       .limit(limit);
 
     // Map events: always prefer publicData for spectator view; never fall back to full data
-    const feedEvents = eventRows.map((row) => ({
+    const feedEvents = aggregateFeedEvents(eventRows.map((row) => ({
       id: row.id,
       tick: row.tick,
       type: row.type,
       colonyId: (row.visibility as string[] | null)?.[0] ?? null,
-      data: row.publicData ?? {},
+      data: (row.publicData ?? {}) as Record<string, unknown>,
       ...(row.createdAt ? { createdAt: row.createdAt.toISOString() } : {}),
-    }));
+    })));
 
     // Get colony summaries (public info only)
     const colonyRows = await db
