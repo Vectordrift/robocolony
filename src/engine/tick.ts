@@ -2299,6 +2299,19 @@ export function resolveMovement(
         },
       });
     }
+
+    if (blockedByFullHex) {
+      events.push({
+        type: 'movement_blocked',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: {
+          hexX: unit.hexX,
+          hexY: unit.hexY,
+          reason: 'hex_full',
+        },
+      });
+    }
   }
 
   return { units, events, actionResults };
@@ -2661,20 +2674,6 @@ export function resolveCombat(
         });
       }
     }
-
-    if (blockedByFullHex) {
-      events.push({
-        type: 'movement_blocked',
-        colonyId: unit.colonyId,
-        unitId: unit.id,
-        data: {
-          hexX: unit.hexX,
-          hexY: unit.hexY,
-          reason: 'hex_full',
-        },
-      });
-    }
-
     // --- Post-combat morale: winners vs losers ---
     // Determine winner per hex: the colony that dealt the most total damage wins.
     // Ties go to the side with fewer casualties.
