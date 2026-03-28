@@ -242,6 +242,23 @@ function chooseExploreTarget(
   return null;
 }
 
+function buildPeaceAgreementLookup(activeAgreements?: Agreement[]): Set<string> {
+  const peacePairs = new Set<string>();
+  if (!activeAgreements) return peacePairs;
+
+  for (const agreement of activeAgreements) {
+    if (agreement.status !== 'active') continue;
+    if (agreement.type !== 'non_aggression' && agreement.type !== 'alliance' && agreement.type !== 'ceasefire') continue;
+    peacePairs.add([agreement.proposedBy, agreement.proposedTo].sort().join('|'));
+  }
+
+  return peacePairs;
+}
+
+function hasPeaceAgreement(peacePairs: Set<string>, colonyA: string, colonyB: string): boolean {
+  return peacePairs.has([colonyA, colonyB].sort().join('|'));
+}
+
 
 export interface ResearchQueueEntry {
   techId: string;
@@ -2468,23 +2485,15 @@ export function resolveCombat(
   }
 
   // Build peace-treaty lookup for active non-aggression, alliance, and ceasefire agreements.
-  const napPairs = new Set<string>();
+  const napPairs = buildPeaceAgreementLookup(activeAgreements);
   const peaceAgreementType = new Map<string, AgreementType>();
   if (activeAgreements) {
     for (const agr of activeAgreements) {
-      if (agr.status === 'active' && (agr.type === 'non_aggression' || agr.type === 'alliance' || agr.type === 'ceasefire')) {
-        const pair = [agr.proposedBy, agr.proposedTo].sort().join('|');
-        napPairs.add(pair);
-        peaceAgreementType.set(pair, agr.type);
-      }
+      if (!hasPeaceAgreement(napPairs, agr.proposedBy, agr.proposedTo)) continue;
+      const pair = [agr.proposedBy, agr.proposedTo].sort().join('|');
+      peaceAgreementType.set(pair, agr.type);
     }
   }
-
-  // Helper to check if two colonies have an active NAP/alliance
-  const hasNap = (colonyA: string, colonyB: string): boolean => {
-    const pair = [colonyA, colonyB].sort().join('|');
-    return napPairs.has(pair);
-  };
 
   // Note: attack actions are handled as move_unit by resolveMovement() — pathfinding
   // toward the target hex. Combat resolution below handles the fighting when they arrive.
@@ -2510,7 +2519,7 @@ export function resolveCombat(
     let allPairsProtected = true;
     for (let i = 0; i < colonyIds.length; i++) {
       for (let j = i + 1; j < colonyIds.length; j++) {
-        if (!hasNap(colonyIds[i], colonyIds[j])) {
+        if (!hasPeaceAgreement(napPairs, colonyIds[i], colonyIds[j])) {
           allPairsProtected = false;
           break;
         }
@@ -2571,7 +2580,7 @@ export function resolveCombat(
       // Find enemy units (from different colony AND not NAP-protected)
       const enemies = unitsOnHex.filter(u =>
         u.colonyId !== attacker.colonyId
-        && !hasNap(attacker.colonyId, u.colonyId)
+        && !hasPeaceAgreement(napPairs, attacker.colonyId, u.colonyId)
         && !(protectedColonyIds?.has(attacker.colonyId) || protectedColonyIds?.has(u.colonyId))
       );
       if (enemies.length === 0) continue;
@@ -4319,6 +4328,68 @@ export function resolveTick(
           }
         }
       }
+    }
+  }
+
+  // --- Treaty enforcement: hostile units cannot occupy settlement hexes protected by active peace agreements ---
+  {
+    const peacePairs = buildPeaceAgreementLookup(agreements);
+    const settlementByHex = new Map(updatedSettlements.map(settlement => [hexKey(settlement.hexX, settlement.hexY), settlement]));
+    const terrainByHex = new Map(hexes.map(hex => [hexKey(hex.x, hex.y), hex.terrain]));
+
+    const isValidEvictionHex = (unit: Unit, candidate: HexCoord, settlementOwner: string): boolean => {
+      const candidateKey = hexKey(candidate.q, candidate.r);
+      const terrain = terrainByHex.get(candidateKey);
+      if (!terrain) return false;
+      if (!findPath({ q: unit.hexX, r: unit.hexY }, candidate, hexLookup)) return false;
+
+      const settlement = settlementByHex.get(candidateKey);
+      if (!settlement) return true;
+      if (settlement.colonyId === unit.colonyId) return true;
+      return !hasPeaceAgreement(peacePairs, unit.colonyId, settlement.colonyId) && settlement.colonyId !== settlementOwner;
+    };
+
+    for (const unit of updatedUnits) {
+      const settlement = settlementByHex.get(hexKey(unit.hexX, unit.hexY));
+      if (!settlement) continue;
+      if (settlement.colonyId === unit.colonyId) continue;
+      if (!hasPeaceAgreement(peacePairs, unit.colonyId, settlement.colonyId)) continue;
+
+      const before = unitPositionsBefore.get(unit.id);
+      let evictionTarget: HexCoord | null = null;
+
+      if (before && (before.x !== unit.hexX || before.y !== unit.hexY)) {
+        const previousHex = { q: before.x, r: before.y };
+        if (isValidEvictionHex(unit, previousHex, settlement.colonyId)) {
+          evictionTarget = previousHex;
+        }
+      }
+
+      if (!evictionTarget) {
+        const fallbackNeighbors = hexNeighbors({ q: unit.hexX, r: unit.hexY })
+          .sort((a, b) => {
+            if (a.q !== b.q) return a.q - b.q;
+            return a.r - b.r;
+          });
+        evictionTarget = fallbackNeighbors.find(candidate => isValidEvictionHex(unit, candidate, settlement.colonyId)) ?? null;
+      }
+
+      if (!evictionTarget) continue;
+
+      unit.hexX = evictionTarget.q;
+      unit.hexY = evictionTarget.r;
+      unit.movementQueue = [];
+
+      events.push({
+        type: 'movement_blocked',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: {
+          hexX: unit.hexX,
+          hexY: unit.hexY,
+          reason: 'peace_treaty_protected_settlement',
+        },
+      });
     }
   }
 
