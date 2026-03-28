@@ -1,15 +1,12 @@
 import { pgTable, text, integer, timestamp, jsonb } from 'drizzle-orm/pg-core';
 
-export const starSystems = pgTable('star_systems', {
+export const sectors = pgTable('sectors', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  sectorId: text('sector_id'),
-  status: text('status').notNull().default('surveyed'),
-  importance: integer('importance').notNull().default(0),
+  status: text('status').notNull().default('open'),
+  strategicValue: integer('strategic_value').notNull().default(0),
   positionX: integer('position_x'),
   positionY: integer('position_y'),
-  claimants: jsonb('claimants').$type<string[]>().notNull().default([]),
-  neighborSystemIds: jsonb('neighbor_system_ids').$type<string[]>().notNull().default([]),
   metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
