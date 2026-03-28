@@ -33,51 +33,6 @@ interface ActionInput {
   params: Record<string, unknown>;
 }
 
-// --- Valid action types and their required params ---
-
-const VALID_ACTION_TYPES: Record<string, string[]> = {
-  'move_unit': ['unitId', 'targetX', 'targetY'],
-  'build': ['settlementId', 'buildingType'],
-  'upgrade_building': ['settlementId', 'buildingType'],
-  'train_unit': ['settlementId', 'unitType'],
-  'found_settlement': ['unitId', 'name'],
-  'demolish': ['settlementId', 'buildingType'],
-  'upgrade_settlement': ['settlementId'],
-  'attack': ['unitId', 'targetX', 'targetY'],
-  'send_message': ['toColonyId', 'message'],
-  'explore': ['unitId'],
-  'survey_poi': ['unitId'],
-  'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
-  'research': ['techId'],
-  'propose_agreement': ['targetColonyId', 'agreementType'],
-  'accept_agreement': ['agreementId'],
-  'reject_agreement': ['agreementId'],
-  'break_agreement': ['agreementId'],
-  'disband': ['unitId'],
-};
-
-// Allowed params per action type (used to strip extra fields)
-const ALLOWED_PARAMS: Record<string, string[]> = {
-  'move_unit': ['unitId', 'targetX', 'targetY'],
-  'build': ['settlementId', 'buildingType'],
-  'upgrade_building': ['settlementId', 'buildingType'],
-  'train_unit': ['settlementId', 'unitType'],
-  'found_settlement': ['unitId', 'name'],
-  'demolish': ['settlementId', 'buildingType'],
-  'upgrade_settlement': ['settlementId'],
-  'attack': ['unitId', 'targetX', 'targetY'],
-  'send_message': ['toColonyId', 'message'],
-  'explore': ['unitId'],
-  'survey_poi': ['unitId'],
-  'convert_resources': ['settlementId', 'fromResource', 'toResource', 'amount'],
-  'research': ['techId'],
-  'propose_agreement': ['targetColonyId', 'agreementType', 'terms'],
-  'accept_agreement': ['agreementId'],
-  'reject_agreement': ['agreementId'],
-  'break_agreement': ['agreementId'],
-  'disband': ['unitId'],
-};
-
 // Valid building types
 const VALID_BUILDING_TYPES = new Set([
   'farm', 'lumberMill', 'quarry', 'mine', 'barracks', 'granary', 'market', 'workshop',
@@ -102,6 +57,191 @@ const BASE_ACTIONS_PER_TICK = 10;
 const ACTIONS_PER_SETTLEMENT = 2;
 const MAX_SETTLEMENT_NAME_LENGTH = 40;
 const MAX_MESSAGE_LENGTH = 500;
+
+type ParamType = 'string' | 'integer' | 'number' | 'object';
+
+interface ActionParamSchema {
+  type: ParamType;
+  description: string;
+  validValues?: string[];
+}
+
+interface ActionDefinition {
+  description: string;
+  required: string[];
+  optional: string[];
+  params: Record<string, ActionParamSchema>;
+}
+
+const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
+  move_unit: {
+    description: 'Queue a unit to move toward a target hex.',
+    required: ['unitId', 'targetX', 'targetY'],
+    optional: [],
+    params: {
+      unitId: { type: 'string', description: 'The unit to move.' },
+      targetX: { type: 'integer', description: 'Destination hex x coordinate.' },
+      targetY: { type: 'integer', description: 'Destination hex y coordinate.' },
+    },
+  },
+  build: {
+    description: 'Queue a building in one of your settlements.',
+    required: ['settlementId', 'buildingType'],
+    optional: [],
+    params: {
+      settlementId: { type: 'string', description: 'Settlement that will build.' },
+      buildingType: { type: 'string', description: 'Building to construct.', validValues: [...VALID_BUILDING_TYPES] },
+    },
+  },
+  upgrade_building: {
+    description: 'Upgrade an existing building in one of your settlements.',
+    required: ['settlementId', 'buildingType'],
+    optional: [],
+    params: {
+      settlementId: { type: 'string', description: 'Settlement that contains the building.' },
+      buildingType: { type: 'string', description: 'Building to upgrade.', validValues: [...VALID_BUILDING_TYPES] },
+    },
+  },
+  train_unit: {
+    description: 'Train a new unit in a settlement.',
+    required: ['settlementId', 'unitType'],
+    optional: [],
+    params: {
+      settlementId: { type: 'string', description: 'Settlement that will train the unit.' },
+      unitType: { type: 'string', description: 'Unit type to train.', validValues: [...VALID_UNIT_TYPES] },
+    },
+  },
+  found_settlement: {
+    description: 'Use a settler to found a new settlement.',
+    required: ['unitId', 'name'],
+    optional: [],
+    params: {
+      unitId: { type: 'string', description: 'Settler unit that will found the settlement.' },
+      name: { type: 'string', description: `Settlement name, max ${MAX_SETTLEMENT_NAME_LENGTH} characters.` },
+    },
+  },
+  demolish: {
+    description: 'Remove a building from a settlement.',
+    required: ['settlementId', 'buildingType'],
+    optional: [],
+    params: {
+      settlementId: { type: 'string', description: 'Settlement that contains the building.' },
+      buildingType: { type: 'string', description: 'Building to demolish.', validValues: [...VALID_BUILDING_TYPES] },
+    },
+  },
+  upgrade_settlement: {
+    description: 'Upgrade a settlement to the next tier.',
+    required: ['settlementId'],
+    optional: [],
+    params: {
+      settlementId: { type: 'string', description: 'Settlement to upgrade.' },
+    },
+  },
+  attack: {
+    description: 'Order a unit to attack a target hex.',
+    required: ['unitId', 'targetX', 'targetY'],
+    optional: [],
+    params: {
+      unitId: { type: 'string', description: 'Unit that will attack.' },
+      targetX: { type: 'integer', description: 'Target hex x coordinate.' },
+      targetY: { type: 'integer', description: 'Target hex y coordinate.' },
+    },
+  },
+  send_message: {
+    description: 'Send a diplomatic message to another colony.',
+    required: ['toColonyId', 'message'],
+    optional: [],
+    params: {
+      toColonyId: { type: 'string', description: 'Recipient colony ID.' },
+      message: { type: 'string', description: `Message body, max ${MAX_MESSAGE_LENGTH} characters.` },
+    },
+  },
+  explore: {
+    description: 'Let a scout automatically explore the frontier.',
+    required: ['unitId'],
+    optional: [],
+    params: {
+      unitId: { type: 'string', description: 'Scout unit that will auto-explore.' },
+    },
+  },
+  survey_poi: {
+    description: 'Survey a point of interest with a scout.',
+    required: ['unitId'],
+    optional: [],
+    params: {
+      unitId: { type: 'string', description: 'Scout unit performing the survey.' },
+    },
+  },
+  convert_resources: {
+    description: 'Convert one resource into another at a settlement.',
+    required: ['settlementId', 'fromResource', 'toResource', 'amount'],
+    optional: [],
+    params: {
+      settlementId: { type: 'string', description: 'Settlement doing the conversion.' },
+      fromResource: { type: 'string', description: 'Resource spent in the conversion.', validValues: [...VALID_RESOURCES] },
+      toResource: { type: 'string', description: 'Resource produced by the conversion.', validValues: [...VALID_RESOURCES] },
+      amount: { type: 'number', description: 'Positive amount to convert.' },
+    },
+  },
+  research: {
+    description: 'Queue research toward a technology.',
+    required: ['techId'],
+    optional: [],
+    params: {
+      techId: { type: 'string', description: 'Technology identifier to research.' },
+    },
+  },
+  propose_agreement: {
+    description: 'Propose a diplomatic agreement to another colony.',
+    required: ['targetColonyId', 'agreementType'],
+    optional: ['terms'],
+    params: {
+      targetColonyId: { type: 'string', description: 'Target colony for the proposal.' },
+      agreementType: { type: 'string', description: 'Agreement type being proposed.', validValues: [...VALID_AGREEMENT_TYPES] },
+      terms: { type: 'object', description: 'Optional agreement terms object, normalized per agreement type.' },
+    },
+  },
+  accept_agreement: {
+    description: 'Accept a proposed agreement.',
+    required: ['agreementId'],
+    optional: [],
+    params: {
+      agreementId: { type: 'string', description: 'Agreement to accept.' },
+    },
+  },
+  reject_agreement: {
+    description: 'Reject a proposed agreement.',
+    required: ['agreementId'],
+    optional: [],
+    params: {
+      agreementId: { type: 'string', description: 'Agreement to reject.' },
+    },
+  },
+  break_agreement: {
+    description: 'Break an active agreement.',
+    required: ['agreementId'],
+    optional: [],
+    params: {
+      agreementId: { type: 'string', description: 'Agreement to break.' },
+    },
+  },
+  disband: {
+    description: 'Disband one of your units.',
+    required: ['unitId'],
+    optional: [],
+    params: {
+      unitId: { type: 'string', description: 'Unit to disband.' },
+    },
+  },
+};
+
+const VALID_ACTION_TYPES = Object.fromEntries(
+  Object.entries(ACTION_DEFINITIONS).map(([type, definition]) => [type, definition.required]),
+);
+
+const ALLOWED_PARAMS = Object.fromEntries(
+  Object.entries(ACTION_DEFINITIONS).map(([type, definition]) => [type, [...definition.required, ...definition.optional]]),
+);
 
 /** Number of ticks after which unprocessed queued actions are auto-expired */
 const STALE_ACTION_TICKS = 5;
@@ -154,6 +294,14 @@ function isFiniteNum(val: unknown): val is number {
 interface ValidationResult {
   valid: boolean;
   error?: string;
+  help?: Record<string, unknown>;
+}
+
+interface ActionValidationError {
+  index: number;
+  actionType: string | null;
+  error: string;
+  help?: Record<string, unknown>;
 }
 
 export function getMaxActionsPerTick(settlementCount: number): number {
@@ -180,22 +328,46 @@ async function getQueuedActionLimit(colonyId: string, worldId: string): Promise<
  */
 function validateActionParams(action: ActionInput, mapRadius: number): ValidationResult {
   if (!action.type || typeof action.type !== 'string') {
-    return { valid: false, error: 'Action type is required' };
+    return {
+      valid: false,
+      error: 'Action type is required',
+      help: { validActionTypes: Object.keys(ACTION_DEFINITIONS) },
+    };
   }
 
+  const definition = ACTION_DEFINITIONS[action.type];
   const requiredParams = VALID_ACTION_TYPES[action.type];
-  if (!requiredParams) {
-    return { valid: false, error: `Unknown action type: ${action.type}. Valid types: ${Object.keys(VALID_ACTION_TYPES).join(', ')}` };
+  if (!requiredParams || !definition) {
+    return {
+      valid: false,
+      error: `Unknown action type: ${action.type}. Valid types: ${Object.keys(VALID_ACTION_TYPES).join(', ')}`,
+      help: { validActionTypes: Object.keys(ACTION_DEFINITIONS) },
+    };
   }
 
   if (!action.params || typeof action.params !== 'object') {
-    return { valid: false, error: `Action params are required for type: ${action.type}` };
+    return {
+      valid: false,
+      error: `Action params are required for type: ${action.type}`,
+      help: {
+        requiredParams,
+        optionalParams: definition.optional,
+      },
+    };
   }
 
   // Check required params exist
   for (const param of requiredParams) {
     if (action.params[param] === undefined || action.params[param] === null) {
-      return { valid: false, error: `Missing required param '${param}' for action type '${action.type}'` };
+      return {
+        valid: false,
+        error: `Missing required param '${param}' for action type '${action.type}'`,
+        help: {
+          requiredParams,
+          optionalParams: definition.optional,
+          paramSchema: definition.params,
+        },
+      };
     }
   }
 
@@ -216,16 +388,16 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
   // Coordinate validation for move_unit and attack
   if (action.type === 'move_unit' || action.type === 'attack') {
     if (!isFiniteInt(p.targetX)) {
-      return { valid: false, error: `'targetX' must be an integer, got: ${typeof p.targetX === 'number' ? p.targetX : typeof p.targetX}` };
+      return { valid: false, error: `'targetX' must be an integer, got: ${typeof p.targetX === 'number' ? p.targetX : typeof p.targetX}`, help: { expectedType: 'integer' } };
     }
     if (!isFiniteInt(p.targetY)) {
-      return { valid: false, error: `'targetY' must be an integer, got: ${typeof p.targetY === 'number' ? p.targetY : typeof p.targetY}` };
+      return { valid: false, error: `'targetY' must be an integer, got: ${typeof p.targetY === 'number' ? p.targetY : typeof p.targetY}`, help: { expectedType: 'integer' } };
     }
     if ((p.targetX as number) < -mapRadius || (p.targetX as number) > mapRadius) {
-      return { valid: false, error: `'targetX' out of map bounds: ${p.targetX} (must be between -${mapRadius} and ${mapRadius})` };
+      return { valid: false, error: `'targetX' out of map bounds: ${p.targetX} (must be between -${mapRadius} and ${mapRadius})`, help: { min: -mapRadius, max: mapRadius } };
     }
     if ((p.targetY as number) < -mapRadius || (p.targetY as number) > mapRadius) {
-      return { valid: false, error: `'targetY' out of map bounds: ${p.targetY} (must be between -${mapRadius} and ${mapRadius})` };
+      return { valid: false, error: `'targetY' out of map bounds: ${p.targetY} (must be between -${mapRadius} and ${mapRadius})`, help: { min: -mapRadius, max: mapRadius } };
     }
     if (typeof p.unitId !== 'string' || p.unitId.length === 0) {
       return { valid: false, error: `'unitId' must be a non-empty string` };
@@ -260,7 +432,7 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
       return { valid: false, error: `'settlementId' must be a non-empty string` };
     }
     if (typeof p.buildingType !== 'string' || !VALID_BUILDING_TYPES.has(p.buildingType as string)) {
-      return { valid: false, error: `Invalid buildingType '${p.buildingType}'. Valid: ${[...VALID_BUILDING_TYPES].join(', ')}` };
+      return { valid: false, error: `Invalid buildingType '${p.buildingType}'. Valid: ${[...VALID_BUILDING_TYPES].join(', ')}`, help: { validValues: [...VALID_BUILDING_TYPES] } };
     }
   }
 
@@ -270,7 +442,7 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
       return { valid: false, error: `'settlementId' must be a non-empty string` };
     }
     if (typeof p.unitType !== 'string' || !VALID_UNIT_TYPES.has(p.unitType as string)) {
-      return { valid: false, error: `Invalid unitType '${p.unitType}'. Valid: ${[...VALID_UNIT_TYPES].join(', ')}` };
+      return { valid: false, error: `Invalid unitType '${p.unitType}'. Valid: ${[...VALID_UNIT_TYPES].join(', ')}`, help: { validValues: [...VALID_UNIT_TYPES] } };
     }
   }
 
@@ -305,10 +477,10 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
       return { valid: false, error: `'settlementId' must be a non-empty string` };
     }
     if (typeof p.fromResource !== 'string' || !VALID_RESOURCES.has(p.fromResource as string)) {
-      return { valid: false, error: `Invalid fromResource '${p.fromResource}'. Valid: ${[...VALID_RESOURCES].join(', ')}` };
+      return { valid: false, error: `Invalid fromResource '${p.fromResource}'. Valid: ${[...VALID_RESOURCES].join(', ')}`, help: { validValues: [...VALID_RESOURCES] } };
     }
     if (typeof p.toResource !== 'string' || !VALID_RESOURCES.has(p.toResource as string)) {
-      return { valid: false, error: `Invalid toResource '${p.toResource}'. Valid: ${[...VALID_RESOURCES].join(', ')}` };
+      return { valid: false, error: `Invalid toResource '${p.toResource}'. Valid: ${[...VALID_RESOURCES].join(', ')}`, help: { validValues: [...VALID_RESOURCES] } };
     }
     if (p.fromResource === p.toResource) {
       return { valid: false, error: `'fromResource' and 'toResource' must be different` };
@@ -331,11 +503,11 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
       return { valid: false, error: `'targetColonyId' must be a non-empty string` };
     }
     if (typeof p.agreementType !== 'string' || !VALID_AGREEMENT_TYPES.has(p.agreementType as string)) {
-      return { valid: false, error: `Invalid agreementType '${p.agreementType}'. Valid: ${[...VALID_AGREEMENT_TYPES].join(', ')}` };
+      return { valid: false, error: `Invalid agreementType '${p.agreementType}'. Valid: ${[...VALID_AGREEMENT_TYPES].join(', ')}`, help: { validValues: [...VALID_AGREEMENT_TYPES] } };
     }
     const normalizedTerms = normalizeAgreementTerms(p.agreementType as AgreementType, p.terms);
     if (!normalizedTerms.valid) {
-      return { valid: false, error: normalizedTerms.error };
+      return { valid: false, error: normalizedTerms.error, help: { agreementType: p.agreementType } };
     }
     p.terms = normalizedTerms.terms as Record<string, unknown>;
   }
@@ -450,32 +622,21 @@ async function validateActionContext(
 
 /** Build the action schema object describing all valid action types and their params */
 function getActionSchema(): Record<string, { required: string[]; optional: string[]; validValues?: Record<string, string[]> }> {
-  const schema: Record<string, { required: string[]; optional: string[]; validValues?: Record<string, string[]> }> = {};
-  for (const [type, required] of Object.entries(VALID_ACTION_TYPES)) {
-    const allowed = ALLOWED_PARAMS[type] ?? required;
-    const optional = allowed.filter(p => !required.includes(p));
-    const entry: { required: string[]; optional: string[]; validValues?: Record<string, string[]> } = { required, optional };
+  const schema: Record<string, { description: string; required: string[]; optional: string[]; params: Record<string, ActionParamSchema>; validValues?: Record<string, string[]> }> = {};
+  for (const [type, definition] of Object.entries(ACTION_DEFINITIONS)) {
+    const validValues = Object.fromEntries(
+      Object.entries(definition.params)
+        .filter(([, value]) => Array.isArray(value.validValues))
+        .map(([key, value]) => [key, value.validValues as string[]]),
+    );
 
-    // Add valid values hints for enum-like params
-    const validValues: Record<string, string[]> = {};
-    if (['build', 'upgrade_building', 'demolish'].includes(type)) {
-      validValues['buildingType'] = [...VALID_BUILDING_TYPES];
-    }
-    if (type === 'train_unit') {
-      validValues['unitType'] = [...VALID_UNIT_TYPES];
-    }
-    if (type === 'convert_resources') {
-      validValues['fromResource'] = [...VALID_RESOURCES];
-      validValues['toResource'] = [...VALID_RESOURCES];
-    }
-    if (type === 'propose_agreement') {
-      validValues['agreementType'] = [...VALID_AGREEMENT_TYPES];
-    }
-    if (Object.keys(validValues).length > 0) {
-      entry.validValues = validValues;
-    }
-
-    schema[type] = entry;
+    schema[type] = {
+      description: definition.description,
+      required: definition.required,
+      optional: definition.optional,
+      params: definition.params,
+      ...(Object.keys(validValues).length > 0 ? { validValues } : {}),
+    };
   }
   return schema;
 }
@@ -490,6 +651,10 @@ export async function actionRoutes(app: FastifyInstance) {
       actionCapacity: {
         basePerTick: BASE_ACTIONS_PER_TICK,
         perSettlement: ACTIONS_PER_SETTLEMENT,
+      },
+      notes: {
+        unknownParamsStripped: true,
+        validationErrorsIncludeHints: true,
       },
       actionTypes: getActionSchema(),
     };
@@ -541,7 +706,7 @@ export async function actionRoutes(app: FastifyInstance) {
     await expireStaleActions(worldId, currentTick);
 
     // Validate all actions first (before rate limit — invalid actions should not consume slots)
-    const validationErrors: Array<{ index: number; error: string }> = [];
+    const validationErrors: ActionValidationError[] = [];
 
     for (let i = 0; i < body.actions.length; i++) {
       const action = body.actions[i];
@@ -549,20 +714,30 @@ export async function actionRoutes(app: FastifyInstance) {
       // Comprehensive type + value validation (also strips extra params)
       const paramResult = validateActionParams(action, mapRadius);
       if (!paramResult.valid) {
-        validationErrors.push({ index: i, error: paramResult.error! });
+        validationErrors.push({
+          index: i,
+          actionType: action?.type ?? null,
+          error: paramResult.error!,
+          ...(paramResult.help ? { help: paramResult.help } : {}),
+        });
         continue;
       }
 
       // Ownership validation
       const ownerResult = await validateOwnership(colony.id, worldId, action);
       if (!ownerResult.valid) {
-        validationErrors.push({ index: i, error: ownerResult.error! });
+        validationErrors.push({ index: i, actionType: action.type, error: ownerResult.error! });
         continue;
       }
 
       const contextResult = await validateActionContext(colony.id, worldId, action);
       if (!contextResult.valid) {
-        validationErrors.push({ index: i, error: contextResult.error! });
+        validationErrors.push({
+          index: i,
+          actionType: action.type,
+          error: contextResult.error!,
+          ...(contextResult.help ? { help: contextResult.help } : {}),
+        });
       }
     }
 
