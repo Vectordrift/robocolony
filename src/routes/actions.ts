@@ -396,6 +396,37 @@ async function validateOwnership(
   return { valid: true };
 }
 
+async function validateActionContext(
+  colonyId: string,
+  worldId: string,
+  action: ActionInput,
+): Promise<ValidationResult> {
+  if (action.type !== 'research') {
+    return { valid: true };
+  }
+
+  const colonySettlements = await db
+    .select({ buildings: settlements.buildings })
+    .from(settlements)
+    .where(
+      and(
+        eq(settlements.worldId, worldId),
+        eq(settlements.colonyId, colonyId),
+      ),
+    );
+
+  const hasWorkshop = colonySettlements.some((settlement) =>
+    Array.isArray(settlement.buildings)
+    && settlement.buildings.some((building) => building?.type === 'workshop'),
+  );
+
+  if (!hasWorkshop) {
+    return { valid: false, error: 'You need a workshop building to research. Build a workshop first.' };
+  }
+
+  return { valid: true };
+}
+
 // --- Action Schema (for discoverability) ---
 
 /** Build the action schema object describing all valid action types and their params */
@@ -502,6 +533,12 @@ export async function actionRoutes(app: FastifyInstance) {
       const ownerResult = await validateOwnership(colony.id, worldId, action);
       if (!ownerResult.valid) {
         validationErrors.push({ index: i, error: ownerResult.error! });
+        continue;
+      }
+
+      const contextResult = await validateActionContext(colony.id, worldId, action);
+      if (!contextResult.valid) {
+        validationErrors.push({ index: i, error: contextResult.error! });
       }
     }
 
