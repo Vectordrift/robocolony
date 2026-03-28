@@ -29,6 +29,7 @@ export const UNIT_SPEED: Record<string, number> = {
   soldier: 3,
   siege: 1,
   settler: 2,
+  engineer: 2,
 };
 
 // --- Vision Radius ---
@@ -40,6 +41,7 @@ export const VISION_RADIUS: Record<string, number> = {
   soldier: 3,
   siege: 1,
   settler: 2,
+  engineer: 3,
 };
 
 // --- A* Pathfinding ---
@@ -51,6 +53,8 @@ interface HexNode {
   parent: HexNode | null;
 }
 
+const MIN_EDGE_COST = 0.5;
+
 function coordKey(c: HexCoord): string {
   return `${c.q},${c.r}`;
 }
@@ -61,21 +65,38 @@ function coordKey(c: HexCoord): string {
  */
 export interface HexLookup {
   getTerrain(q: number, r: number): string | undefined;
+  getRoadStatus?(fromQ: number, fromR: number, toQ: number, toR: number): string | undefined;
 }
 
 /**
  * Create a HexLookup from an array of hex objects.
  */
-export function createHexLookup(hexes: Array<{ x: number; y: number; terrain: string }>): HexLookup {
+export function createHexLookup(hexes: Array<{ x: number; y: number; terrain: string; roads?: Record<string, { status?: string }> }>): HexLookup {
   const map = new Map<string, string>();
+  const roads = new Map<string, Record<string, { status?: string }>>();
   for (const h of hexes) {
     map.set(`${h.x},${h.y}`, h.terrain);
+    roads.set(`${h.x},${h.y}`, h.roads ?? {});
   }
   return {
     getTerrain(q: number, r: number): string | undefined {
       return map.get(`${q},${r}`);
     },
+    getRoadStatus(fromQ: number, fromR: number, toQ: number, toR: number): string | undefined {
+      return roads.get(`${fromQ},${fromR}`)?.[`${toQ},${toR}`]?.status;
+    },
   };
+}
+
+function edgeMovementCost(from: HexCoord, to: HexCoord, hexLookup: HexLookup): number {
+  const terrain = hexLookup.getTerrain(to.q, to.r);
+  if (!terrain) return Infinity;
+
+  const terrainCost = TERRAIN_COST[terrain];
+  if (terrainCost === Infinity) return Infinity;
+
+  const roadStatus = hexLookup.getRoadStatus?.(from.q, from.r, to.q, to.r);
+  return roadStatus === 'built' ? terrainCost * 0.5 : terrainCost;
 }
 
 /**
@@ -108,7 +129,7 @@ export function findPath(
   const startNode: HexNode = {
     coord: from,
     g: 0,
-    f: hexDistance(from, to),
+    f: hexDistance(from, to) * MIN_EDGE_COST,
     parent: null,
   };
 
@@ -150,7 +171,7 @@ export function findPath(
       const terrain = hexLookup.getTerrain(neighbor.q, neighbor.r);
       if (!terrain) continue; // off-map
 
-      const cost = TERRAIN_COST[terrain];
+      const cost = edgeMovementCost(current.coord, neighbor, hexLookup);
       if (cost === Infinity) continue; // impassable
 
       const tentativeG = current.g + cost;
@@ -161,7 +182,7 @@ export function findPath(
       const node: HexNode = {
         coord: neighbor,
         g: tentativeG,
-        f: tentativeG + hexDistance(neighbor, to),
+        f: tentativeG + hexDistance(neighbor, to) * MIN_EDGE_COST,
         parent: current,
       };
       openSet.set(nKey, node);
@@ -187,24 +208,35 @@ export function movementStepsThisTick(
   path: HexCoord[],
   unitType: string,
   hexLookup: HexLookup,
+  start?: HexCoord,
 ): number {
   const budget = UNIT_SPEED[unitType] ?? 1;
   let spent = 0;
   let steps = 0;
+  let previous = start;
 
   for (const step of path) {
-    const terrain = hexLookup.getTerrain(step.q, step.r);
-    const cost = terrain ? (TERRAIN_COST[terrain] ?? 1) : 1;
+    const cost = previous
+      ? edgeMovementCost(previous, step, hexLookup)
+      : (() => {
+          const terrain = hexLookup.getTerrain(step.q, step.r);
+          return terrain ? (TERRAIN_COST[terrain] ?? 1) : 1;
+        })();
 
     if (spent + cost > budget) break;
     spent += cost;
     steps++;
+    previous = step;
   }
 
   // Always allow at least 1 step if the first hex is passable
   if (steps === 0 && path.length > 0) {
-    const terrain = hexLookup.getTerrain(path[0].q, path[0].r);
-    const cost = terrain ? (TERRAIN_COST[terrain] ?? 1) : 1;
+    const cost = start
+      ? edgeMovementCost(start, path[0], hexLookup)
+      : (() => {
+          const terrain = hexLookup.getTerrain(path[0].q, path[0].r);
+          return terrain ? (TERRAIN_COST[terrain] ?? 1) : 1;
+        })();
     if (cost !== Infinity) {
       steps = 1;
     }
@@ -212,5 +244,3 @@ export function movementStepsThisTick(
 
   return steps;
 }
-
-

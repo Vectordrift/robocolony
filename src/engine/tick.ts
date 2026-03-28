@@ -76,7 +76,7 @@ export interface Unit {
   idleTicks?: number;
 }
 
-export type UnitType = 'scout' | 'militia' | 'soldier' | 'siege' | 'settler';
+export type UnitType = 'scout' | 'militia' | 'soldier' | 'siege' | 'settler' | 'engineer';
 
 export interface PoiState {
   type: string;
@@ -93,7 +93,16 @@ export interface HexTileState {
   resources: HexResources;
   settlementId: string | null;
   exploredBy?: string[];
+  roads?: Record<string, RoadEdgeState>;
   poi?: PoiState | null;
+}
+
+export interface RoadEdgeState {
+  colonyId: string;
+  status: 'building' | 'built';
+  remainingTicks?: number;
+  builtAtTick?: number;
+  lastSupportedTick: number;
 }
 
 export interface QueuedAction {
@@ -563,6 +572,7 @@ export const UNIT_UPKEEP: Record<UnitType, number> = {
   soldier: 3,
   siege: 4,
   settler: 3,
+  engineer: 2,
 };
 
 /** Population food consumption per person per tick (reduced from 0.4 to enable faster growth) */
@@ -575,10 +585,18 @@ export const UNIT_TRAINING_COSTS: Record<UnitType, Partial<Resources>> = {
   soldier:  { food: 25, timber: 10, iron: 15 },
   siege:    { food: 40, timber: 20, iron: 30, stone: 10 },
   settler:  { food: 30, timber: 15 },
+  engineer: { food: 30, timber: 20, iron: 15, stone: 10 },
 };
 
 /** All valid unit types for training */
-export const VALID_UNIT_TYPES: UnitType[] = ['scout', 'militia', 'soldier', 'siege', 'settler'];
+export const VALID_UNIT_TYPES: UnitType[] = ['scout', 'militia', 'soldier', 'siege', 'settler', 'engineer'];
+export const ROAD_BUILD_TICKS = 2;
+export const ROAD_DECAY_TICKS = 100;
+export const ROAD_SUPPORT_RANGE = 2;
+export const ROAD_COST: Partial<Resources> = {
+  stone: 10,
+  timber: 5,
+};
 
 /** Base morale loss per tick when food is negative (scaled by deficit severity) */
 export const MORALE_LOSS_RATE = 0.03;
@@ -612,7 +630,7 @@ export const GARRISON_MORALE_RECOVERY = 0.02;
 export const SCORE_SETTLEMENT: Record<string, number> = { outpost: 10, town: 30, city: 100 };
 export const SCORE_POP_PER_10 = 1;
 export const SCORE_BUILDING_LEVEL = 5;
-export const SCORE_UNIT: Record<string, number> = { scout: 2, militia: 5, soldier: 10, siege: 15, settler: 3 };
+export const SCORE_UNIT: Record<string, number> = { scout: 2, militia: 5, soldier: 10, siege: 15, settler: 3, engineer: 4 };
 export const SCORE_TECH = 25;
 export const SCORE_EXPLORED_PER_10 = 1;
 
@@ -726,6 +744,7 @@ export const UNIT_ATTACK: Record<UnitType, number> = {
   soldier: 8,
   siege: 12,
   settler: 0,
+  engineer: 1,
 };
 
 /** Unit defense power by type */
@@ -735,6 +754,7 @@ export const UNIT_DEFENSE: Record<UnitType, number> = {
   soldier: 6,
   siege: 2,
   settler: 1,
+  engineer: 2,
 };
 
 /** Morale loss for surviving units after combat (applied to all combatants) */
@@ -808,6 +828,70 @@ function truncId(id: string, maxLen = 50): string {
 
 function hexKey(x: number, y: number): string {
   return `${x},${y}`;
+}
+
+function parseHexKey(key: string): HexCoord | null {
+  const [q, r] = key.split(',').map(Number);
+  if (!Number.isFinite(q) || !Number.isFinite(r)) return null;
+  return { q, r };
+}
+
+function getRoadEntry(hex: HexTileState, to: HexCoord): RoadEdgeState | undefined {
+  return hex.roads?.[hexKey(to.q, to.r)];
+}
+
+function setRoadEntry(hex: HexTileState, to: HexCoord, entry: RoadEdgeState): void {
+  hex.roads = {
+    ...(hex.roads ?? {}),
+    [hexKey(to.q, to.r)]: entry,
+  };
+}
+
+function removeRoadEntry(hex: HexTileState, to: HexCoord): void {
+  if (!hex.roads) return;
+  const next = { ...hex.roads };
+  delete next[hexKey(to.q, to.r)];
+  hex.roads = next;
+}
+
+function setRoadBetween(
+  hexMap: Map<string, HexTileState>,
+  from: HexCoord,
+  to: HexCoord,
+  entry: RoadEdgeState,
+): void {
+  const fromHex = hexMap.get(hexKey(from.q, from.r));
+  const toHex = hexMap.get(hexKey(to.q, to.r));
+  if (!fromHex || !toHex) return;
+  setRoadEntry(fromHex, to, entry);
+  setRoadEntry(toHex, from, entry);
+}
+
+function removeRoadBetween(
+  hexMap: Map<string, HexTileState>,
+  from: HexCoord,
+  to: HexCoord,
+): void {
+  const fromHex = hexMap.get(hexKey(from.q, from.r));
+  const toHex = hexMap.get(hexKey(to.q, to.r));
+  if (!fromHex || !toHex) return;
+  removeRoadEntry(fromHex, to);
+  removeRoadEntry(toHex, from);
+}
+
+function hasFriendlySettlementSupport(
+  colonyId: string,
+  from: HexCoord,
+  to: HexCoord,
+  settlements: Settlement[],
+): boolean {
+  return settlements.some((settlement) =>
+    settlement.colonyId === colonyId
+    && (
+      hexDistance(from, { q: settlement.hexX, r: settlement.hexY }) <= ROAD_SUPPORT_RANGE
+      || hexDistance(to, { q: settlement.hexX, r: settlement.hexY }) <= ROAD_SUPPORT_RANGE
+    ),
+  );
 }
 
 /**
@@ -1953,6 +2037,16 @@ export function resolveTrainUnit(
       continue;
     }
 
+    const researched: string[] = ((colony as Colony & { researchedTechs?: string[] }).researchedTechs) ?? [];
+    if (uType === 'engineer' && !researched.includes('civil_engineering')) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: 'Engineer training requires Civil Engineering',
+      });
+      continue;
+    }
+
     const cost = UNIT_TRAINING_COSTS[uType];
     if (!hasResources(colony.resources, cost)) {
       const costStr = Object.entries(cost)
@@ -2016,6 +2110,204 @@ export function resolveTrainUnit(
   }
 
   return { newUnits, events, actionResults };
+}
+
+export interface RoadProgressResult {
+  events: TickEvent[];
+}
+
+export function progressRoads(
+  hexes: HexTileState[],
+  settlements: Settlement[],
+  currentTick: number,
+): RoadProgressResult {
+  const events: TickEvent[] = [];
+  const hexMap = new Map<string, HexTileState>(hexes.map((hex) => [hexKey(hex.x, hex.y), hex]));
+  const processedEdges = new Set<string>();
+
+  for (const hex of hexes) {
+    for (const [neighborKey, road] of Object.entries(hex.roads ?? {})) {
+      const from = { q: hex.x, r: hex.y };
+      const to = parseHexKey(neighborKey);
+      if (!to) continue;
+
+      const dedupKey = [hexKey(from.q, from.r), hexKey(to.q, to.r)].sort().join('|');
+      if (processedEdges.has(dedupKey)) continue;
+      processedEdges.add(dedupKey);
+
+      if (road.status === 'building') {
+        const remainingTicks = (road.remainingTicks ?? ROAD_BUILD_TICKS) - 1;
+        if (remainingTicks <= 0) {
+          const builtRoad: RoadEdgeState = {
+            colonyId: road.colonyId,
+            status: 'built',
+            builtAtTick: currentTick,
+            lastSupportedTick: currentTick,
+          };
+          setRoadBetween(hexMap, from, to, builtRoad);
+          events.push({
+            type: 'road_complete',
+            colonyId: road.colonyId,
+            data: {
+              fromX: from.q,
+              fromY: from.r,
+              toX: to.q,
+              toY: to.r,
+            },
+          });
+        } else {
+          setRoadBetween(hexMap, from, to, {
+            ...road,
+            remainingTicks,
+          });
+        }
+        continue;
+      }
+
+      if (hasFriendlySettlementSupport(road.colonyId, from, to, settlements)) {
+        if (road.lastSupportedTick !== currentTick) {
+          setRoadBetween(hexMap, from, to, {
+            ...road,
+            lastSupportedTick: currentTick,
+          });
+        }
+        continue;
+      }
+
+      if (currentTick - road.lastSupportedTick >= ROAD_DECAY_TICKS) {
+        removeRoadBetween(hexMap, from, to);
+        events.push({
+          type: 'road_decayed',
+          colonyId: road.colonyId,
+          data: {
+            fromX: from.q,
+            fromY: from.r,
+            toX: to.q,
+            toY: to.r,
+          },
+        });
+      }
+    }
+  }
+
+  return { events };
+}
+
+export interface BuildRoadResult {
+  events: TickEvent[];
+  actionResults: ActionResult[];
+}
+
+export function resolveBuildRoad(
+  units: Unit[],
+  colonies: Colony[],
+  settlements: Settlement[],
+  hexes: HexTileState[],
+  actions: QueuedAction[],
+  currentTick: number,
+): BuildRoadResult {
+  const events: TickEvent[] = [];
+  const actionResults: ActionResult[] = [];
+  const roadActions = actions.filter((action) => action.type === 'build_road');
+  if (roadActions.length === 0) {
+    return { events, actionResults };
+  }
+
+  const unitMap = new Map(units.map((unit) => [unit.id, unit]));
+  const colonyMap = new Map(colonies.map((colony) => [colony.id, colony]));
+  const hexMap = new Map(hexes.map((hex) => [hexKey(hex.x, hex.y), hex]));
+
+  for (const action of roadActions) {
+    const unit = unitMap.get(action.params.unitId as string);
+    if (!unit) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Unit ${truncId(String(action.params.unitId ?? ''))} not found` });
+      continue;
+    }
+
+    if (unit.colonyId !== action.colonyId) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Unit ${truncId(unit.id)} does not belong to this colony` });
+      continue;
+    }
+
+    if (unit.type !== 'engineer') {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Only engineers can build roads' });
+      continue;
+    }
+
+    const colony = colonyMap.get(action.colonyId);
+    if (!colony) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: `Colony ${truncId(action.colonyId)} not found` });
+      continue;
+    }
+
+    const researched: string[] = ((colony as Colony & { researchedTechs?: string[] }).researchedTechs) ?? [];
+    if (!researched.includes('civil_engineering')) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Civil Engineering is required before building roads' });
+      continue;
+    }
+
+    const from = { q: action.params.fromX as number, r: action.params.fromY as number };
+    const to = { q: action.params.toX as number, r: action.params.toY as number };
+    if (hexDistance(from, to) !== 1) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Road endpoints must be adjacent hexes' });
+      continue;
+    }
+
+    if (!((unit.hexX === from.q && unit.hexY === from.r) || (unit.hexX === to.q && unit.hexY === to.r))) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Engineer must stand on one of the road endpoints' });
+      continue;
+    }
+
+    const fromHex = hexMap.get(hexKey(from.q, from.r));
+    const toHex = hexMap.get(hexKey(to.q, to.r));
+    if (!fromHex || !toHex) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Road endpoints must be on the map' });
+      continue;
+    }
+
+    if (fromHex.terrain === 'ocean' || toHex.terrain === 'ocean') {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Roads cannot be built through ocean hexes' });
+      continue;
+    }
+
+    if (getRoadEntry(fromHex, to)) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'A road already exists or is under construction on that edge' });
+      continue;
+    }
+
+    if (!hasResources(colony.resources, ROAD_COST)) {
+      actionResults.push({ actionId: action.id, status: 'failed', result: 'Insufficient resources for road: need 10 stone, 5 timber' });
+      continue;
+    }
+
+    deductResources(colony.resources, ROAD_COST);
+    setRoadBetween(hexMap, from, to, {
+      colonyId: colony.id,
+      status: 'building',
+      remainingTicks: ROAD_BUILD_TICKS,
+      lastSupportedTick: currentTick,
+    });
+
+    events.push({
+      type: 'road_started',
+      colonyId: colony.id,
+      unitId: unit.id,
+      data: {
+        fromX: from.q,
+        fromY: from.r,
+        toX: to.q,
+        toY: to.r,
+        ticksRemaining: ROAD_BUILD_TICKS,
+      },
+    });
+    actionResults.push({
+      actionId: action.id,
+      status: 'resolved',
+      result: `Road construction started between (${from.q},${from.r}) and (${to.q},${to.r})`,
+    });
+  }
+
+  return { events, actionResults };
 }
 
 // --- Settlement Upgrade ---
@@ -2350,7 +2642,7 @@ export function resolveMovement(
   for (const unit of units) {
     if (!unit.movementQueue || unit.movementQueue.length === 0) continue;
 
-    const steps = movementStepsThisTick(unit.movementQueue, unit.type, hexLookup);
+    const steps = movementStepsThisTick(unit.movementQueue, unit.type, hexLookup, { q: unit.hexX, r: unit.hexY });
 
     if (steps === 0) {
       // Can't move (all remaining hexes impassable?) — clear queue
@@ -4363,9 +4655,18 @@ export function resolveTick(
   }
 
   // --- Phase 0: Resolve movement actions + advance movement queues ---
-  const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+  if (currentTick !== undefined) {
+    const roadProgress = progressRoads(hexes, updatedSettlements, currentTick);
+    events.push(...roadProgress.events);
+  }
+  const roadBuildResult = currentTick !== undefined
+    ? resolveBuildRoad(updatedUnits, updatedColonies, updatedSettlements, hexes, actions, currentTick)
+    : { events: [], actionResults: [] };
+  events.push(...roadBuildResult.events);
+  actionResults.push(...roadBuildResult.actionResults);
+  const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain, roads: h.roads })));
   const hasMovingUnits = updatedUnits.some(u => u.movementQueue && u.movementQueue.length > 0);
-  const nonFoundActions = actions.filter(a => a.type !== 'found_settlement');
+  const nonFoundActions = actions.filter(a => a.type !== 'found_settlement' && a.type !== 'build_road');
   if (nonFoundActions.length > 0 || hasMovingUnits) {
     const moveResult = resolveMovement(updatedUnits, nonFoundActions, hexLookup, hexes);
     events.push(...moveResult.events);
@@ -4441,7 +4742,7 @@ export function resolveTick(
             e => e.type === 'auto_explore' && e.unitId === unit.id
           );
           if (isAutoExplore) {
-            const steps = movementStepsThisTick(unit.movementQueue, unit.type, hexLookup);
+            const steps = movementStepsThisTick(unit.movementQueue, unit.type, hexLookup, { q: unit.hexX, r: unit.hexY });
             if (steps > 0) {
               const moved = unit.movementQueue.slice(0, steps);
               const destination = moved[moved.length - 1];

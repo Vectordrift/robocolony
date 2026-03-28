@@ -128,4 +128,52 @@ describe('State route intel', () => {
       status: 'available',
     });
   });
+
+  it('exposes public roads on the map even without prior exploration', async () => {
+    mockDbSelectQueue([
+      [{ currentTick: 50 }],
+      [],
+      [
+        {
+          x: 4,
+          y: 2,
+          terrain: 'plains',
+          resources: { food: 3 },
+          settlementId: null,
+          roads: { '5,2': { status: 'built' } },
+          poi: null,
+        },
+        {
+          x: 5,
+          y: 2,
+          terrain: 'plains',
+          resources: { food: 2 },
+          settlementId: null,
+          roads: { '4,2': { status: 'built' } },
+          poi: null,
+        },
+      ],
+    ]);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/worlds/world-1/map',
+      headers: {
+        authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      tick: 50,
+      hexCount: 2,
+      hexes: expect.arrayContaining([
+        expect.objectContaining({
+          x: 4,
+          y: 2,
+          roads: [{ toX: 5, toY: 2, status: 'built' }],
+        }),
+      ]),
+    });
+  });
 });

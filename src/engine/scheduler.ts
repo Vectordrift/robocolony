@@ -369,6 +369,7 @@ export class TickScheduler {
         resources: (h.resources ?? { food: 0, timber: 0, stone: 0, iron: 0 }) as HexTileState['resources'],
         settlementId: h.settlementId,
         exploredBy: (h.exploredBy ?? []) as string[],
+        roads: (h as any).roads ?? {},
         poi: (h as any).poi ?? null,
       }));
 
@@ -582,19 +583,27 @@ export class TickScheduler {
           }
         }
 
-        // --- Persist POI discovery state ---
-        // The tick engine marks POIs as discovered in-place on hex objects.
-        // We need to write those changes back to the DB.
+        // --- Persist POI discovery state + road network changes ---
+        const dbHexByCoord = new Map(dbHexes.map((hex) => [`${hex.x},${hex.y}`, hex]));
         for (const hex of hexes) {
-          if (hex.poi && hex.poi.discoveredBy) {
-            // Check if this was newly discovered this tick
-            if (hex.poi.discoveredAtTick === newTick) {
-              await tx.execute(
-                sql`UPDATE hexes SET poi = ${JSON.stringify(hex.poi)}::jsonb
-                    WHERE world_id = ${world.id} AND x = ${hex.x} AND y = ${hex.y}`
-              );
-            }
-          }
+          const previous = dbHexByCoord.get(`${hex.x},${hex.y}`);
+          const poiChanged = JSON.stringify((previous as any)?.poi ?? null) !== JSON.stringify(hex.poi ?? null);
+          const roadsChanged = JSON.stringify((previous as any)?.roads ?? {}) !== JSON.stringify(hex.roads ?? {});
+          if (!poiChanged && !roadsChanged) continue;
+
+          await tx
+            .update(schema.hexes)
+            .set({
+              ...(poiChanged ? { poi: hex.poi ?? null } : {}),
+              ...(roadsChanged ? { roads: hex.roads ?? {} } : {}),
+            } as any)
+            .where(
+              and(
+                eq(schema.hexes.worldId, world.id),
+                eq(schema.hexes.x, hex.x),
+                eq(schema.hexes.y, hex.y),
+              ),
+            );
         }
 
         // Update action statuses + emit action outcome events
