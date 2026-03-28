@@ -52,6 +52,7 @@ import {
   GRANARY_BONUS_PER_LEVEL,
   STOCKPILE_DECAY_RATE,
   HEALING_PER_TICK,
+  MAX_UNITS_PER_HEX,
   BARRACKS_HEALING_BONUS,
   SETTLEMENT_LOYALTY_RECOVERY,
   SETTLEMENT_GARRISON_LOYALTY_BONUS,
@@ -924,6 +925,24 @@ describe('resolveMovement', () => {
     expect(units[0].hexX).toBe(3);
     expect(units[0].hexY).toBe(0);
     expect(units[0].movementQueue?.length).toBe(0);
+  });
+
+  it('blocks movement into a hex that is already at the stacking cap', () => {
+    const hexes = makePlainLine(2);
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const movingUnit = makeUnit({ id: 'unit-move', hexX: 0, hexY: 0, type: 'soldier' });
+    const blockers = Array.from({ length: MAX_UNITS_PER_HEX }, (_, i) =>
+      makeUnit({ id: `blocker-${i}`, colonyId: `c${i + 2}`, hexX: 1, hexY: 0, type: 'soldier' }),
+    );
+    const units = [movingUnit, ...blockers];
+    const actions = [makeAction({ params: { unitId: 'unit-move', targetX: 1, targetY: 0 } })];
+
+    const result = resolveMovement(units, actions, hexLookup);
+
+    expect(units[0]).toMatchObject({ hexX: 0, hexY: 0 });
+    expect(result.events.some(
+      e => e.type === 'movement_blocked' && e.unitId === 'unit-move' && e.data.reason === 'hex_full',
+    )).toBe(true);
   });
 });
 
@@ -2051,6 +2070,26 @@ describe('resolveTrainUnit', () => {
     expect(result.newUnits[0].id).not.toBe(result.newUnits[1].id);
     expect(result.newUnits[0].id).toMatch(/^unit_/);
     expect(result.newUnits[1].id).toMatch(/^unit_/);
+  });
+
+  it('fails to train when the settlement hex is already at the stacking cap', () => {
+    const colony = makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+    });
+    const settlement = makeSettlement({
+      buildings: [{ type: 'barracks', level: 1 }],
+    });
+    const existingUnits = Array.from({ length: MAX_UNITS_PER_HEX }, (_, i) =>
+      makeUnit({ id: `unit-${i}`, colonyId: colony.id, hexX: settlement.hexX, hexY: settlement.hexY, type: 'scout' }),
+    );
+
+    const result = resolveTrainUnit([colony], [settlement], [makeTrainAction()], existingUnits);
+
+    expect(result.newUnits).toHaveLength(0);
+    expect(result.actionResults[0]).toMatchObject({
+      status: 'failed',
+      result: expect.stringContaining('Settlement hex is full'),
+    });
   });
 });
 
