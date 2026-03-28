@@ -49,6 +49,31 @@
       margin-bottom: 1rem;
     }
 
+    .topbar-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .release-link {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.18rem 0.5rem;
+      border-radius: 999px;
+      border: 1px solid rgba(74, 158, 255, 0.35);
+      background: rgba(74, 158, 255, 0.12);
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+
+    .release-link:hover {
+      border-color: rgba(74, 158, 255, 0.6);
+      background: rgba(74, 158, 255, 0.18);
+    }
+
     .brand {
       font-weight: 700;
       letter-spacing: 0.05em;
@@ -255,7 +280,10 @@
   <div class="shell">
     <header class="topbar">
       <div class="brand">🤖 <span>ROBO</span>COLONY Feedback</div>
-      <a href="/index.html">Back to Spectator Feed</a>
+      <div class="topbar-meta">
+        <a class="release-link" id="releaseLink" href="https://github.com/Vectordrift/robocolony/releases" target="_blank" rel="noreferrer">v?</a>
+        <a href="/index.html">Back to Spectator Feed</a>
+      </div>
     </header>
 
     <section class="hero">
@@ -445,6 +473,14 @@
 
     async function init() {
       try {
+        const version = await fetchJson('/version');
+        const releaseLink = document.getElementById('releaseLink');
+        if (version.release && version.release !== 'dev') {
+          releaseLink.textContent = version.release;
+          releaseLink.href = `https://github.com/Vectordrift/robocolony/releases/tag/${version.release}`;
+        } else {
+          releaseLink.textContent = 'dev';
+        }
         await loadWorlds();
         await loadFeedback();
       } catch (error) {

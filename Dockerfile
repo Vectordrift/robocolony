@@ -17,7 +17,8 @@ RUN npm install --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 COPY web ./web
 RUN SHORT_SHA="$(printf '%.7s' "$VCS_REF")" && \
-    printf '{"sha":"%s","short":"%s","timestamp":"%s","message":""}\n' "$VCS_REF" "$SHORT_SHA" "$BUILD_TIMESTAMP" > version.json && \
+    RELEASE_VERSION="v$(node -p "require('./package.json').version")" && \
+    printf '{"sha":"%s","short":"%s","release":"%s","timestamp":"%s","message":""}\n' "$VCS_REF" "$SHORT_SHA" "$RELEASE_VERSION" "$BUILD_TIMESTAMP" > version.json && \
     cp version.json dist/version.json && \
     cp version.json web/version.json
 EXPOSE 3000
