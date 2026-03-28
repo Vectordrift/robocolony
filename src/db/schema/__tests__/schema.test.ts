@@ -4,6 +4,8 @@ import { worlds } from '../worlds.js';
 import { starSystems } from '../starSystems.js';
 import { sectors } from '../sectors.js';
 import { starLanes } from '../starLanes.js';
+import { fleets } from '../fleets.js';
+import { orbitalAssets } from '../orbitalAssets.js';
 import { hexes } from '../hexes.js';
 import { colonies } from '../colonies.js';
 import { settlements } from '../settlements.js';
@@ -90,6 +92,55 @@ describe('Database schema', () => {
       expect(cols).toHaveProperty('travelCost');
       expect(cols).toHaveProperty('travelTicks');
       expect(cols).toHaveProperty('chokepoint');
+      expect(cols).toHaveProperty('visibility');
+      expect(cols).toHaveProperty('metadata');
+      expect(cols).toHaveProperty('createdAt');
+    });
+  });
+
+  describe('fleets table', () => {
+    it('has correct table name', () => {
+      expect(getTableName(fleets)).toBe('fleets');
+    });
+
+    it('has all required columns', () => {
+      const cols = getTableColumns(fleets);
+      expect(cols).toHaveProperty('id');
+      expect(cols).toHaveProperty('colonyId');
+      expect(cols).toHaveProperty('starSystemId');
+      expect(cols).toHaveProperty('homeSystemId');
+      expect(cols).toHaveProperty('currentLaneId');
+      expect(cols).toHaveProperty('type');
+      expect(cols).toHaveProperty('status');
+      expect(cols).toHaveProperty('missionType');
+      expect(cols).toHaveProperty('missionTargetType');
+      expect(cols).toHaveProperty('missionTargetId');
+      expect(cols).toHaveProperty('strength');
+      expect(cols).toHaveProperty('morale');
+      expect(cols).toHaveProperty('supply');
+      expect(cols).toHaveProperty('etaTick');
+      expect(cols).toHaveProperty('visibility');
+      expect(cols).toHaveProperty('metadata');
+      expect(cols).toHaveProperty('createdAt');
+    });
+  });
+
+  describe('orbital_assets table', () => {
+    it('has correct table name', () => {
+      expect(getTableName(orbitalAssets)).toBe('orbital_assets');
+    });
+
+    it('has all required columns', () => {
+      const cols = getTableColumns(orbitalAssets);
+      expect(cols).toHaveProperty('id');
+      expect(cols).toHaveProperty('colonyId');
+      expect(cols).toHaveProperty('starSystemId');
+      expect(cols).toHaveProperty('worldId');
+      expect(cols).toHaveProperty('type');
+      expect(cols).toHaveProperty('status');
+      expect(cols).toHaveProperty('orbitalSlot');
+      expect(cols).toHaveProperty('controlLevel');
+      expect(cols).toHaveProperty('capacity');
       expect(cols).toHaveProperty('visibility');
       expect(cols).toHaveProperty('metadata');
       expect(cols).toHaveProperty('createdAt');
@@ -265,9 +316,9 @@ describe('Database schema', () => {
     });
   });
 
-  it('all 13 tables are defined', () => {
-    const tables = [worlds, starSystems, sectors, starLanes, hexes, colonies, settlements, units, actions, agreements, messages, events, feedbackReports];
-    expect(tables).toHaveLength(13);
+  it('all 15 tables are defined', () => {
+    const tables = [worlds, starSystems, sectors, starLanes, fleets, orbitalAssets, hexes, colonies, settlements, units, actions, agreements, messages, events, feedbackReports];
+    expect(tables).toHaveLength(15);
     tables.forEach(t => expect(getTableName(t)).toBeTruthy());
   });
 });
