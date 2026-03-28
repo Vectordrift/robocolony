@@ -660,6 +660,8 @@ export const HEALING_PER_TICK = 5;
 
 /** Additional healing per barracks level at a friendly settlement */
 export const BARRACKS_HEALING_BONUS = 3;
+/** Hard cap on total units that can occupy a single hex */
+export const MAX_UNITS_PER_HEX = 12;
 
 /** Base loyalty recovered per tick at a friendly settlement */
 export const SETTLEMENT_LOYALTY_RECOVERY = 1;
@@ -1732,6 +1734,7 @@ export function resolveTrainUnit(
   colonies: Colony[],
   settlements: Settlement[],
   actions: QueuedAction[],
+  existingUnits: Unit[] = [],
 ): TrainUnitResult {
   const events: TickEvent[] = [];
   const actionResults: ActionResult[] = [];
@@ -1750,6 +1753,11 @@ export function resolveTrainUnit(
   const colonyMap = new Map<string, Colony>();
   for (const c of colonies) {
     colonyMap.set(c.id, c);
+  }
+  const unitsPerHex = new Map<string, number>();
+  for (const unit of existingUnits) {
+    const key = hexKey(unit.hexX, unit.hexY);
+    unitsPerHex.set(key, (unitsPerHex.get(key) ?? 0) + 1);
   }
 
   for (const action of trainActions) {
@@ -1820,6 +1828,19 @@ export function resolveTrainUnit(
         actionId: action.id,
         status: 'failed',
         result: `Insufficient resources for ${uType}: need ${costStr}`,
+      });
+      continue;
+    }
+
+    const settlementHexKey = hexKey(settlement.hexX, settlement.hexY);
+    const occupiedCount = (unitsPerHex.get(settlementHexKey) ?? 0) + newUnits.filter(
+      unit => unit.hexX === settlement.hexX && unit.hexY === settlement.hexY,
+    ).length;
+    if (occupiedCount >= MAX_UNITS_PER_HEX) {
+      actionResults.push({
+        actionId: action.id,
+        status: 'failed',
+        result: `Settlement hex is full (max ${MAX_UNITS_PER_HEX} units)`,
       });
       continue;
     }
@@ -2038,11 +2059,14 @@ export function resolveMovement(
   const actionResults: ActionResult[] = [];
   const reservedScoutTargetsByColony = new Map<string, Set<string>>();
   const { terrainMap, exploredByColony, allHexKeys } = buildExplorationMaps(hexes);
+  const occupancy = new Map<string, number>();
 
   // Build unit lookup for ownership/existence checks
   const unitMap = new Map<string, Unit>();
   for (const u of units) {
     unitMap.set(u.id, u);
+    const key = hexKey(u.hexX, u.hexY);
+    occupancy.set(key, (occupancy.get(key) ?? 0) + 1);
   }
 
   // Phase 1: Process move_unit, attack, and explore actions — compute paths and set queues
@@ -2209,7 +2233,37 @@ export function resolveMovement(
       continue;
     }
 
-    const moved = unit.movementQueue.slice(0, steps);
+    const moved: HexCoord[] = [];
+    let blockedByFullHex = false;
+    let current = { q: unit.hexX, r: unit.hexY };
+    for (const next of unit.movementQueue.slice(0, steps)) {
+      const nextKey = hexKey(next.q, next.r);
+      const currentOccupancy = occupancy.get(nextKey) ?? 0;
+      if (currentOccupancy >= MAX_UNITS_PER_HEX) {
+        blockedByFullHex = true;
+        break;
+      }
+
+      const currentKey = hexKey(current.q, current.r);
+      occupancy.set(currentKey, Math.max(0, (occupancy.get(currentKey) ?? 1) - 1));
+      occupancy.set(nextKey, currentOccupancy + 1);
+      moved.push(next);
+      current = next;
+    }
+
+    if (moved.length === 0 && blockedByFullHex) {
+      events.push({
+        type: 'movement_blocked',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: {
+          hexX: unit.hexX,
+          hexY: unit.hexY,
+          reason: 'hex_full',
+        },
+      });
+      continue;
+    }
     const destination = moved[moved.length - 1];
 
     // Move unit
@@ -2219,7 +2273,7 @@ export function resolveMovement(
     unit.hexY = destination.r;
 
     // Drain queue
-    unit.movementQueue = unit.movementQueue.slice(steps);
+    unit.movementQueue = unit.movementQueue.slice(moved.length);
 
     events.push({
       type: 'unit_moved',
@@ -2242,6 +2296,19 @@ export function resolveMovement(
         data: {
           hexX: unit.hexX,
           hexY: unit.hexY,
+        },
+      });
+    }
+
+    if (blockedByFullHex) {
+      events.push({
+        type: 'movement_blocked',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: {
+          hexX: unit.hexX,
+          hexY: unit.hexY,
+          reason: 'hex_full',
         },
       });
     }
@@ -2607,7 +2674,6 @@ export function resolveCombat(
         });
       }
     }
-
     // --- Post-combat morale: winners vs losers ---
     // Determine winner per hex: the colony that dealt the most total damage wins.
     // Ties go to the side with fewer casualties.
@@ -4504,7 +4570,7 @@ export function resolveTick(
   // --- Phase 1.5: Resolve train_unit actions ---
   const trainActions = actions.filter(a => a.type === 'train_unit');
   if (trainActions.length > 0) {
-    const trainResult = resolveTrainUnit(updatedColonies, updatedSettlements, actions);
+    const trainResult = resolveTrainUnit(updatedColonies, updatedSettlements, actions, updatedUnits);
     events.push(...trainResult.events);
     actionResults.push(...trainResult.actionResults);
     // Add newly trained units to the unit pool
