@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { eventVisibility } from '../scheduler.js';
+import { buildPublicData, eventVisibility } from '../scheduler.js';
 
 describe('eventVisibility', () => {
   it('includes both agreement parties for private diplomacy events', () => {
@@ -12,5 +12,27 @@ describe('eventVisibility', () => {
     });
 
     expect(new Set(visibility)).toEqual(new Set(['colony-1', 'colony-2']));
+  });
+});
+
+describe('buildPublicData', () => {
+  it('keeps hex coordinates for public unit_destroyed events', () => {
+    const data = buildPublicData({
+      type: 'unit_destroyed',
+      colonyId: 'colony-1',
+      data: {
+        unitType: 'soldier',
+        hexX: 7,
+        hexY: -2,
+        cause: 'combat',
+      },
+    });
+
+    expect(data).toEqual({
+      unitType: 'soldier',
+      hexX: 7,
+      hexY: -2,
+      cause: 'combat',
+    });
   });
 });
