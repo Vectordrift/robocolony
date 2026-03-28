@@ -180,6 +180,40 @@ describe('Action submission route', () => {
     });
   });
 
+  it('rejects Tier 2 research submissions until all Tier 1 techs are complete', async () => {
+    mockDbSelectQueue([
+      [{ currentTick: 42, status: 'active', mapRadius: 12 }],
+      [{ count: 1 }],
+      [{ buildings: [{ type: 'workshop', level: 1 }] }],
+      [{ researchedTechs: ['improved_agriculture', 'fortifications', 'advanced_scouting'] }],
+    ]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/worlds/world-1/actions',
+      headers: {
+        authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+      payload: {
+        actions: [
+          { type: 'research', params: { techId: 'crop_rotation' } },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: 'validation_error',
+      details: [
+        {
+          index: 0,
+          actionType: 'research',
+          error: expect.stringContaining('Tier 2 research is locked'),
+        },
+      ],
+    });
+  });
+
   it('scales action capacity with settlement count', async () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],

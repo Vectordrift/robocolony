@@ -10,7 +10,7 @@ import { eq, and, or, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { worlds, hexes, colonies, settlements, units, agreements } from '../db/schema/index.js';
 import { requireAuth } from '../middleware/index.js';
-import { TECH_TREE, MIN_SETTLEMENT_DISTANCE } from '../engine/tick.js';
+import { TECH_TREE, MIN_SETTLEMENT_DISTANCE, canResearchTech } from '../engine/tick.js';
 import type { TechId } from '../engine/tick.js';
 import { hexDistance, hexNeighbors } from '../engine/hex.js';
 
@@ -525,12 +525,13 @@ export async function stateRoutes(app: FastifyInstance) {
       description: tech.description,
       cost: tech.cost,
       ticks: tech.ticks,
+      tier: tech.tier,
       requires: tech.requires ?? [],
       status: researched.includes(tech.id)
         ? 'researched'
         : queue.some(q => q.techId === tech.id)
           ? 'in_progress'
-          : (tech.requires ?? []).every(r => researched.includes(r))
+          : canResearchTech(tech.id, researched).ok
             ? 'available'
             : 'locked',
       ticksRemaining: queue.find(q => q.techId === tech.id)?.ticksRemaining ?? null,

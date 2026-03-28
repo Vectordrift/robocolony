@@ -11,6 +11,7 @@ import {
   resolveDemolish,
   resolvePoiSurvey,
   resolveCombat,
+  resolveResearch,
   buildingUpgradeCost,
   calculateProduction,
   calculateBuildingUpkeep,
@@ -64,6 +65,7 @@ import {
   IDLE_WARNING_TICKS,
   DEMOLISH_REFUND_RATE,
   DECAY_CHANCE_PER_BUILDING,
+  TECH_TREE,
   type Colony,
   type Settlement,
   type Unit,
@@ -4116,6 +4118,60 @@ describe('Edge cases: simultaneous actions (Issue #123)', () => {
     expect(result.actionResults[0].status).toBe('failed');
     expect(result.actionResults[0].result).toContain('already has a settlement');
     expect(result.newSettlements.length).toBe(0);
+  });
+
+  it('blocks Tier 2 research until all Tier 1 techs are complete', () => {
+    const colony = Object.assign(makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+    }), {
+      researchedTechs: ['improved_agriculture', 'fortifications', 'advanced_scouting'],
+      researchQueue: [],
+    });
+    const settlement = makeSettlement({
+      colonyId: colony.id,
+      buildings: [{ type: 'workshop', level: 1 }],
+    });
+
+    const result = resolveResearch(
+      [colony],
+      [settlement],
+      [{ id: 'act-1', colonyId: colony.id, type: 'research', params: { techId: 'crop_rotation' } } as QueuedAction],
+    );
+
+    expect(result.actionResults[0].status).toBe('failed');
+    expect(result.actionResults[0].result).toContain('Tier 2 research is locked');
+    expect(result.actionResults[0].result).toContain(TECH_TREE.steel_weapons.name);
+    expect((colony as Colony & { researchQueue?: unknown[] }).researchQueue).toEqual([]);
+  });
+
+  it('unlocks Tier 2 research once all Tier 1 techs are complete', () => {
+    const colony = Object.assign(makeColony({
+      resources: { food: 500, timber: 500, stone: 500, iron: 500, influence: 500 },
+    }), {
+      researchedTechs: [
+        'improved_agriculture',
+        'fortifications',
+        'advanced_scouting',
+        'steel_weapons',
+        'trade_routes',
+        'siege_engineering',
+      ],
+      researchQueue: [],
+    });
+    const settlement = makeSettlement({
+      colonyId: colony.id,
+      buildings: [{ type: 'workshop', level: 1 }],
+    });
+
+    const result = resolveResearch(
+      [colony],
+      [settlement],
+      [{ id: 'act-2', colonyId: colony.id, type: 'research', params: { techId: 'civil_engineering' } } as QueuedAction],
+    );
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.actionResults[0].result).toContain(TECH_TREE.civil_engineering.name);
+    expect((colony as Colony & { researchQueue?: Array<{ techId: string }> }).researchQueue?.[0]?.techId).toBe('civil_engineering');
   });
 
 });
