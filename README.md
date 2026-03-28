@@ -106,6 +106,7 @@ See [docs/roadmap.md](docs/roadmap.md) for the current product roadmap and scope
 ## Documentation
 
 - **[Roadmap](docs/roadmap.md)** — current product direction, shipped scope, and next priorities
+- **[Star Systems Foundation](docs/star-systems.md)** — how the current world model evolves into a system layer
 - **[Contributing](CONTRIBUTING.md)** — how to set up, code style, PR workflow
 
 ## Status

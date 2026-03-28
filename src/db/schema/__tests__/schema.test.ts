@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { getTableName, getTableColumns } from 'drizzle-orm';
 import { worlds } from '../worlds.js';
+import { starSystems } from '../starSystems.js';
 import { hexes } from '../hexes.js';
 import { colonies } from '../colonies.js';
 import { settlements } from '../settlements.js';
@@ -27,6 +28,29 @@ describe('Database schema', () => {
       expect(cols).toHaveProperty('status');
       expect(cols).toHaveProperty('mapRadius');
       expect(cols).toHaveProperty('maxColonies');
+      expect(cols).toHaveProperty('starSystemId');
+      expect(cols).toHaveProperty('theaterType');
+      expect(cols).toHaveProperty('orbitalSlot');
+      expect(cols).toHaveProperty('createdAt');
+    });
+  });
+
+  describe('star_systems table', () => {
+    it('has correct table name', () => {
+      expect(getTableName(starSystems)).toBe('star_systems');
+    });
+
+    it('has all required columns', () => {
+      const cols = getTableColumns(starSystems);
+      expect(cols).toHaveProperty('id');
+      expect(cols).toHaveProperty('name');
+      expect(cols).toHaveProperty('status');
+      expect(cols).toHaveProperty('importance');
+      expect(cols).toHaveProperty('positionX');
+      expect(cols).toHaveProperty('positionY');
+      expect(cols).toHaveProperty('claimants');
+      expect(cols).toHaveProperty('neighborSystemIds');
+      expect(cols).toHaveProperty('metadata');
       expect(cols).toHaveProperty('createdAt');
     });
   });
@@ -200,9 +224,9 @@ describe('Database schema', () => {
     });
   });
 
-  it('all 10 tables are defined', () => {
-    const tables = [worlds, hexes, colonies, settlements, units, actions, agreements, messages, events, feedbackReports];
-    expect(tables).toHaveLength(10);
+  it('all 11 tables are defined', () => {
+    const tables = [worlds, starSystems, hexes, colonies, settlements, units, actions, agreements, messages, events, feedbackReports];
+    expect(tables).toHaveLength(11);
     tables.forEach(t => expect(getTableName(t)).toBeTruthy());
   });
 });

@@ -21,6 +21,18 @@ interface ColumnDef {
 }
 
 const CREATE_TABLE_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS star_systems (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'surveyed',
+    importance INTEGER NOT NULL DEFAULT 0,
+    position_x INTEGER,
+    position_y INTEGER,
+    claimants JSONB NOT NULL DEFAULT '[]'::jsonb,
+    neighbor_system_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
   `CREATE TABLE IF NOT EXISTS feedback_reports (
     id TEXT PRIMARY KEY,
     world_id TEXT NOT NULL REFERENCES worlds(id),
@@ -52,7 +64,22 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   { table: 'worlds', column: 'status', type: 'TEXT', defaultValue: "'open'" },
   { table: 'worlds', column: 'map_radius', type: 'INTEGER', defaultValue: '50' },
   { table: 'worlds', column: 'max_colonies', type: 'INTEGER', defaultValue: '8' },
+  { table: 'worlds', column: 'star_system_id', type: 'TEXT', nullable: true },
+  { table: 'worlds', column: 'theater_type', type: 'TEXT', defaultValue: "'surface'" },
+  { table: 'worlds', column: 'orbital_slot', type: 'INTEGER', nullable: true },
   { table: 'worlds', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
+
+  // star_systems
+  { table: 'star_systems', column: 'id', type: 'TEXT' },
+  { table: 'star_systems', column: 'name', type: 'TEXT' },
+  { table: 'star_systems', column: 'status', type: 'TEXT', defaultValue: "'surveyed'" },
+  { table: 'star_systems', column: 'importance', type: 'INTEGER', defaultValue: '0' },
+  { table: 'star_systems', column: 'position_x', type: 'INTEGER', nullable: true },
+  { table: 'star_systems', column: 'position_y', type: 'INTEGER', nullable: true },
+  { table: 'star_systems', column: 'claimants', type: 'JSONB', defaultValue: "'[]'::jsonb" },
+  { table: 'star_systems', column: 'neighbor_system_ids', type: 'JSONB', defaultValue: "'[]'::jsonb" },
+  { table: 'star_systems', column: 'metadata', type: 'JSONB', defaultValue: "'{}'::jsonb" },
+  { table: 'star_systems', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
 
   // colonies
   { table: 'colonies', column: 'id', type: 'TEXT' },
