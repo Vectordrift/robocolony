@@ -148,6 +148,16 @@ export function eventVisibility(event: { colonyId?: string; data: Record<string,
   return [...visibility];
 }
 
+export function findRemovedUnitIds(
+  previousUnits: Array<{ id: string }>,
+  nextUnits: Array<{ id: string }>,
+): string[] {
+  const nextUnitIds = new Set(nextUnits.map(unit => unit.id));
+  return previousUnits
+    .map(unit => unit.id)
+    .filter(unitId => !nextUnitIds.has(unitId));
+}
+
 function eventDedupKey(event: { type: string; data: Record<string, unknown> }): string | null {
   switch (event.type) {
     case 'combat_resolved':
@@ -536,6 +546,16 @@ export class TickScheduler {
 
         // Delete disbanded units
         for (const unitId of result.disbandedUnitIds) {
+          await tx
+            .delete(schema.units)
+            .where(eq(schema.units.id, unitId));
+        }
+
+        // Delete units removed by combat or end-of-tick cleanup.
+        // The tick engine returns the authoritative surviving unit list, so any
+        // previously persisted unit missing from result.units must be removed.
+        const removedUnitIds = findRemovedUnitIds(dbUnits, result.units);
+        for (const unitId of removedUnitIds) {
           await tx
             .delete(schema.units)
             .where(eq(schema.units.id, unitId));
