@@ -128,6 +128,24 @@ function buildPublicData(event: { type: string; colonyId?: string; data: Record<
   }
 }
 
+export function eventVisibility(event: { colonyId?: string; data: Record<string, unknown> }): string[] {
+  const visibility = new Set<string>();
+
+  if (Array.isArray(event.data.visibility)) {
+    for (const id of event.data.visibility) {
+      if (typeof id === 'string' && id.length > 0) {
+        visibility.add(id);
+      }
+    }
+  }
+
+  if (event.colonyId) {
+    visibility.add(event.colonyId);
+  }
+
+  return [...visibility];
+}
+
 function eventDedupKey(event: { type: string; data: Record<string, unknown> }): string | null {
   switch (event.type) {
     case 'combat_resolved':
@@ -763,7 +781,7 @@ export class TickScheduler {
           const persistedEvent = {
             type: event.type,
             public: isPublic,
-            visibility: event.colonyId ? [event.colonyId] : [],
+            visibility: eventVisibility(event),
             data: event.data,
             ...(publicData ? { publicData } : {}),
           };
@@ -796,8 +814,6 @@ export class TickScheduler {
     }
   }
 }
-
-
 
 
 
