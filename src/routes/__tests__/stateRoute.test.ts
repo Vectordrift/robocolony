@@ -153,6 +153,7 @@ describe('State route intel', () => {
           poi: null,
         },
       ],
+      [],
     ]);
 
     const response = await app.inject({
@@ -174,6 +175,68 @@ describe('State route intel', () => {
           roads: [{ toX: 5, toY: 2, status: 'built' }],
         }),
       ]),
+    });
+  });
+
+  it('includes visible enemy units and settlements in the map response', async () => {
+    mockDbSelectQueue([
+      [{ currentTick: 778 }],
+      [],
+      [
+        { x: 36, y: -21, terrain: 'plains', resources: { food: 3 }, settlementId: 'set-enemy', roads: {}, poi: null },
+        { x: 40, y: -17, terrain: 'plains', resources: { food: 2 }, settlementId: null, roads: {}, poi: null },
+      ],
+      [
+        { id: 'enemy-1', colonyId: 'colony-2', type: 'soldier', hexX: 36, hexY: -21, health: 72 },
+        { id: 'enemy-2', colonyId: 'colony-2', type: 'soldier', hexX: 40, hexY: -17, health: 91 },
+      ],
+      [
+        { id: 'set-enemy', colonyId: 'colony-2', name: 'Iron Horde Prime', hexX: 36, hexY: -21, tier: 'town' },
+      ],
+      [
+        { id: 'colony-2', name: 'Iron Horde' },
+      ],
+    ]);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/worlds/world-1/map',
+      headers: {
+        authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      tick: 778,
+      enemyUnits: [
+        {
+          id: 'enemy-1',
+          colonyId: 'colony-2',
+          type: 'soldier',
+          hex: { x: 36, y: -21 },
+          health: 72,
+        },
+        {
+          id: 'enemy-2',
+          colonyId: 'colony-2',
+          type: 'soldier',
+          hex: { x: 40, y: -17 },
+          health: 91,
+        },
+      ],
+      settlements: [
+        {
+          id: 'set-enemy',
+          colonyId: 'colony-2',
+          name: 'Iron Horde Prime',
+          hex: { x: 36, y: -21 },
+          tier: 'town',
+        },
+      ],
+      knownColonies: {
+        'colony-2': 'Iron Horde',
+      },
     });
   });
 });
