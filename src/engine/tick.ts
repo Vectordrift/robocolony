@@ -1523,8 +1523,6 @@ export function resolveFoundSettlement(
   const unitMap = new Map<string, Unit>();
   for (const u of units) {
     unitMap.set(u.id, u);
-    const key = hexKey(u.hexX, u.hexY);
-    occupancy.set(key, (occupancy.get(key) ?? 0) + 1);
   }
   const colonyMap = new Map<string, Colony>();
   for (const c of colonies) {
@@ -2067,6 +2065,8 @@ export function resolveMovement(
   const unitMap = new Map<string, Unit>();
   for (const u of units) {
     unitMap.set(u.id, u);
+    const key = hexKey(u.hexX, u.hexY);
+    occupancy.set(key, (occupancy.get(key) ?? 0) + 1);
   }
 
   // Phase 1: Process move_unit, attack, and explore actions — compute paths and set queues
@@ -2296,19 +2296,6 @@ export function resolveMovement(
         data: {
           hexX: unit.hexX,
           hexY: unit.hexY,
-        },
-      });
-    }
-
-    if (blockedByFullHex) {
-      events.push({
-        type: 'movement_blocked',
-        colonyId: unit.colonyId,
-        unitId: unit.id,
-        data: {
-          hexX: unit.hexX,
-          hexY: unit.hexY,
-          reason: 'hex_full',
         },
       });
     }
@@ -2673,6 +2660,19 @@ export function resolveCombat(
           },
         });
       }
+    }
+
+    if (blockedByFullHex) {
+      events.push({
+        type: 'movement_blocked',
+        colonyId: unit.colonyId,
+        unitId: unit.id,
+        data: {
+          hexX: unit.hexX,
+          hexY: unit.hexY,
+          reason: 'hex_full',
+        },
+      });
     }
 
     // --- Post-combat morale: winners vs losers ---
