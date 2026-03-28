@@ -69,6 +69,7 @@ import {
   type Resources,
   type QueuedAction,
   type BuildingType,
+  type Agreement,
 } from '../tick.js';
 import { createHexLookup, UNIT_SPEED } from '../pathfinding.js';
 
@@ -112,6 +113,21 @@ function makeUnit(overrides: Partial<Unit> = {}): Unit {
     hexY: 0,
     health: 100,
     morale: 1.0,
+    ...overrides,
+  };
+}
+
+function makeAgreement(overrides: Partial<Agreement> = {}): Agreement {
+  return {
+    id: 'agreement-1',
+    worldId: 'world-1',
+    type: 'non_aggression',
+    proposedBy: 'colony-1',
+    proposedTo: 'colony-2',
+    status: 'active',
+    terms: {},
+    proposedAtTick: 1,
+    acceptedAtTick: 2,
     ...overrides,
   };
 }
@@ -1494,6 +1510,62 @@ describe('resolveTick', () => {
 
     expect(result.units.find(u => u.id === 'u2')?.hexX).toBe(0);
     expect(result.events.some(e => e.type === 'movement_blocked' && e.unitId === 'u2')).toBe(true);
+  });
+
+  it('blocks peace-treaty movement into an allied settlement hex', () => {
+    const colonyA = makeColony({ id: 'c1' });
+    const colonyB = makeColony({ id: 'c2' });
+    const settlement = makeSettlement({ id: 's1', colonyId: 'c1', hexX: 1, hexY: 0, population: 0 });
+    const invadingUnit = makeUnit({ id: 'u2', colonyId: 'c2', type: 'soldier', hexX: 0, hexY: 0 });
+    const agreements = [makeAgreement({ proposedBy: 'c1', proposedTo: 'c2' })];
+    const hexes = makePlainLine(2);
+
+    const result = resolveTick(
+      [colonyA, colonyB],
+      [settlement],
+      [invadingUnit],
+      hexes,
+      [{ id: 'a1', colonyId: 'c2', type: 'move_unit', params: { unitId: 'u2', targetX: 1, targetY: 0 } }],
+      42,
+      'world-1',
+      10,
+      agreements,
+    );
+
+    expect(result.units.find(u => u.id === 'u2')?.hexX).toBe(0);
+    expect(result.events.some(
+      e => e.type === 'movement_blocked'
+        && e.unitId === 'u2'
+        && e.data.reason === 'peace_treaty_protected_settlement',
+    )).toBe(true);
+  });
+
+  it('evicts units already occupying a treaty-protected foreign settlement', () => {
+    const colonyA = makeColony({ id: 'c1' });
+    const colonyB = makeColony({ id: 'c2' });
+    const settlement = makeSettlement({ id: 's1', colonyId: 'c1', hexX: 1, hexY: 0, population: 0 });
+    const occupyingUnit = makeUnit({ id: 'u2', colonyId: 'c2', type: 'soldier', hexX: 1, hexY: 0 });
+    const agreements = [makeAgreement({ proposedBy: 'c1', proposedTo: 'c2' })];
+    const hexes = makePlainLine(2);
+
+    const result = resolveTick(
+      [colonyA, colonyB],
+      [settlement],
+      [occupyingUnit],
+      hexes,
+      [],
+      42,
+      'world-1',
+      10,
+      agreements,
+    );
+
+    expect(result.units.find(u => u.id === 'u2')).toMatchObject({ hexX: 0, hexY: 0 });
+    expect(result.events.some(
+      e => e.type === 'movement_blocked'
+        && e.unitId === 'u2'
+        && e.data.reason === 'peace_treaty_protected_settlement',
+    )).toBe(true);
   });
 
   it('suppresses combat involving protected colonies', () => {
