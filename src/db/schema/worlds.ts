@@ -12,5 +12,6 @@ export const worlds = pgTable('worlds', {
   starSystemId: text('star_system_id'),
   theaterType: text('theater_type').notNull().default('surface'),
   orbitalSlot: integer('orbital_slot'),
+  suspendedStatus: text('suspended_status'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

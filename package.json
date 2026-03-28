@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "agent:starter": "tsx src/agent-starter.ts",
+    "world:admin": "tsx src/world-admin.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",

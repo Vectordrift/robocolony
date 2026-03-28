@@ -12,6 +12,7 @@ import { resolveTick } from './tick.js';
 import type { Colony, Settlement, Unit, HexTileState, Resources, Building, BuildQueueEntry, QueuedAction, MessageRecord, ResearchQueueEntry, Agreement, AgreementMutation } from './tick.js';
 import { hexDistance } from './hex.js';
 import { nanoid } from 'nanoid';
+import { canWorldRunScheduler } from '../lib/worldLifecycle.js';
 
 /** How often (in ticks) to send compass signal events */
 const COMPASS_SIGNAL_INTERVAL = 25;
@@ -207,7 +208,7 @@ export class TickScheduler {
       .where(eq(schema.worlds.id, this.worldId));
 
     if (!world) throw new Error(`World ${this.worldId} not found`);
-    if (world.status !== 'running' && world.status !== 'open') throw new Error(`World ${this.worldId} is not running (status: ${world.status})`);
+    if (!canWorldRunScheduler(world.status)) throw new Error(`World ${this.worldId} is not running (status: ${world.status})`);
 
     console.log(`[SCHEDULER] World found: ${world.name}, status=${world.status}, tickRate=${world.tickRate}ms, currentTick=${world.currentTick}`);
 
@@ -265,7 +266,7 @@ export class TickScheduler {
         .from(schema.worlds)
         .where(eq(schema.worlds.id, this.worldId));
 
-      if (!world || (world.status !== 'running' && world.status !== 'open')) {
+      if (!world || !canWorldRunScheduler(world.status)) {
         this.stop();
         return;
       }

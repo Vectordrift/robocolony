@@ -37,6 +37,7 @@ describe('Database schema', () => {
       expect(cols).toHaveProperty('starSystemId');
       expect(cols).toHaveProperty('theaterType');
       expect(cols).toHaveProperty('orbitalSlot');
+      expect(cols).toHaveProperty('suspendedStatus');
       expect(cols).toHaveProperty('createdAt');
     });
   });
