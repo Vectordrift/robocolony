@@ -4,6 +4,8 @@ export { sectors } from './sectors.js';
 export { starLanes } from './starLanes.js';
 export { fleets } from './fleets.js';
 export { orbitalAssets } from './orbitalAssets.js';
+export { governanceActors } from './governanceActors.js';
+export { actorDelegations } from './actorDelegations.js';
 export { hexes } from './hexes.js';
 export { colonies } from './colonies.js';
 export { settlements } from './settlements.js';

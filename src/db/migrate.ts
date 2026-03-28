@@ -97,6 +97,31 @@ const CREATE_TABLE_STATEMENTS = [
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
+  `CREATE TABLE IF NOT EXISTS governance_actors (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    parent_actor_id TEXT,
+    colony_id TEXT,
+    star_system_id TEXT,
+    sector_id TEXT,
+    polity_id TEXT,
+    authority_scope JSONB NOT NULL DEFAULT '[]'::jsonb,
+    visibility_scope JSONB NOT NULL DEFAULT '[]'::jsonb,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS actor_delegations (
+    id TEXT PRIMARY KEY,
+    from_actor_id TEXT NOT NULL,
+    to_actor_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    authority_scope JSONB NOT NULL DEFAULT '[]'::jsonb,
+    control_surface TEXT NOT NULL,
+    visibility_rules JSONB NOT NULL DEFAULT '{}'::jsonb,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
   `CREATE TABLE IF NOT EXISTS feedback_reports (
     id TEXT PRIMARY KEY,
     world_id TEXT NOT NULL REFERENCES worlds(id),
@@ -208,6 +233,31 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   { table: 'orbital_assets', column: 'visibility', type: 'TEXT', defaultValue: "'public'" },
   { table: 'orbital_assets', column: 'metadata', type: 'JSONB', defaultValue: "'{}'::jsonb" },
   { table: 'orbital_assets', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
+
+  // governance_actors
+  { table: 'governance_actors', column: 'id', type: 'TEXT' },
+  { table: 'governance_actors', column: 'type', type: 'TEXT' },
+  { table: 'governance_actors', column: 'name', type: 'TEXT' },
+  { table: 'governance_actors', column: 'parent_actor_id', type: 'TEXT', nullable: true },
+  { table: 'governance_actors', column: 'colony_id', type: 'TEXT', nullable: true },
+  { table: 'governance_actors', column: 'star_system_id', type: 'TEXT', nullable: true },
+  { table: 'governance_actors', column: 'sector_id', type: 'TEXT', nullable: true },
+  { table: 'governance_actors', column: 'polity_id', type: 'TEXT', nullable: true },
+  { table: 'governance_actors', column: 'authority_scope', type: 'JSONB', defaultValue: "'[]'::jsonb" },
+  { table: 'governance_actors', column: 'visibility_scope', type: 'JSONB', defaultValue: "'[]'::jsonb" },
+  { table: 'governance_actors', column: 'metadata', type: 'JSONB', defaultValue: "'{}'::jsonb" },
+  { table: 'governance_actors', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
+
+  // actor_delegations
+  { table: 'actor_delegations', column: 'id', type: 'TEXT' },
+  { table: 'actor_delegations', column: 'from_actor_id', type: 'TEXT' },
+  { table: 'actor_delegations', column: 'to_actor_id', type: 'TEXT' },
+  { table: 'actor_delegations', column: 'status', type: 'TEXT', defaultValue: "'active'" },
+  { table: 'actor_delegations', column: 'authority_scope', type: 'JSONB', defaultValue: "'[]'::jsonb" },
+  { table: 'actor_delegations', column: 'control_surface', type: 'TEXT' },
+  { table: 'actor_delegations', column: 'visibility_rules', type: 'JSONB', defaultValue: "'{}'::jsonb" },
+  { table: 'actor_delegations', column: 'metadata', type: 'JSONB', defaultValue: "'{}'::jsonb" },
+  { table: 'actor_delegations', column: 'created_at', type: 'TIMESTAMPTZ', defaultValue: 'NOW()', nullable: true },
 
   // colonies
   { table: 'colonies', column: 'id', type: 'TEXT' },
