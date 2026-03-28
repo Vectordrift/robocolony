@@ -51,10 +51,14 @@ describe('Database schema', () => {
       expect(cols).toHaveProperty('sectorId');
       expect(cols).toHaveProperty('status');
       expect(cols).toHaveProperty('importance');
+      expect(cols).toHaveProperty('simulationMode');
+      expect(cols).toHaveProperty('heatScore');
+      expect(cols).toHaveProperty('lastActiveTick');
       expect(cols).toHaveProperty('positionX');
       expect(cols).toHaveProperty('positionY');
       expect(cols).toHaveProperty('claimants');
       expect(cols).toHaveProperty('neighborSystemIds');
+      expect(cols).toHaveProperty('aggregateState');
       expect(cols).toHaveProperty('metadata');
       expect(cols).toHaveProperty('createdAt');
     });
@@ -71,8 +75,12 @@ describe('Database schema', () => {
       expect(cols).toHaveProperty('name');
       expect(cols).toHaveProperty('status');
       expect(cols).toHaveProperty('strategicValue');
+      expect(cols).toHaveProperty('simulationMode');
+      expect(cols).toHaveProperty('heatScore');
+      expect(cols).toHaveProperty('lastEvaluatedTick');
       expect(cols).toHaveProperty('positionX');
       expect(cols).toHaveProperty('positionY');
+      expect(cols).toHaveProperty('aggregateState');
       expect(cols).toHaveProperty('metadata');
       expect(cols).toHaveProperty('createdAt');
     });
