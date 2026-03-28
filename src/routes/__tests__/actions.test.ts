@@ -154,30 +154,35 @@ describe('Action validation', () => {
 });
 
 describe('Rate limiting', () => {
-  const MAX_ACTIONS_PER_TICK = 10;
+  const getMaxActionsPerTick = (settlementCount: number) => 10 + settlementCount * 2;
 
   it('allows up to 10 actions per tick', () => {
     const currentQueued = 0;
     const newActions = 10;
-    expect(newActions <= MAX_ACTIONS_PER_TICK - currentQueued).toBe(true);
+    expect(newActions <= getMaxActionsPerTick(0) - currentQueued).toBe(true);
   });
 
   it('rejects when queue is full', () => {
-    const currentQueued = 10;
+    const currentQueued = getMaxActionsPerTick(0);
     const newActions = 1;
-    expect(newActions <= MAX_ACTIONS_PER_TICK - currentQueued).toBe(false);
+    expect(newActions <= getMaxActionsPerTick(0) - currentQueued).toBe(false);
   });
 
   it('allows partial fill', () => {
     const currentQueued = 7;
     const newActions = 3;
-    expect(newActions <= MAX_ACTIONS_PER_TICK - currentQueued).toBe(true);
+    expect(newActions <= getMaxActionsPerTick(0) - currentQueued).toBe(true);
   });
 
   it('rejects overfill', () => {
     const currentQueued = 7;
     const newActions = 4;
-    expect(newActions <= MAX_ACTIONS_PER_TICK - currentQueued).toBe(false);
+    expect(newActions <= getMaxActionsPerTick(0) - currentQueued).toBe(false);
+  });
+
+  it('scales action capacity with settlements', () => {
+    expect(getMaxActionsPerTick(1)).toBe(12);
+    expect(getMaxActionsPerTick(9)).toBe(28);
   });
 });
 

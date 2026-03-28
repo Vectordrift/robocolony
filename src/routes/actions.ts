@@ -98,7 +98,8 @@ const VALID_AGREEMENT_TYPES = new Set([
   'non_aggression', 'trade', 'alliance', 'ceasefire',
 ]);
 
-const MAX_ACTIONS_PER_TICK = 10;
+const BASE_ACTIONS_PER_TICK = 10;
+const ACTIONS_PER_SETTLEMENT = 2;
 const MAX_SETTLEMENT_NAME_LENGTH = 40;
 const MAX_MESSAGE_LENGTH = 500;
 
@@ -153,6 +154,24 @@ function isFiniteNum(val: unknown): val is number {
 interface ValidationResult {
   valid: boolean;
   error?: string;
+}
+
+export function getMaxActionsPerTick(settlementCount: number): number {
+  return BASE_ACTIONS_PER_TICK + Math.max(0, settlementCount) * ACTIONS_PER_SETTLEMENT;
+}
+
+async function getQueuedActionLimit(colonyId: string, worldId: string): Promise<number> {
+  const settlementCountRows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(settlements)
+    .where(
+      and(
+        eq(settlements.worldId, worldId),
+        eq(settlements.colonyId, colonyId),
+      ),
+    );
+
+  return getMaxActionsPerTick(Number(settlementCountRows[0]?.count ?? 0));
 }
 
 /**
@@ -467,7 +486,11 @@ export async function actionRoutes(app: FastifyInstance) {
   // Action schema — discover valid action types and their params (no auth required)
   app.get('/api/worlds/:id/actions/schema', async (_request, reply) => {
     return {
-      maxActionsPerTick: MAX_ACTIONS_PER_TICK,
+      maxActionsPerTick: BASE_ACTIONS_PER_TICK,
+      actionCapacity: {
+        basePerTick: BASE_ACTIONS_PER_TICK,
+        perSettlement: ACTIONS_PER_SETTLEMENT,
+      },
       actionTypes: getActionSchema(),
     };
   });
@@ -512,6 +535,7 @@ export async function actionRoutes(app: FastifyInstance) {
     const currentTick = world[0].currentTick;
     const nextTick = currentTick + 1;
     const mapRadius = world[0].mapRadius;
+    const maxActionsPerTick = await getQueuedActionLimit(colony.id, worldId);
 
     // Auto-expire stale queued actions from previous ticks
     await expireStaleActions(worldId, currentTick);
@@ -564,7 +588,7 @@ export async function actionRoutes(app: FastifyInstance) {
       );
 
     const currentQueuedCount = Number(existingCount[0]?.count ?? 0);
-    const remainingSlots = MAX_ACTIONS_PER_TICK - currentQueuedCount;
+    const remainingSlots = maxActionsPerTick - currentQueuedCount;
 
     // Truncate batch to fit remaining slots (partial accept)
     let truncated = false;
@@ -572,7 +596,7 @@ export async function actionRoutes(app: FastifyInstance) {
       if (remainingSlots <= 0) {
         return reply.code(429).send({
           error: 'rate_limit',
-          message: `Rate limit: max ${MAX_ACTIONS_PER_TICK} actions per tick. You have ${currentQueuedCount} queued, 0 remaining.`,
+          message: `Rate limit: max ${maxActionsPerTick} actions per tick. You have ${currentQueuedCount} queued, 0 remaining.`,
         });
       }
       body.actions = body.actions.slice(0, remainingSlots);
@@ -609,7 +633,7 @@ export async function actionRoutes(app: FastifyInstance) {
       actions: inserted,
       ...(truncated ? {
         truncated: true,
-        message: `Batch truncated: ${inserted.length} of your actions accepted (max ${MAX_ACTIONS_PER_TICK}/tick, ${currentQueuedCount} already queued).`,
+        message: `Batch truncated: ${inserted.length} of your actions accepted (max ${maxActionsPerTick}/tick, ${currentQueuedCount} already queued).`,
       } : {}),
     });
   });
@@ -634,6 +658,7 @@ export async function actionRoutes(app: FastifyInstance) {
 
     const currentTick = world[0].currentTick;
     const nextTick = currentTick + 1;
+    const maxActionsPerTick = await getQueuedActionLimit(colony.id, worldId);
 
     // Auto-expire stale queued actions from previous ticks
     await expireStaleActions(worldId, currentTick);
@@ -685,7 +710,7 @@ export async function actionRoutes(app: FastifyInstance) {
       tick: currentTick,
       queued: {
         count: queued.length,
-        maxPerTick: MAX_ACTIONS_PER_TICK,
+        maxPerTick: maxActionsPerTick,
         actions: queued,
       },
       recent: recent,
