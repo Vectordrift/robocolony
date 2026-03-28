@@ -3607,6 +3607,24 @@ describe('resolveCombat', () => {
     expect(result.units.find(u => u.id === 'u1')).toBeDefined();
   });
 
+  it('reports prior combat damage when a unit bleeds out after combat', () => {
+    const units = [
+      makeUnit({ id: 'u1', colonyId: 'c1', hexX: 0, hexY: 0, type: 'soldier', health: 100 }),
+      makeUnit({ id: 'u2', colonyId: 'c2', hexX: 0, hexY: 0, type: 'soldier', health: 7 }),
+    ];
+
+    const result = resolveCombat(units, [], 42);
+    const destroyedEvent = result.events.find(
+      e => e.type === 'unit_destroyed'
+        && e.unitId === 'u2'
+        && typeof e.data.reason === 'string'
+        && e.data.reason.includes('bled out after combat'),
+    );
+
+    expect(destroyedEvent).toBeDefined();
+    expect(destroyedEvent!.data.damageReceived).toBeGreaterThan(0);
+  });
+
   it('should destroy units that reach 0 health', () => {
     // Soldier (attack 8) vs settler (defense 1, health 10) → settler dies easily
     const units = [
