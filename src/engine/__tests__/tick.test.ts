@@ -723,7 +723,7 @@ describe('resolveMovement', () => {
     const units = [makeUnit({ hexX: 0, hexY: 0, type: 'scout' })];
     const actions = [makeAction({ params: { unitId: 'unit-1', targetX: 5, targetY: 0 } })];
 
-    const result = resolveMovement(units, actions, hexLookup);
+    const result = resolveMovement(units, actions, hexLookup, hexes);
 
     // Scout moves 5 hexes per tick on plains
     expect(result.actionResults[0].status).toBe('resolved');
@@ -741,7 +741,7 @@ describe('resolveMovement', () => {
     const units = [makeUnit({ hexX: 0, hexY: 0, type: 'settler' })];
     const actions = [makeAction({ params: { unitId: 'unit-1', targetX: 3, targetY: 0 } })];
 
-    const result = resolveMovement(units, actions, hexLookup);
+    const result = resolveMovement(units, actions, hexLookup, hexes);
 
     expect(units[0].hexX).toBe(2);
     expect(units[0].hexY).toBe(0);
@@ -758,7 +758,7 @@ describe('resolveMovement', () => {
     const units = [makeUnit({ hexX: 0, hexY: 0 })];
     const actions = [makeAction({ params: { unitId: 'unit-1', targetX: 2, targetY: 0 } })];
 
-    const result = resolveMovement(units, actions, hexLookup);
+    const result = resolveMovement(units, actions, hexLookup, hexes);
 
     expect(result.actionResults[0].status).toBe('failed');
     expect(result.actionResults[0].result).toContain('No path');
@@ -776,7 +776,7 @@ describe('resolveMovement', () => {
     // New action sends them to (0,3) instead
     const actions = [makeAction({ params: { unitId: 'unit-1', targetX: 0, targetY: 3 } })];
 
-    const result = resolveMovement(units, actions, hexLookup);
+    const result = resolveMovement(units, actions, hexLookup, hexes);
 
     expect(result.actionResults[0].status).toBe('resolved');
     // Old queue replaced; should now be heading toward (0,3)
@@ -797,7 +797,7 @@ describe('resolveMovement', () => {
       makeAction({ id: 'action-2', params: { unitId: 'scout-2', targetX: 3, targetY: 0 } }),
     ];
 
-    const result = resolveMovement(units, actions, hexLookup);
+    const result = resolveMovement(units, actions, hexLookup, hexes);
 
     expect(result.actionResults[0].status).toBe('resolved');
     expect(result.actionResults[0].result).toBe('Path computed: 3 steps');
@@ -822,7 +822,7 @@ describe('resolveMovement', () => {
     })];
     const actions = [makeAction({ params: { unitId: 'unit-1', targetX: 1, targetY: 0 } })];
 
-    const result = resolveMovement(units, actions, hexLookup);
+    const result = resolveMovement(units, actions, hexLookup, hexes);
 
     expect(result.actionResults[0].status).toBe('resolved');
     expect(result.actionResults[0].result).toBe('Movement cancelled');
@@ -836,7 +836,7 @@ describe('resolveMovement', () => {
     const units: Unit[] = [];
     const actions = [makeAction({ params: { unitId: 'nonexistent', targetX: 1, targetY: 0 } })];
 
-    const result = resolveMovement(units, actions, hexLookup);
+    const result = resolveMovement(units, actions, hexLookup, hexes);
 
     expect(result.actionResults[0].status).toBe('failed');
     expect(result.actionResults[0].result).toContain('not found');
@@ -848,10 +848,28 @@ describe('resolveMovement', () => {
     const units = [makeUnit({ colonyId: 'colony-2' })];
     const actions = [makeAction({ colonyId: 'colony-1', params: { unitId: 'unit-1', targetX: 1, targetY: 0 } })];
 
-    const result = resolveMovement(units, actions, hexLookup);
+    const result = resolveMovement(units, actions, hexLookup, hexes);
 
     expect(result.actionResults[0].status).toBe('failed');
     expect(result.actionResults[0].result).toContain('does not belong');
+  });
+
+  it('computes a frontier path for explore actions', () => {
+    const hexes = makePlainGrid(3).map((hex) => ({
+      ...hex,
+      exploredBy: Math.abs(hex.x) <= 1 && Math.abs(hex.y) <= 1 ? ['colony-1'] : [],
+    }));
+    const hexLookup = createHexLookup(hexes.map(h => ({ x: h.x, y: h.y, terrain: h.terrain })));
+    const units = [makeUnit({ id: 'scout-1', colonyId: 'colony-1', hexX: 0, hexY: 0, type: 'scout' })];
+    const actions = [makeAction({ type: 'explore', params: { unitId: 'scout-1' } })];
+
+    const result = resolveMovement(units, actions, hexLookup, hexes);
+
+    expect(result.actionResults[0].status).toBe('resolved');
+    expect(result.actionResults[0].result).toContain('Exploration path computed');
+    expect(result.events.some(e => e.type === 'movement_queued')).toBe(true);
+    expect(result.events.some(e => e.type === 'unit_moved')).toBe(true);
+    expect(units[0].hexX !== 0 || units[0].hexY !== 0).toBe(true);
   });
 
   it('advances existing movement queue without new action', () => {
@@ -863,7 +881,7 @@ describe('resolveMovement', () => {
       movementQueue: [{ q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }, { q: 4, r: 0 }],
     })];
     // No new actions — just advance existing queue
-    const result = resolveMovement(units, [], hexLookup);
+    const result = resolveMovement(units, [], hexLookup, hexes);
 
     expect(units[0].hexX).toBe(4);
     expect(units[0].hexY).toBe(0);
@@ -880,7 +898,7 @@ describe('resolveMovement', () => {
       movementQueue: [{ q: 1, r: 0 }, { q: 2, r: 0 }], // only 2 steps
     })];
 
-    const result = resolveMovement(units, [], hexLookup);
+    const result = resolveMovement(units, [], hexLookup, hexes);
 
     expect(units[0].hexX).toBe(2);
     expect(units[0].movementQueue).toEqual([]);
@@ -901,7 +919,7 @@ describe('resolveMovement', () => {
       movementQueue: [{ q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }],
     })];
 
-    const result = resolveMovement(units, [], hexLookup);
+    const result = resolveMovement(units, [], hexLookup, hexes);
 
     // Forest 1.5 + plains 1 + plains 1 = 3.5, within scout speed 5. Moves full path.
     expect(units[0].hexX).toBe(3);
@@ -1554,6 +1572,28 @@ describe('resolveTick', () => {
     expect(result.actionResults.length).toBe(1);
     expect(result.actionResults[0].status).toBe('resolved');
     expect(result.events.some(e => e.type === 'unit_moved')).toBe(true);
+  });
+
+  it('processes explore actions instead of leaving them unimplemented', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ population: 0 });
+    const hexes = makePlainGrid(3).map((hex) => ({
+      ...hex,
+      exploredBy: Math.abs(hex.x) <= 1 && Math.abs(hex.y) <= 1 ? [colony.id] : [],
+    }));
+    const units = [makeUnit({ id: 'scout-1', colonyId: colony.id, hexX: 0, hexY: 0, type: 'scout' })];
+    const actions: QueuedAction[] = [
+      makeAction({ id: 'explore-1', colonyId: colony.id, type: 'explore', params: { unitId: 'scout-1' } }),
+    ];
+
+    const result = resolveTick([colony], [settlement], units, hexes, actions);
+
+    expect(result.actionResults).toHaveLength(1);
+    expect(result.actionResults[0]).toMatchObject({
+      actionId: 'explore-1',
+      status: 'resolved',
+    });
+    expect(result.actionResults[0].result).toContain('Exploration path computed');
   });
 
   it('returns empty actionResults when no actions provided', () => {

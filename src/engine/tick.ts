@@ -154,6 +154,94 @@ function chooseScoutDestination(
   return desired;
 }
 
+const PASSABLE_EXPLORE = new Set(['plains', 'forest', 'coast', 'desert', 'tundra', 'mountains']);
+
+function buildExplorationMaps(hexes: HexTileState[]): {
+  terrainMap: Map<string, string>;
+  exploredByColony: Map<string, Set<string>>;
+  allHexKeys: Set<string>;
+} {
+  const terrainMap = new Map<string, string>();
+  const exploredByColony = new Map<string, Set<string>>();
+  const allHexKeys = new Set<string>();
+
+  for (const hex of hexes) {
+    const key = coordKey({ q: hex.x, r: hex.y });
+    terrainMap.set(key, hex.terrain);
+    allHexKeys.add(key);
+
+    for (const colonyId of hex.exploredBy ?? []) {
+      if (!exploredByColony.has(colonyId)) {
+        exploredByColony.set(colonyId, new Set());
+      }
+      exploredByColony.get(colonyId)!.add(key);
+    }
+  }
+
+  return { terrainMap, exploredByColony, allHexKeys };
+}
+
+function chooseExploreTarget(
+  scout: Unit,
+  explored: Set<string>,
+  terrainMap: Map<string, string>,
+  allHexKeys: Set<string>,
+  hexLookup: HexLookup,
+  reservedTargets: Set<string>,
+): { target: HexCoord; path: HexCoord[] } | null {
+  const scoutPos: HexCoord = { q: scout.hexX, r: scout.hexY };
+  const frontierCandidates: HexCoord[] = [];
+  const frontierSeen = new Set<string>();
+
+  for (const exploredKey of explored) {
+    const [eq, er] = exploredKey.split(',').map(Number);
+    for (const neighbor of hexNeighbors({ q: eq, r: er })) {
+      const neighborKey = coordKey(neighbor);
+      if (frontierSeen.has(neighborKey)) continue;
+      frontierSeen.add(neighborKey);
+
+      if (!allHexKeys.has(neighborKey)) continue;
+      if (explored.has(neighborKey)) continue;
+      if (reservedTargets.has(neighborKey)) continue;
+
+      const terrain = terrainMap.get(neighborKey);
+      if (!terrain || !PASSABLE_EXPLORE.has(terrain)) continue;
+
+      frontierCandidates.push(neighbor);
+    }
+  }
+
+  if (frontierCandidates.length === 0) return null;
+
+  function frontierScore(candidate: HexCoord): number {
+    let unexploredCount = 0;
+    for (const neighbor of hexNeighbors(candidate)) {
+      const neighborKey = coordKey(neighbor);
+      if (allHexKeys.has(neighborKey) && !explored.has(neighborKey)) {
+        unexploredCount++;
+      }
+    }
+    return unexploredCount * 1000 + hexDistance(scoutPos, candidate);
+  }
+
+  frontierCandidates.sort((a, b) => frontierScore(b) - frontierScore(a));
+
+  const farCandidates = frontierCandidates.filter(candidate => hexDistance(scoutPos, candidate) >= 2);
+  const nearCandidates = frontierCandidates.filter(candidate => hexDistance(scoutPos, candidate) < 2);
+
+  for (const candidates of [farCandidates, nearCandidates]) {
+    for (let i = 0; i < Math.min(candidates.length, 15); i++) {
+      const candidate = candidates[i];
+      const path = findPath(scoutPos, candidate, hexLookup);
+      if (path && path.length > 0) {
+        return { target: candidate, path };
+      }
+    }
+  }
+
+  return null;
+}
+
 
 export interface ResearchQueueEntry {
   techId: string;
@@ -1927,10 +2015,12 @@ export function resolveMovement(
   units: Unit[],
   actions: QueuedAction[],
   hexLookup: HexLookup,
+  hexes: HexTileState[],
 ): { units: Unit[]; events: TickEvent[]; actionResults: ActionResult[] } {
   const events: TickEvent[] = [];
   const actionResults: ActionResult[] = [];
   const reservedScoutTargetsByColony = new Map<string, Set<string>>();
+  const { terrainMap, exploredByColony, allHexKeys } = buildExplorationMaps(hexes);
 
   // Build unit lookup for ownership/existence checks
   const unitMap = new Map<string, Unit>();
@@ -1938,15 +2028,13 @@ export function resolveMovement(
     unitMap.set(u.id, u);
   }
 
-  // Phase 1: Process move_unit and attack actions — compute paths and set queues
+  // Phase 1: Process move_unit, attack, and explore actions — compute paths and set queues
   // Attack actions work the same as move_unit — pathfind toward target hex.
   // Combat is resolved automatically when opposing units share a hex.
-  const moveActions = actions.filter(a => a.type === 'move_unit' || a.type === 'attack' );
+  const moveActions = actions.filter(a => a.type === 'move_unit' || a.type === 'attack' || a.type === 'explore');
 
   for (const action of moveActions) {
     const unitId = action.params.unitId as string;
-    const targetX = action.params.targetX as number;
-    const targetY = action.params.targetY as number;
 
     const unit = unitMap.get(unitId);
     if (!unit) {
@@ -1969,64 +2057,106 @@ export function resolveMovement(
     }
 
     const from: HexCoord = { q: unit.hexX, r: unit.hexY };
-    const desired: HexCoord = { q: targetX, r: targetY };
-    let to: HexCoord = desired;
+    let to: HexCoord = from;
+    let resultMessage = '';
 
-    if (action.type === 'move_unit' && unit.type === 'scout') {
+    if (action.type === 'explore') {
+      if (unit.type !== 'scout') {
+        actionResults.push({
+          actionId: action.id,
+          status: 'failed',
+          result: 'Only scouts can explore',
+        });
+        continue;
+      }
+
+      const explored = exploredByColony.get(unit.colonyId);
+      if (!explored) {
+        actionResults.push({
+          actionId: action.id,
+          status: 'failed',
+          result: 'No explored frontier available yet',
+        });
+        continue;
+      }
+
       const reservedTargets = reservedScoutTargetsByColony.get(unit.colonyId) ?? new Set<string>();
       reservedScoutTargetsByColony.set(unit.colonyId, reservedTargets);
-      to = chooseScoutDestination(from, desired, hexLookup, reservedTargets);
+      const choice = chooseExploreTarget(unit, explored, terrainMap, allHexKeys, hexLookup, reservedTargets);
+      if (!choice) {
+        actionResults.push({
+          actionId: action.id,
+          status: 'failed',
+          result: 'No unexplored frontier hex available',
+        });
+        continue;
+      }
+
+      to = choice.target;
+      unit.movementQueue = choice.path;
       reservedTargets.add(coordKey(to));
+      resultMessage = `Exploration path computed: ${choice.path.length} steps`;
+    } else {
+      const targetX = action.params.targetX as number;
+      const targetY = action.params.targetY as number;
+      const desired: HexCoord = { q: targetX, r: targetY };
+      to = desired;
+
+      if (action.type === 'move_unit' && unit.type === 'scout') {
+        const reservedTargets = reservedScoutTargetsByColony.get(unit.colonyId) ?? new Set<string>();
+        reservedScoutTargetsByColony.set(unit.colonyId, reservedTargets);
+        to = chooseScoutDestination(from, desired, hexLookup, reservedTargets);
+        reservedTargets.add(coordKey(to));
+      }
+
+      // Cancel movement: move to current position clears queue
+      if (from.q === to.q && from.r === to.r) {
+        unit.movementQueue = [];
+        actionResults.push({
+          actionId: action.id,
+          status: 'resolved',
+          result: 'Movement cancelled',
+        });
+        events.push({
+          type: 'movement_cancelled',
+          colonyId: unit.colonyId,
+          unitId: unit.id,
+          data: { hexX: unit.hexX, hexY: unit.hexY },
+        });
+        continue;
+      }
+
+      const path = findPath(from, to, hexLookup);
+      if (!path || path.length === 0) {
+        actionResults.push({
+          actionId: action.id,
+          status: 'failed',
+          result: `No path from (${from.q},${from.r}) to (${to.q},${to.r})`,
+        });
+        events.push({
+          type: 'movement_failed',
+          colonyId: unit.colonyId,
+          unitId: unit.id,
+          data: {
+            from: { x: from.q, y: from.r },
+            to: { x: to.q, y: to.r },
+            reason: 'no_path',
+          },
+        });
+        continue;
+      }
+
+      unit.movementQueue = path;
+      const redirected = to.q !== desired.q || to.r !== desired.r;
+      resultMessage = redirected
+        ? `Path computed: ${path.length} steps (destination adjusted to ${to.q},${to.r} to avoid scout overlap)`
+        : `Path computed: ${path.length} steps`;
     }
 
-    // Cancel movement: move to current position clears queue
-    if (from.q === to.q && from.r === to.r) {
-      unit.movementQueue = [];
-      actionResults.push({
-        actionId: action.id,
-        status: 'resolved',
-        result: 'Movement cancelled',
-      });
-      events.push({
-        type: 'movement_cancelled',
-        colonyId: unit.colonyId,
-        unitId: unit.id,
-        data: { hexX: unit.hexX, hexY: unit.hexY },
-      });
-      continue;
-    }
-
-    // Compute path using A*
-    const path = findPath(from, to, hexLookup);
-
-    if (!path || path.length === 0) {
-      actionResults.push({
-        actionId: action.id,
-        status: 'failed',
-        result: `No path from (${from.q},${from.r}) to (${to.q},${to.r})`,
-      });
-      events.push({
-        type: 'movement_failed',
-        colonyId: unit.colonyId,
-        unitId: unit.id,
-        data: {
-          from: { x: from.q, y: from.r },
-          to: { x: to.q, y: to.r },
-          reason: 'no_path',
-        },
-      });
-      continue;
-    }
-
-    // Set (or replace) movement queue
-    unit.movementQueue = path;
-    const redirected = to.q !== desired.q || to.r !== desired.r;
     actionResults.push({
       actionId: action.id,
       status: 'resolved',
-      result: redirected
-        ? `Path computed: ${path.length} steps (destination adjusted to ${to.q},${to.r} to avoid scout overlap)`
-        : `Path computed: ${path.length} steps`,
+      result: resultMessage,
     });
     events.push({
       type: 'movement_queued',
@@ -2035,7 +2165,7 @@ export function resolveMovement(
       data: {
         from: { x: from.q, y: from.r },
         to: { x: to.q, y: to.r },
-        pathLength: path.length,
+        pathLength: unit.movementQueue.length,
       },
     });
   }
@@ -3119,34 +3249,8 @@ export function autoExploreIdleScouts(
   actionedUnitIds: Set<string>,
 ): { events: TickEvent[] } {
   const events: TickEvent[] = [];
-
-  // Build terrain map for quick lookups
-  const terrainMap = new Map<string, string>();
-  for (const h of hexes) {
-    terrainMap.set(`${h.x},${h.y}`, h.terrain);
-  }
-
-  // Build explored sets per colony
-  const exploredByColony = new Map<string, Set<string>>();
-  for (const h of hexes) {
-    if (h.exploredBy) {
-      for (const colonyId of h.exploredBy) {
-        if (!exploredByColony.has(colonyId)) {
-          exploredByColony.set(colonyId, new Set());
-        }
-        exploredByColony.get(colonyId)!.add(`${h.x},${h.y}`);
-      }
-    }
-  }
-
-  // All valid hex coords (for neighbor checks)
-  const allHexKeys = new Set<string>();
-  for (const h of hexes) {
-    allHexKeys.add(`${h.x},${h.y}`);
-  }
-
-  // Passable terrain types for exploration targets
-  const PASSABLE_EXPLORE = new Set(['plains', 'forest', 'coast', 'desert', 'tundra', 'mountains']);
+  const { terrainMap, exploredByColony, allHexKeys } = buildExplorationMaps(hexes);
+  const reservedTargetsByColony = new Map<string, Set<string>>();
 
   // Find idle scouts
   const idleScouts = units.filter(u =>
@@ -3159,92 +3263,14 @@ export function autoExploreIdleScouts(
     const exploredOrUndefined = exploredByColony.get(scout.colonyId);
     if (!exploredOrUndefined) continue;
     const explored: Set<string> = exploredOrUndefined;
-
-    // Find frontier: unexplored hexes adjacent to explored territory
-    // To be efficient, we check neighbors of explored hexes that are NOT explored
-    const frontierCandidates: HexCoord[] = [];
-    const frontierSeen = new Set<string>();
-
-    for (const exploredKey of explored) {
-      const [eq, er] = exploredKey.split(',').map(Number);
-      const neighbors = hexNeighbors({ q: eq, r: er });
-      for (const n of neighbors) {
-        const nKey = `${n.q},${n.r}`;
-        if (frontierSeen.has(nKey)) continue;
-        frontierSeen.add(nKey);
-
-        // Must be on the map, unexplored, and passable
-        if (!allHexKeys.has(nKey)) continue;
-        if (explored.has(nKey)) continue;
-        const terrain = terrainMap.get(nKey);
-        if (!terrain || !PASSABLE_EXPLORE.has(terrain)) continue;
-
-        frontierCandidates.push(n);
-      }
-    }
-
-    if (frontierCandidates.length === 0) continue;
-
-    // Score frontier candidates to prevent oscillation.
-    // Each candidate is scored by how many of its own neighbors are unexplored
-    // ("frontier depth"). Deeper frontier hexes have more unexplored neighbors,
-    // while hexes adjacent to well-explored territory score low. This prevents
-    // scouts from bouncing between two adjacent explored-edge hexes.
-    // Tie-break: prefer candidates farther from the scout (push outward).
-    const scoutPos: HexCoord = { q: scout.hexX, r: scout.hexY };
-
-    function frontierScore(candidate: HexCoord): number {
-      const neighbors = hexNeighbors(candidate);
-      let unexploredCount = 0;
-      for (const n of neighbors) {
-        const nk = `${n.q},${n.r}`;
-        if (allHexKeys.has(nk) && !explored.has(nk)) {
-          unexploredCount++;
-        }
-      }
-      // Primary: more unexplored neighbors = better (deeper frontier)
-      // Secondary: farther from scout = better (push outward, break ties)
-      return unexploredCount * 1000 + hexDistance(scoutPos, candidate);
-    }
-
-    frontierCandidates.sort((a, b) => frontierScore(b) - frontierScore(a));
-
-    // Partition candidates: prefer those at distance >= 2 from the scout
-    // to prevent 1-hop oscillation (scout bounces between adjacent hexes).
-    const farCandidates = frontierCandidates.filter(c => hexDistance(scoutPos, c) >= 2);
-    const nearCandidates = frontierCandidates.filter(c => hexDistance(scoutPos, c) < 2);
-
-    // Try far candidates first (prevents oscillation)
-    let bestPath: HexCoord[] | null = null;
-    let bestTarget: HexCoord | null = null;
-
-    for (let i = 0; i < Math.min(farCandidates.length, 15); i++) {
-      const candidate = farCandidates[i];
-      const path = findPath(scoutPos, candidate, hexLookup);
-      if (path && path.length > 0) {
-        bestPath = path;
-        bestTarget = candidate;
-        break;
-      }
-    }
-
-    // Fallback: near candidates only if no far candidates have paths
-    if (!bestPath) {
-      for (let i = 0; i < Math.min(nearCandidates.length, 15); i++) {
-        const candidate = nearCandidates[i];
-        const path = findPath(scoutPos, candidate, hexLookup);
-        if (path && path.length > 0) {
-          bestPath = path;
-          bestTarget = candidate;
-          break;
-        }
-      }
-    }
-
-    if (!bestPath || !bestTarget) continue;
+    const reservedTargets = reservedTargetsByColony.get(scout.colonyId) ?? new Set<string>();
+    reservedTargetsByColony.set(scout.colonyId, reservedTargets);
+    const choice = chooseExploreTarget(scout, explored, terrainMap, allHexKeys, hexLookup, reservedTargets);
+    if (!choice) continue;
 
     // Set movement queue
-    scout.movementQueue = bestPath;
+    scout.movementQueue = choice.path;
+    reservedTargets.add(coordKey(choice.target));
 
     events.push({
       type: 'auto_explore',
@@ -3252,8 +3278,8 @@ export function autoExploreIdleScouts(
       unitId: scout.id,
       data: {
         from: { x: scout.hexX, y: scout.hexY },
-        to: { x: bestTarget.q, y: bestTarget.r },
-        pathLength: bestPath.length,
+        to: { x: choice.target.q, y: choice.target.r },
+        pathLength: choice.path.length,
       },
     });
   }
@@ -4130,7 +4156,7 @@ export function resolveTick(
   const hasMovingUnits = updatedUnits.some(u => u.movementQueue && u.movementQueue.length > 0);
   const nonFoundActions = actions.filter(a => a.type !== 'found_settlement');
   if (nonFoundActions.length > 0 || hasMovingUnits) {
-    const moveResult = resolveMovement(updatedUnits, nonFoundActions, hexLookup);
+    const moveResult = resolveMovement(updatedUnits, nonFoundActions, hexLookup, hexes);
     events.push(...moveResult.events);
     actionResults.push(...moveResult.actionResults);
   }
