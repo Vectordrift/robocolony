@@ -200,7 +200,7 @@ const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
     required: ['techId'],
     optional: [],
     params: {
-      techId: { type: 'string', description: 'Technology identifier to research.' },
+      techId: { type: 'string', description: 'Technology identifier to research.', validValues: Object.keys(TECH_TREE) },
     },
   },
   propose_agreement: {
@@ -529,6 +529,13 @@ function validateActionParams(action: ActionInput, mapRadius: number): Validatio
   if (action.type === 'research') {
     if (typeof p.techId !== 'string' || p.techId.length === 0) {
       return { valid: false, error: `'techId' must be a non-empty string` };
+    }
+    if (!TECH_TREE[p.techId as TechId]) {
+      return {
+        valid: false,
+        error: `Unknown techId '${p.techId}'. Valid: ${Object.keys(TECH_TREE).join(', ')}`,
+        help: { validValues: Object.keys(TECH_TREE) },
+      };
     }
   }
 

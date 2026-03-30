@@ -111,6 +111,13 @@ describe('Action submission route', () => {
             },
           },
         },
+        research: {
+          params: {
+            techId: {
+              validValues: expect.arrayContaining(['improved_agriculture', 'civil_engineering']),
+            },
+          },
+        },
         build_road: {
           required: ['unitId', 'fromX', 'fromY', 'toX', 'toY'],
         },
@@ -185,6 +192,41 @@ describe('Action submission route', () => {
           index: 0,
           actionType: 'research',
           error: 'You need a workshop building to research. Build a workshop first.',
+        },
+      ],
+    });
+  });
+
+  it('rejects research submissions with an unknown techId immediately', async () => {
+    mockDbSelectQueue([
+      [{ currentTick: 42, status: 'active', mapRadius: 12 }],
+      [{ count: 1 }],
+    ]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/worlds/world-1/actions',
+      headers: {
+        authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+      payload: {
+        actions: [
+          { type: 'research', params: { techId: 'test_invalid' } },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: 'validation_error',
+      details: [
+        {
+          index: 0,
+          actionType: 'research',
+          error: expect.stringContaining("Unknown techId 'test_invalid'. Valid:"),
+          help: {
+            validValues: expect.arrayContaining(['improved_agriculture', 'civil_engineering']),
+          },
         },
       ],
     });
