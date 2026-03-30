@@ -822,6 +822,9 @@ export const SETTLEMENT_GARRISON_LOYALTY_BONUS = 2;
 /** Legacy score awarded for capturing an enemy settlement */
 export const SETTLEMENT_CAPTURE_SCORE = 50;
 
+/** Low-loyalty settlements produce proportionally less until pacified */
+export const MIN_LOYALTY_PRODUCTION_MULTIPLIER = 0.25;
+
 const UNFOUNDABLE_TERRAIN = new Set(['ocean', 'mountains']);
 
 // --- Helpers ---
@@ -2765,6 +2768,7 @@ export function calculateProduction(
   nearbyHexes: HexTileState[],
 ): Partial<Resources> {
   const tierMult = TIER_MULTIPLIER[settlement.tier] ?? 1.0;
+  const loyaltyMult = Math.max(MIN_LOYALTY_PRODUCTION_MULTIPLIER, Math.min(1, settlement.loyalty / 100));
   const production = emptyResources();
 
   // Building production
@@ -2782,6 +2786,10 @@ export function calculateProduction(
     production.timber += hex.resources.timber * 0.5;
     production.stone += hex.resources.stone * 0.5;
     production.iron += hex.resources.iron * 0.5;
+  }
+
+  for (const key of RESOURCE_KEYS) {
+    production[key] = Math.round((((production[key] ?? 0) as number) * loyaltyMult) * 100) / 100;
   }
 
   return production;
