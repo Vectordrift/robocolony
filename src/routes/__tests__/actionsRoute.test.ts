@@ -81,6 +81,8 @@ describe('Action submission route', () => {
       actionCapacity: {
         basePerTick: 10,
         perSettlement: 2,
+        perUnitBlock: 1,
+        unitsPerBlock: 20,
       },
       notes: {
         unknownParamsStripped: true,
@@ -132,6 +134,7 @@ describe('Action submission route', () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],
       [{ count: 1 }],
+      [{ count: 0 }],
     ]);
 
     const response = await app.inject({
@@ -168,6 +171,7 @@ describe('Action submission route', () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],
       [{ count: 1 }],
+      [{ count: 0 }],
       [{ buildings: [{ type: 'farm', level: 1 }] }],
     ]);
 
@@ -201,6 +205,7 @@ describe('Action submission route', () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],
       [{ count: 1 }],
+      [{ count: 0 }],
     ]);
 
     const response = await app.inject({
@@ -236,6 +241,7 @@ describe('Action submission route', () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],
       [{ count: 1 }],
+      [{ count: 0 }],
       [{ colonyId: 'colony-1', type: 'engineer' }],
       [{ researchedTechs: [] }],
     ]);
@@ -270,6 +276,7 @@ describe('Action submission route', () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],
       [{ count: 1 }],
+      [{ count: 0 }],
       [{ buildings: [{ type: 'workshop', level: 1 }] }],
       [{ researchedTechs: ['improved_agriculture', 'fortifications', 'advanced_scouting'] }],
     ]);
@@ -304,6 +311,7 @@ describe('Action submission route', () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],
       [{ count: 1 }],
+      [{ count: 0 }],
       [{ colonyId: 'colony-1' }],
       [{ researchedTechs: [] }],
     ]);
@@ -334,10 +342,11 @@ describe('Action submission route', () => {
     });
   });
 
-  it('scales action capacity with settlement count', async () => {
+  it('scales action capacity with settlements and unit count', async () => {
     mockDbSelectQueue([
       [{ currentTick: 42, status: 'active', mapRadius: 12 }],
       [{ count: 9 }],
+      [{ count: 126 }],
       [{ count: 0 }],
     ]);
 
@@ -348,7 +357,7 @@ describe('Action submission route', () => {
         authorization: 'Bearer rc_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       },
       payload: {
-        actions: Array.from({ length: 24 }, (_, i) => ({
+        actions: Array.from({ length: 34 }, (_, i) => ({
           type: 'send_message',
           params: {
             toColonyId: `colony-${i + 2}`,
@@ -360,8 +369,8 @@ describe('Action submission route', () => {
 
     expect(response.statusCode).toBe(201);
     const body = response.json();
-    expect(body.submitted).toBe(24);
+    expect(body.submitted).toBe(34);
     expect(body.truncated).toBeUndefined();
-    expect(insertValuesMock).toHaveBeenCalledTimes(24);
+    expect(insertValuesMock).toHaveBeenCalledTimes(34);
   });
 });
