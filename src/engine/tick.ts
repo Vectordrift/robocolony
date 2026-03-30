@@ -4520,6 +4520,7 @@ export function resolveTick(
   let newMessages: MessageRecord[] = [];
   let agreementMutations: AgreementMutation[] = [];
   const combatHexesThisTick = new Set<string>();
+  const combatParticipantIdsThisTick = new Set<string>();
   const capturedSettlementIdsThisTick = new Set<string>();
 
   // --- Agreement resolution (before other actions) ---
@@ -4915,6 +4916,14 @@ export function resolveTick(
       }));
       events.push(...combatResult.events);
       actionResults.push(...combatResult.actionResults);
+
+      for (const event of combatResult.events) {
+        if (event.type !== 'combat_resolved') continue;
+        const participants = (event.data as { participants?: Array<{ unitId: string }> }).participants ?? [];
+        for (const participant of participants) {
+          combatParticipantIdsThisTick.add(participant.unitId);
+        }
+      }
     }
 
     // Handle settlement captures: award legacy score, check for colony elimination
@@ -5701,8 +5710,9 @@ export function resolveTick(
     const moved = before.x !== unit.hexX || before.y !== unit.hexY;
     const hasQueue = unit.movementQueue && unit.movementQueue.length > 0;
     const hadAction = unitActionTargets.has(unit.id);
+    const foughtThisTick = combatParticipantIdsThisTick.has(unit.id);
 
-    if (moved || hasQueue || hadAction) {
+    if (moved || hasQueue || hadAction || foughtThisTick) {
       unit.idleTicks = 0;
     } else {
       unit.idleTicks = (unit.idleTicks ?? 0) + 1;
