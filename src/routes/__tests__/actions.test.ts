@@ -154,7 +154,8 @@ describe('Action validation', () => {
 });
 
 describe('Rate limiting', () => {
-  const getMaxActionsPerTick = (settlementCount: number) => 10 + settlementCount * 2;
+  const getMaxActionsPerTick = (settlementCount: number, unitCount = 0) =>
+    10 + settlementCount * 2 + Math.floor(unitCount / 20);
 
   it('allows up to 10 actions per tick', () => {
     const currentQueued = 0;
@@ -171,18 +172,19 @@ describe('Rate limiting', () => {
   it('allows partial fill', () => {
     const currentQueued = 7;
     const newActions = 3;
-    expect(newActions <= getMaxActionsPerTick(0) - currentQueued).toBe(true);
+    expect(newActions <= getMaxActionsPerTick(0, 0) - currentQueued).toBe(true);
   });
 
   it('rejects overfill', () => {
     const currentQueued = 7;
     const newActions = 4;
-    expect(newActions <= getMaxActionsPerTick(0) - currentQueued).toBe(false);
+    expect(newActions <= getMaxActionsPerTick(0, 0) - currentQueued).toBe(false);
   });
 
-  it('scales action capacity with settlements', () => {
-    expect(getMaxActionsPerTick(1)).toBe(12);
-    expect(getMaxActionsPerTick(9)).toBe(28);
+  it('scales action capacity with settlements and unit count', () => {
+    expect(getMaxActionsPerTick(1, 0)).toBe(12);
+    expect(getMaxActionsPerTick(9, 0)).toBe(28);
+    expect(getMaxActionsPerTick(9, 126)).toBe(34);
   });
 });
 

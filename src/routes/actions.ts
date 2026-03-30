@@ -55,6 +55,8 @@ const VALID_AGREEMENT_TYPES = new Set([
 
 const BASE_ACTIONS_PER_TICK = 10;
 const ACTIONS_PER_SETTLEMENT = 2;
+const ACTIONS_PER_UNIT_BLOCK = 1;
+const UNITS_PER_ACTION_BLOCK = 20;
 const MAX_SETTLEMENT_NAME_LENGTH = 40;
 const MAX_MESSAGE_LENGTH = 500;
 
@@ -316,8 +318,10 @@ interface ActionValidationError {
   help?: Record<string, unknown>;
 }
 
-export function getMaxActionsPerTick(settlementCount: number): number {
-  return BASE_ACTIONS_PER_TICK + Math.max(0, settlementCount) * ACTIONS_PER_SETTLEMENT;
+export function getMaxActionsPerTick(settlementCount: number, unitCount = 0): number {
+  const settlementBonus = Math.max(0, settlementCount) * ACTIONS_PER_SETTLEMENT;
+  const unitBonus = Math.floor(Math.max(0, unitCount) / UNITS_PER_ACTION_BLOCK) * ACTIONS_PER_UNIT_BLOCK;
+  return BASE_ACTIONS_PER_TICK + settlementBonus + unitBonus;
 }
 
 async function getQueuedActionLimit(colonyId: string, worldId: string): Promise<number> {
@@ -331,7 +335,20 @@ async function getQueuedActionLimit(colonyId: string, worldId: string): Promise<
       ),
     );
 
-  return getMaxActionsPerTick(Number(settlementCountRows[0]?.count ?? 0));
+  const unitCountRows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(units)
+    .where(
+      and(
+        eq(units.worldId, worldId),
+        eq(units.colonyId, colonyId),
+      ),
+    );
+
+  return getMaxActionsPerTick(
+    Number(settlementCountRows[0]?.count ?? 0),
+    Number(unitCountRows[0]?.count ?? 0),
+  );
 }
 
 /**
@@ -764,6 +781,8 @@ export async function actionRoutes(app: FastifyInstance) {
       actionCapacity: {
         basePerTick: BASE_ACTIONS_PER_TICK,
         perSettlement: ACTIONS_PER_SETTLEMENT,
+        perUnitBlock: ACTIONS_PER_UNIT_BLOCK,
+        unitsPerBlock: UNITS_PER_ACTION_BLOCK,
       },
       notes: {
         unknownParamsStripped: true,
