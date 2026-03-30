@@ -321,6 +321,25 @@ describe('calculateProduction', () => {
     expect(production.food).toBe(0);
   });
 
+  it('scales production down for low-loyalty settlements', () => {
+    const settlement = makeSettlement({
+      loyalty: 50,
+      buildings: [{ type: 'farm', level: 2 }],
+      population: 0,
+    });
+    const production = calculateProduction(settlement, []);
+
+    expect(production.food).toBeCloseTo(15);
+  });
+
+  it('applies loyalty scaling to nearby hex yields too', () => {
+    const settlement = makeSettlement({ loyalty: 50, population: 0 });
+    const hexes = makeHexRing(0, 0);
+    const production = calculateProduction(settlement, hexes);
+
+    expect(production.food).toBeCloseTo(5.25);
+  });
+
 });
 
 describe('resolvePoiSurvey', () => {
