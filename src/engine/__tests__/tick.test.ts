@@ -3256,6 +3256,49 @@ describe('Idle unit tracking', () => {
     expect(updatedUnit.idleTicks).toBe(4);
   });
 
+  it('does not mark frontline combatants idle when they fight this tick', () => {
+    const attacker = makeUnit({ id: 'soldier-1', type: 'soldier', idleTicks: 2, hexX: 0, hexY: 0 });
+    const defender = makeUnit({ id: 'soldier-2', colonyId: 'colony-2', type: 'soldier', hexX: 0, hexY: 0 });
+
+    const result = resolveTick(
+      [makeColony(), makeColony({ id: 'colony-2', name: 'Enemy Colony' })],
+      [],
+      [attacker, defender],
+      makeHexRing(0, 0),
+      [],
+      42,
+      'world-1',
+      5,
+    );
+
+    expect(result.events.find(e => e.type === 'unit_idle' && e.unitId === 'soldier-1')).toBeUndefined();
+    expect(result.units.find(u => u.id === 'soldier-1')?.idleTicks).toBe(0);
+  });
+
+  it('does not mark adjacent support combatants idle when they join a full battle', () => {
+    const attackerColony = makeColony({ id: 'colony-1' });
+    const defenderColony = makeColony({ id: 'colony-2', name: 'Enemy Colony' });
+    const frontlineAttacker = makeUnit({ id: 'frontline', colonyId: 'colony-1', type: 'soldier', hexX: 1, hexY: 0 });
+    const supportAttacker = makeUnit({ id: 'support', colonyId: 'colony-1', type: 'soldier', hexX: 0, hexY: 0, idleTicks: 2 });
+    const defenders = Array.from({ length: MAX_UNITS_PER_HEX - 1 }, (_, i) =>
+      makeUnit({ id: `defender-${i}`, colonyId: 'colony-2', type: 'soldier', hexX: 1, hexY: 0 }),
+    );
+
+    const result = resolveTick(
+      [attackerColony, defenderColony],
+      [makeSettlement({ id: 'settlement-2', colonyId: 'colony-2', hexX: 1, hexY: 0, population: 10 })],
+      [frontlineAttacker, supportAttacker, ...defenders],
+      makePlainLine(1),
+      [makeAction({ colonyId: 'colony-1', params: { unitId: 'support', targetX: 1, targetY: 0 } })],
+      123,
+      'world-1',
+      50,
+    );
+
+    expect(result.events.find(e => e.type === 'unit_idle' && e.unitId === 'support')).toBeUndefined();
+    expect(result.units.find(u => u.id === 'support')?.idleTicks).toBe(0);
+  });
+
   it('newly trained units start with idleTicks 0', () => {
     const colony = makeColony({ resources: { food: 200, timber: 100, stone: 50, iron: 20, influence: 50 } });
     const settlement = makeSettlement({
