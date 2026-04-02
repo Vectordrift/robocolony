@@ -327,7 +327,7 @@ export async function getVisibleHexes(worldId: string, colonyId: string): Promis
         eq(hexes.worldId, worldId),
         sql`(
           explored_by && ARRAY[${sql.join(visibleColonyIds.map(id => sql`${id}`), sql`, `)}]::text[]
-          OR COALESCE(jsonb_object_length(${hexes.roads}), 0) > 0
+          OR ${hexes.roads} IS NOT NULL AND ${hexes.roads} != '{}'::jsonb
         )`,
       ),
     );
