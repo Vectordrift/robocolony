@@ -810,11 +810,18 @@ export class TickScheduler {
             }
           }
 
+          // Merge top-level TickEvent fields (colonyId, settlementId, unitId)
+          // into data so they are persisted and visible in the events API.
+          const enrichedData: Record<string, unknown> = { ...event.data };
+          if (event.colonyId) enrichedData.colonyId ??= event.colonyId;
+          if (event.settlementId) enrichedData.settlementId ??= event.settlementId;
+          if (event.unitId) enrichedData.unitId ??= event.unitId;
+
           const persistedEvent = {
             type: event.type,
             public: isPublic,
             visibility: eventVisibility(event),
-            data: event.data,
+            data: enrichedData,
             ...(publicData ? { publicData } : {}),
           };
 
