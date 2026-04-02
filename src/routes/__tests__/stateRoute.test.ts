@@ -90,6 +90,7 @@ describe('State route intel', () => {
         type: 'soldier',
         hex: { x: 5, y: 5 },
         health: 80,
+        maxHp: 100,
       },
     ]);
   });
@@ -216,6 +217,7 @@ describe('State route intel', () => {
           type: 'soldier',
           hex: { x: 36, y: -21 },
           health: 72,
+          maxHp: 100,
         },
         {
           id: 'enemy-2',
@@ -223,6 +225,7 @@ describe('State route intel', () => {
           type: 'soldier',
           hex: { x: 40, y: -17 },
           health: 91,
+          maxHp: 100,
         },
       ],
       settlements: [
