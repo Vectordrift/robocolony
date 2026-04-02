@@ -90,7 +90,9 @@ describe('State response shape', () => {
         type: 'scout',
         hex: { x: 10, y: -5 },
         health: 100,
+        maxHp: 100,
         morale: 1.0,
+        status: 'idle',
         movementQueue: [],
       }],
       map: [{

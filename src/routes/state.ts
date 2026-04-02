@@ -64,6 +64,7 @@ interface VisibleEnemyUnit {
   type: string;
   hex: { x: number; y: number };
   health: number;
+  maxHp: number;
 }
 
 interface VisibleEnemySettlement {
@@ -220,6 +221,7 @@ async function getVisibleEnemyIntel(
       type: u.type,
       hex: { x: u.hexX, y: u.hexY },
       health: u.health,
+      maxHp: 100,
     }));
 
   const visibleSettlementIds = visibleMap
@@ -498,7 +500,9 @@ export async function stateRoutes(app: FastifyInstance) {
         type: u.type,
         hex: { x: u.hexX, y: u.hexY },
         health: u.health,
+        maxHp: 100,
         morale: u.morale,
+        status: (u.movementQueue as unknown[])?.length > 0 ? 'moving' : 'idle',
         movementQueue: u.movementQueue,
       })),
       intel: {
