@@ -159,15 +159,30 @@ export function findRemovedUnitIds(
     .filter(unitId => !nextUnitIds.has(unitId));
 }
 
-function eventDedupKey(event: { type: string; data: Record<string, unknown> }): string | null {
+export function eventDedupKey(
+  event: { type: string; colonyId?: string; data: Record<string, unknown> },
+  isPublic: boolean,
+): string | null {
   switch (event.type) {
     case 'combat_resolved':
+      if (!isPublic) return null;
       return JSON.stringify({
         type: event.type,
         hexX: event.data.hexX,
         hexY: event.data.hexY,
         casualties: event.data.casualties,
         winnerColony: event.data.winnerColony,
+      });
+    case 'stockpile_decay':
+      return JSON.stringify({
+        type: event.type,
+        colonyId: event.colonyId,
+        resource: event.data.resource,
+        decayed: event.data.decayed,
+        clamped: event.data.clamped,
+        cap: event.data.cap,
+        hardCeiling: event.data.hardCeiling,
+        remaining: event.data.remaining,
       });
     default:
       return null;
@@ -798,7 +813,7 @@ export class TickScheduler {
         for (const event of result.events) {
           const isPublic = PUBLIC_EVENT_TYPES.has(event.type);
           const publicData = isPublic ? buildPublicData(event) : null;
-          const dedupKey = isPublic ? eventDedupKey(event) : null;
+          const dedupKey = eventDedupKey(event, isPublic);
 
           if (dedupKey) {
             const existing = persistedEvents.get(dedupKey);
