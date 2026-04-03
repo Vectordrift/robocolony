@@ -141,6 +141,31 @@ function coordKey(coord: HexCoord): string {
   return `${coord.q},${coord.r}`;
 }
 
+function normalizeMovementQueue(queue: unknown): HexCoord[] {
+  if (!Array.isArray(queue)) return [];
+
+  return queue
+    .map((step) => {
+      if (!step || typeof step !== 'object') return null;
+
+      const candidate = step as { q?: unknown; r?: unknown; x?: unknown; y?: unknown };
+      const q = typeof candidate.q === 'number'
+        ? candidate.q
+        : typeof candidate.x === 'number'
+          ? candidate.x
+          : null;
+      const r = typeof candidate.r === 'number'
+        ? candidate.r
+        : typeof candidate.y === 'number'
+          ? candidate.y
+          : null;
+
+      if (!Number.isFinite(q) || !Number.isFinite(r)) return null;
+      return { q, r };
+    })
+    .filter((step): step is HexCoord => step !== null);
+}
+
 function chooseScoutDestination(
   from: HexCoord,
   desired: HexCoord,
@@ -2504,6 +2529,7 @@ export function resolveMovement(
   // Build unit lookup for ownership/existence checks
   const unitMap = new Map<string, Unit>();
   for (const u of units) {
+    u.movementQueue = normalizeMovementQueue(u.movementQueue);
     unitMap.set(u.id, u);
     const key = hexKey(u.hexX, u.hexY);
     occupancy.set(key, (occupancy.get(key) ?? 0) + 1);
@@ -4637,7 +4663,7 @@ export function resolveTick(
   // Deep clone units so we can mutate
   let updatedUnits = units.map(u => ({
     ...u,
-    movementQueue: u.movementQueue ? [...u.movementQueue] : [],
+    movementQueue: normalizeMovementQueue(u.movementQueue),
   }));
 
   // Deep clone settlements so we can mutate (including buildQueue)
@@ -4686,7 +4712,7 @@ export function resolveTick(
 
     updatedUnits = foundResult.units.map(u => ({
       ...u,
-      movementQueue: u.movementQueue ? [...u.movementQueue] : [],
+      movementQueue: normalizeMovementQueue(u.movementQueue),
     }));
     updatedSettlements = [...updatedSettlements, ...foundResult.newSettlements];
     events.push(...foundResult.events);
@@ -4701,7 +4727,7 @@ export function resolveTick(
     const disbandResult = resolveDisband(updatedUnits, actions);
     updatedUnits = disbandResult.units.map(u => ({
       ...u,
-      movementQueue: u.movementQueue ? [...u.movementQueue] : [],
+      movementQueue: normalizeMovementQueue(u.movementQueue),
     }));
     events.push(...disbandResult.events);
     actionResults.push(...disbandResult.actionResults);
@@ -4920,7 +4946,7 @@ export function resolveTick(
     if (combatResult.destroyedUnitIds.length > 0 || combatResult.events.length > 0) {
       updatedUnits = combatResult.units.map(u => ({
         ...u,
-        movementQueue: u.movementQueue ? [...u.movementQueue] : [],
+        movementQueue: normalizeMovementQueue(u.movementQueue),
       }));
       events.push(...combatResult.events);
       actionResults.push(...combatResult.actionResults);

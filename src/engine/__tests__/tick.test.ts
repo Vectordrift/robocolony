@@ -1864,6 +1864,31 @@ describe('resolveTick', () => {
     expect(result3.units[0].movementQueue).toEqual([]);
   });
 
+  it('continues draining persisted movement queues that use legacy x/y coordinates', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ population: 0 });
+    const hexes = makePlainLine(8);
+
+    const persistedQueue = [
+      { x: 4, y: 0 },
+      { x: 5, y: 0 },
+      { x: 6, y: 0 },
+    ];
+    const units = [
+      makeUnit({
+        hexX: 3,
+        hexY: 0,
+        type: 'militia',
+        movementQueue: persistedQueue as unknown as Unit['movementQueue'],
+      }),
+    ];
+
+    const result = resolveTick([colony], [settlement], units, hexes);
+
+    expect(result.units[0].hexX).toBe(6);
+    expect(result.units[0].movementQueue).toEqual([]);
+  });
+
   // --- Settlement founding integration in resolveTick ---
 
   it('resolves found_settlement in tick and adds new settlement to results', () => {
