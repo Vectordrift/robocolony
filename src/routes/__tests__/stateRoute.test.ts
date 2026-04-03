@@ -122,6 +122,15 @@ describe('State route intel', () => {
       tier: 2,
       status: 'locked',
       requires: ['improved_agriculture'],
+      tierGate: {
+        allTier1Required: true,
+        missingTechs: ['steel_weapons', 'trade_routes', 'siege_engineering'],
+      },
+      missingRequirements: {
+        direct: [],
+        tierGate: ['steel_weapons', 'trade_routes', 'siege_engineering'],
+      },
+      lockReason: 'Tier 2 research is locked until all Tier 1 techs are complete. Missing: Steel Weapons, Trade Routes, Siege Engineering',
     });
     expect(steelWeapons).toMatchObject({
       id: 'steel_weapons',
