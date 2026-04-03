@@ -4497,4 +4497,47 @@ describe('Edge cases: simultaneous actions (Issue #123)', () => {
     expect(productionEvent?.data.consumed.iron).toBe(2 + FOUNDRY_IRON_CONVERSION_PER_LEVEL);
   });
 
+  it('generates passive influence for each settlement every tick', () => {
+    const colony = makeColony({ resources: { food: 100, timber: 50, stone: 30, iron: 10, influence: 0 } });
+    const settlement = makeSettlement({ population: 0 });
+    const hexes = makeHexRing(0, 0);
+
+    const result = resolveTick([colony], [settlement], [], hexes, []);
+
+    expect(result.colonies[0].resources.influence).toBe(1);
+    const productionEvent = result.events.find((event) => event.type === 'production');
+    expect(productionEvent?.data.produced.influence).toBe(1);
+  });
+
+  it('lets an outpost bank passive influence and upgrade out of a slot deadlock', () => {
+    const colony = makeColony({
+      resources: { food: 300, timber: 200, stone: 150, iron: 50, influence: 24 },
+    });
+    const settlement = makeSettlement({
+      tier: 'outpost',
+      population: 50,
+      buildings: [
+        { type: 'farm', level: 1 },
+        { type: 'lumberMill', level: 1 },
+        { type: 'quarry', level: 1 },
+        { type: 'mine', level: 1 },
+      ],
+    });
+    const hexes = makeHexRing(0, 0);
+
+    const afterIncome = resolveTick([colony], [settlement], [], hexes, []);
+    expect(afterIncome.colonies[0].resources.influence).toBe(25);
+
+    const upgraded = resolveTick(
+      afterIncome.colonies,
+      afterIncome.settlements,
+      [],
+      hexes,
+      [makeUpgradeAction()],
+    );
+
+    expect(upgraded.actionResults.find((result) => result.actionId === 'action-upgrade-1')?.status).toBe('resolved');
+    expect(upgraded.settlements[0].tier).toBe('town');
+  });
+
 });
