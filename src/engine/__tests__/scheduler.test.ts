@@ -78,4 +78,21 @@ describe('eventDedupKey', () => {
     expect(eventDedupKey(event, false)).toBeNull();
     expect(eventDedupKey(event, true)).not.toBeNull();
   });
+
+  it('deduplicates movement_blocked events by colony, hex, and reason', () => {
+    const event = {
+      type: 'movement_blocked',
+      colonyId: 'colony-1',
+      data: {
+        hexX: 35,
+        hexY: -20,
+        reason: 'hex_full',
+      },
+    };
+
+    const first = eventDedupKey(event, false);
+    const second = eventDedupKey({ ...event, unitId: 'unit-2' } as typeof event & { unitId: string }, false);
+
+    expect(first).toBe(second);
+  });
 });

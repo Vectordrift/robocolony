@@ -184,6 +184,14 @@ export function eventDedupKey(
         hardCeiling: event.data.hardCeiling,
         remaining: event.data.remaining,
       });
+    case 'movement_blocked':
+      return JSON.stringify({
+        type: event.type,
+        colonyId: event.colonyId,
+        hexX: event.data.hexX,
+        hexY: event.data.hexY,
+        reason: event.data.reason,
+      });
     default:
       return null;
   }
@@ -821,6 +829,14 @@ export class TickScheduler {
               if (event.colonyId && !existing.visibility.includes(event.colonyId)) {
                 existing.visibility.push(event.colonyId);
               }
+              if (event.type === 'movement_blocked') {
+                const currentCount = typeof existing.data.blockedUnits === 'number' ? existing.data.blockedUnits : 1;
+                existing.data.blockedUnits = currentCount + 1;
+                const unitIds = Array.isArray(existing.data.unitIds) ? existing.data.unitIds as string[] : [];
+                if (event.unitId && !unitIds.includes(event.unitId)) {
+                  existing.data.unitIds = [...unitIds, event.unitId];
+                }
+              }
               continue;
             }
           }
@@ -836,7 +852,13 @@ export class TickScheduler {
             type: event.type,
             public: isPublic,
             visibility: eventVisibility(event),
-            data: enrichedData,
+            data: event.type === 'movement_blocked'
+              ? {
+                  ...enrichedData,
+                  blockedUnits: 1,
+                  ...(event.unitId ? { unitIds: [event.unitId] } : {}),
+                }
+              : enrichedData,
             ...(publicData ? { publicData } : {}),
           };
 
