@@ -5241,6 +5241,9 @@ export function resolveTick(
     // --- Apply research bonuses ---
     const researched: string[] = (colony as any).researchedTechs ?? [];
 
+    // Baseline political coordination: each settlement generates a small trickle of influence.
+    totalProduction.influence += mySettlements.length;
+
     // Improved Agriculture: +30% food production
     if (researched.includes('improved_agriculture')) {
       totalProduction.food = Math.round(totalProduction.food * 1.3 * 100) / 100;
