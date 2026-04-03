@@ -56,6 +56,8 @@ import {
   STOCKPILE_DECAY_RATE,
   HEALING_PER_TICK,
   MAX_UNITS_PER_HEX,
+  SUPPORT_COMBAT_ATTACK_MULTIPLIER,
+  SUPPORT_COMBAT_SETTLEMENT_ATTACK_MULTIPLIER,
   CRITICAL_WOUND_THRESHOLD,
   BARRACKS_HEALING_BONUS,
   SETTLEMENT_LOYALTY_RECOVERY,
@@ -1058,6 +1060,50 @@ describe('resolveMovement', () => {
     expect(combatEvent?.data.participants.some((participant: { unitId: string; supporting?: boolean }) =>
       participant.unitId === 'reinforcement' && participant.supporting === true,
     )).toBe(true);
+  });
+
+  it('makes adjacent support stronger in settlement sieges than in open field combat', () => {
+    const attackerColony = makeColony({ id: 'colony-1' });
+    const defenderColony = makeColony({ id: 'colony-2' });
+    const frontlineAttacker = makeUnit({ id: 'frontline', colonyId: 'colony-1', hexX: 1, hexY: 0, type: 'soldier' });
+    const supportAttacker = makeUnit({ id: 'support', colonyId: 'colony-1', hexX: 0, hexY: 0, type: 'soldier' });
+    const defenders = Array.from({ length: MAX_UNITS_PER_HEX - 1 }, (_, i) =>
+      makeUnit({ id: `defender-${i}`, colonyId: 'colony-2', hexX: 1, hexY: 0, type: 'soldier', health: 100 }),
+    );
+    const actions = [makeAction({ colonyId: 'colony-1', params: { unitId: 'support', targetX: 1, targetY: 0 } })];
+    const hexes = makePlainLine(1);
+
+    const fieldResult = resolveTick(
+      [attackerColony, defenderColony],
+      [],
+      [{ ...frontlineAttacker }, { ...supportAttacker }, ...defenders.map(unit => ({ ...unit }))],
+      hexes,
+      actions,
+      123,
+      'world-1',
+      50,
+    );
+
+    const siegeResult = resolveTick(
+      [attackerColony, defenderColony],
+      [makeSettlement({ id: 'settlement-2', colonyId: 'colony-2', hexX: 1, hexY: 0, population: 20 })],
+      [{ ...frontlineAttacker }, { ...supportAttacker }, ...defenders.map(unit => ({ ...unit }))],
+      hexes,
+      actions,
+      123,
+      'world-1',
+      50,
+    );
+
+    const fieldDefenderHealth = fieldResult.units
+      .filter(unit => unit.colonyId === 'colony-2')
+      .reduce((total, unit) => total + unit.health, 0);
+    const siegeDefenderHealth = siegeResult.units
+      .filter(unit => unit.colonyId === 'colony-2')
+      .reduce((total, unit) => total + unit.health, 0);
+
+    expect(SUPPORT_COMBAT_SETTLEMENT_ATTACK_MULTIPLIER).toBeGreaterThan(SUPPORT_COMBAT_ATTACK_MULTIPLIER);
+    expect(siegeDefenderHealth).toBeLessThan(fieldDefenderHealth);
   });
 });
 

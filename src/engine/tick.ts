@@ -859,6 +859,9 @@ export const MAX_UNITS_PER_HEX = 12;
 /** Adjacent military units can support a full contested hex at reduced effectiveness */
 export const SUPPORT_COMBAT_ATTACK_MULTIPLIER = 0.5;
 
+/** Supporting units attack at full strength when reinforcing a siege on a settlement hex */
+export const SUPPORT_COMBAT_SETTLEMENT_ATTACK_MULTIPLIER = 1.0;
+
 /** Supporting units take reduced incoming damage because they fight from adjacent hexes */
 export const SUPPORT_COMBAT_DEFENSE_MULTIPLIER = 0.25;
 
@@ -3099,14 +3102,20 @@ export function resolveCombat(
     }> = [];
 
     for (const attacker of combatParticipants) {
+      const contestedSettlement = settlements?.find(
+        settlement => settlement.hexX === parsedHex?.q && settlement.hexY === parsedHex?.r,
+      );
       const attackerSupporting = supportUnitIds.has(attacker.id);
+      const supportAttackMultiplier = attackerSupporting
+        ? (contestedSettlement ? SUPPORT_COMBAT_SETTLEMENT_ATTACK_MULTIPLIER : SUPPORT_COMBAT_ATTACK_MULTIPLIER)
+        : 1;
       const attackerTechs = researchedTechsByColony.get(attacker.colonyId) ?? new Set<string>();
       const attackPower = (
         UNIT_ATTACK[attacker.type]
         + ((attacker.type === 'militia' || attacker.type === 'soldier') && attackerTechs.has('steel_weapons')
           ? STEEL_WEAPONS_ATTACK_BONUS
           : 0)
-      ) * (attackerSupporting ? SUPPORT_COMBAT_ATTACK_MULTIPLIER : 1);
+      ) * supportAttackMultiplier;
       if (attackPower <= 0) continue; // settlers can't attack
 
       // Find enemy units (from different colony AND not NAP-protected)
