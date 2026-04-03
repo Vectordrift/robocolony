@@ -10,7 +10,7 @@ import { eq, and, or, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { worlds, hexes, colonies, settlements, units, agreements } from '../db/schema/index.js';
 import { requireAuth } from '../middleware/index.js';
-import { TECH_TREE, MIN_SETTLEMENT_DISTANCE, canResearchTech } from '../engine/tick.js';
+import { TECH_TREE, MIN_SETTLEMENT_DISTANCE, canResearchTech, getTechResearchRequirements } from '../engine/tick.js';
 import type { TechId } from '../engine/tick.js';
 import { hexDistance, hexNeighbors } from '../engine/hex.js';
 
@@ -587,23 +587,39 @@ export async function stateRoutes(app: FastifyInstance) {
     const researched: string[] = (colonyData[0] as any)?.researchedTechs ?? [];
     const queue: Array<{ techId: string; ticksRemaining: number }> = (colonyData[0] as any)?.researchQueue ?? [];
 
-    const techs = Object.values(TECH_TREE).map(tech => ({
-      id: tech.id,
-      name: tech.name,
-      description: tech.description,
-      cost: tech.cost,
-      ticks: tech.ticks,
-      tier: tech.tier,
-      requires: tech.requires ?? [],
-      status: researched.includes(tech.id)
-        ? 'researched'
-        : queue.some(q => q.techId === tech.id)
-          ? 'in_progress'
-          : canResearchTech(tech.id, researched).ok
-            ? 'available'
-            : 'locked',
-      ticksRemaining: queue.find(q => q.techId === tech.id)?.ticksRemaining ?? null,
-    }));
+    const techs = Object.values(TECH_TREE).map(tech => {
+      const researchState = canResearchTech(tech.id, researched);
+      const requirements = getTechResearchRequirements(tech.id, researched);
+
+      return {
+        id: tech.id,
+        name: tech.name,
+        description: tech.description,
+        cost: tech.cost,
+        ticks: tech.ticks,
+        tier: tech.tier,
+        requires: requirements.directRequires,
+        tierGate: requirements.tierGate
+          ? {
+              allTier1Required: true,
+              missingTechs: requirements.tierGate.missingTechs,
+            }
+          : null,
+        missingRequirements: {
+          direct: requirements.missingDirectRequires,
+          tierGate: requirements.tierGate?.missingTechs ?? [],
+        },
+        status: researched.includes(tech.id)
+          ? 'researched'
+          : queue.some(q => q.techId === tech.id)
+            ? 'in_progress'
+            : researchState.ok
+              ? 'available'
+              : 'locked',
+        lockReason: researchState.ok ? null : researchState.reason,
+        ticksRemaining: queue.find(q => q.techId === tech.id)?.ticksRemaining ?? null,
+      };
+    });
 
     return {
       colonyId: colony.id,

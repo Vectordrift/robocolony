@@ -443,30 +443,54 @@ export const TIER_1_TECHS = Object.values(TECH_TREE)
   .filter((tech) => tech.tier === 1)
   .map((tech) => tech.id);
 
+export function getTechResearchRequirements(techId: TechId, researched: string[]): {
+  directRequires: TechId[];
+  missingDirectRequires: TechId[];
+  tierGate: null | {
+    allTier1Required: true;
+    missingTechs: TechId[];
+  };
+} {
+  const tech = TECH_TREE[techId];
+  const directRequires = tech?.requires ?? [];
+  const missingDirectRequires = directRequires.filter((id) => !researched.includes(id));
+
+  const missingTierOne = tech && tech.tier > 1
+    ? TIER_1_TECHS.filter((id) => !researched.includes(id))
+    : [];
+
+  return {
+    directRequires,
+    missingDirectRequires,
+    tierGate: missingTierOne.length > 0
+      ? {
+          allTier1Required: true,
+          missingTechs: missingTierOne,
+        }
+      : null,
+  };
+}
+
 export function canResearchTech(techId: TechId, researched: string[]): { ok: true } | { ok: false; reason: string } {
   const tech = TECH_TREE[techId];
   if (!tech) {
     return { ok: false, reason: `Unknown tech: ${techId}` };
   }
 
-  if (tech.tier > 1) {
-    const missingTierOne = TIER_1_TECHS.filter((id) => !researched.includes(id));
-    if (missingTierOne.length > 0) {
-      return {
-        ok: false,
-        reason: `Tier 2 research is locked until all Tier 1 techs are complete. Missing: ${missingTierOne.map((id) => TECH_TREE[id].name).join(', ')}`,
-      };
-    }
+  const requirements = getTechResearchRequirements(techId, researched);
+
+  if (requirements.tierGate) {
+    return {
+      ok: false,
+      reason: `Tier 2 research is locked until all Tier 1 techs are complete. Missing: ${requirements.tierGate.missingTechs.map((id) => TECH_TREE[id].name).join(', ')}`,
+    };
   }
 
-  if (tech.requires) {
-    const missing = tech.requires.filter((id) => !researched.includes(id));
-    if (missing.length > 0) {
-      return {
-        ok: false,
-        reason: `Missing prerequisite tech(s): ${missing.map((id) => TECH_TREE[id]?.name ?? id).join(', ')}`,
-      };
-    }
+  if (requirements.missingDirectRequires.length > 0) {
+    return {
+      ok: false,
+      reason: `Missing prerequisite tech(s): ${requirements.missingDirectRequires.map((id) => TECH_TREE[id]?.name ?? id).join(', ')}`,
+    };
   }
 
   return { ok: true };
