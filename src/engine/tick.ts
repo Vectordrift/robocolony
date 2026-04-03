@@ -5745,27 +5745,6 @@ export function resolveTick(
   const removedUnitIds = new Set([...desertedUnitIds, ...criticalWoundUnitIds]);
   const survivingUnits = updatedUnits.filter(u => !removedUnitIds.has(u.id));
 
-  // Emit action_failed events so failures appear in the event feed
-  for (const ar of actionResults) {
-    if (ar.status === 'failed') {
-      // Find the original action to get colony context
-      const action = actions.find(a => a.id === ar.actionId);
-      if (action) {
-        events.push({
-          type: 'action_failed',
-          colonyId: action.colonyId,
-          data: {
-            actionId: ar.actionId,
-            actionType: action.type,
-            reason: ar.result || 'Unknown error',
-            params: action.params,
-          },
-        });
-      }
-    }
-  }
-
-
   // --- Snapshot Score (recalculated every tick from current state) ---
   for (const colony of updatedColonies) {
     if (colony.status !== 'active') { continue; }

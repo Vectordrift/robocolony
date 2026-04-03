@@ -1814,6 +1814,28 @@ describe('resolveTick', () => {
     expect(result.units[0].hexX).toBe(0); // didn't move
   });
 
+  it('does not emit duplicate action_failed events for failed actions', () => {
+    const colony = makeColony();
+    const settlement = makeSettlement({ population: 0 });
+    const hexes = [
+      makeHex(0, 0),
+      makeHex(1, 0, { terrain: 'ocean' }),
+      makeHex(2, 0),
+    ];
+    const units = [makeUnit({ hexX: 0, hexY: 0 })];
+    const actions: QueuedAction[] = [
+      makeAction({ params: { unitId: 'unit-1', targetX: 2, targetY: 0 } }),
+    ];
+
+    const result = resolveTick([colony], [settlement], units, hexes, actions);
+
+    expect(result.actionResults[0]).toMatchObject({
+      actionId: actions[0].id,
+      status: 'failed',
+    });
+    expect(result.events.find((event) => event.type === 'action_failed')).toBeUndefined();
+  });
+
   it('continues draining movement queue across ticks without new actions', () => {
     const colony = makeColony();
     const settlement = makeSettlement({ population: 0 });
