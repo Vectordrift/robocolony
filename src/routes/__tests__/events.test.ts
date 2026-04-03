@@ -108,6 +108,27 @@ describe('Event Feed', () => {
       expect(colBPrivate).toHaveLength(0);
     });
 
+    it('observed public events should retain source colony context', () => {
+      const observedEvent = {
+        id: 'evt_famine',
+        tick: 10,
+        type: 'famine',
+        public: true,
+        visibility: ['col_b'],
+        data: { colonyId: 'col_b', netFood: -26.55, severity: 0.04 },
+        publicData: { netFood: -26.55, severity: 0.04, colonyId: 'col_b' },
+      };
+
+      const visible = filterVisibleEvents([observedEvent], 'col_a');
+
+      expect(visible).toHaveLength(1);
+      expect(visible[0].publicData).toMatchObject({
+        colonyId: 'col_b',
+        netFood: -26.55,
+        severity: 0.04,
+      });
+    });
+
     it('deduplicated public combat events remain visible to all involved colonies as a single event', () => {
       const events: TestEvent[] = [
         {

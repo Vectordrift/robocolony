@@ -103,16 +103,29 @@ export async function eventRoutes(app: FastifyInstance) {
     // those get the redacted publicData to prevent information leakage.
     const mappedEvents = rows.map((row) => {
       const isOwnEvent = Array.isArray(row.visibility) && row.visibility.includes(colony.id);
+      const fullPayload = row.data && typeof row.data === 'object'
+        ? row.data as Record<string, unknown>
+        : {};
+      const sourceColonyId = typeof fullPayload.colonyId === 'string'
+        ? fullPayload.colonyId
+        : null;
+      const publicPayload = row.publicData && typeof row.publicData === 'object'
+        ? row.publicData as Record<string, unknown>
+        : fullPayload;
 
       // Use full data for own events, publicData for other colonies' public events
       const eventData = isOwnEvent
-        ? row.data
-        : (row.publicData ?? row.data); // fall back to data if publicData not set
+        ? fullPayload
+        : {
+            ...publicPayload,
+            ...(sourceColonyId ? { colonyId: sourceColonyId } : {}),
+          };
 
       return {
         id: row.id,
         tick: row.tick,
         type: row.type,
+        colonyId: sourceColonyId,
         data: eventData,
         public: row.public,
         own: isOwnEvent, // let clients distinguish own vs observed events
